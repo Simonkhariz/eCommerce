@@ -1,0 +1,112 @@
+'use client';
+
+import React from 'react';
+import Link from 'next/link';
+import Image from 'next/image';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { ArrowUpRight01Icon } from '@hugeicons/core-free-icons';
+
+const CATEGORY_ITEMS = [
+  {
+    name: 'T-Shirts',
+    slug: 't-shirts',
+    count: '240+ Products',
+    image: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=600&q=80',
+  },
+  {
+    name: 'Casual Shirts',
+    slug: 'shirts',
+    count: '180+ Products',
+    image: 'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=600&q=80',
+  },
+  {
+    name: 'Denim & Jeans',
+    slug: 'jeans',
+    count: '120+ Products',
+    image: 'https://images.unsplash.com/photo-1542272604-780c96856592?auto=format&fit=crop&w=600&q=80',
+  },
+  {
+    name: 'Footwear',
+    slug: 'footwear',
+    count: '95+ Products',
+    image: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?auto=format&fit=crop&w=600&q=80',
+  },
+  {
+    name: 'Accessories',
+    slug: 'accessories',
+    count: '150+ Products',
+    image: 'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=600&q=80',
+  },
+  {
+    name: 'Electronics',
+    slug: 'electronics',
+    count: '80+ Products',
+    image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=600&q=80',
+  },
+];
+
+export const CategoryGrid: React.FC = () => {
+  return (
+    <section className="py-12 sm:py-16">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 sm:mb-12">
+          <div>
+            <span className="text-xs font-bold uppercase tracking-widest text-neutral-400 block mb-1">
+              Curated Collections
+            </span>
+            <h2 className="font-integral text-2xl sm:text-4xl text-black">
+              EXPLORE BY CATEGORY
+            </h2>
+          </div>
+          <Link
+            href="/category"
+            className="text-xs sm:text-sm font-semibold text-black hover:underline mt-2 sm:mt-0 flex items-center gap-1"
+          >
+            <span>Browse All Collections</span>
+            <HugeiconsIcon icon={ArrowUpRight01Icon} size={16} />
+          </Link>
+        </div>
+
+        {/* 6-Grid Responsive Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 sm:gap-6">
+          {CATEGORY_ITEMS.map((cat) => (
+            <Link
+              key={cat.slug}
+              href={`/category?cat=${cat.slug}`}
+              className="group relative bg-[#F0EEED] rounded-3xl overflow-hidden aspect-[4/5] flex flex-col justify-between p-4 sm:p-5 shadow-sm hover:shadow-md transition-all duration-300"
+            >
+              {/* Background Image with Zoom */}
+              <div className="absolute inset-0 z-0">
+                <Image
+                  src={cat.image}
+                  alt={cat.name}
+                  fill
+                  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw"
+                  className="object-cover object-center group-hover:scale-110 transition-transform duration-500 opacity-90 group-hover:opacity-100"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+              </div>
+
+              {/* Top Floating Badge */}
+              <div className="relative z-10 self-end">
+                <div className="w-8 h-8 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center text-black group-hover:bg-black group-hover:text-white transition-colors shadow-sm">
+                  <HugeiconsIcon icon={ArrowUpRight01Icon} size={16} />
+                </div>
+              </div>
+
+              {/* Bottom Details */}
+              <div className="relative z-10 text-white">
+                <h3 className="font-bold text-base sm:text-lg leading-tight group-hover:translate-x-1 transition-transform">
+                  {cat.name}
+                </h3>
+                <p className="text-[11px] text-neutral-300 mt-0.5 font-medium">
+                  {cat.count}
+                </p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+};
