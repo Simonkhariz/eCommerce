@@ -27,6 +27,10 @@ export default function RootLayout({
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Host+Grotesk:ital,wght@0,300..800;1,300..800&display=swap"
         />
+        <link
+          rel="stylesheet"
+          href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700,900&display=swap"
+        />
       </head>
       <body className="min-h-screen flex flex-col bg-white text-black antialiased selection:bg-black selection:text-white">
         <CartProvider>
