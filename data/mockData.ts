@@ -80,9 +80,8 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'casual',
     gender: 'men',
     images: [
-      'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/tshirts.webp',
+      '/images/categories/tshirt_white.webp',
     ],
     colors: [
       { name: 'Olive Green', hex: '#4F583D' },
@@ -129,8 +128,8 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'casual',
     gender: 'men',
     images: [
-      'https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/tshirts.webp',
+      '/images/categories/tshirt_white.webp',
     ],
     colors: [
       { name: 'Matte Black', hex: '#111827' },
@@ -161,8 +160,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'casual',
     gender: 'men',
     images: [
-      'https://images.unsplash.com/photo-1542272604-780c96856592?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1541099649105-f69ad21f3246?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/jeans.webp',
     ],
     colors: [
       { name: 'Indigo Blue', hex: '#2563EB' },
@@ -194,8 +192,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'casual',
     gender: 'men',
     images: [
-      'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/shirts.webp',
     ],
     colors: [
       { name: 'Sage Green', hex: '#4B5320' },
@@ -224,8 +221,8 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'casual',
     gender: 'men',
     images: [
-      'https://images.unsplash.com/photo-1576566588028-4147f3842f27?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/tshirts.webp',
+      '/images/categories/tshirt_white.webp',
     ],
     colors: [
       { name: 'Burnt Orange', hex: '#EA580C' },
@@ -254,8 +251,8 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'casual',
     gender: 'unisex',
     images: [
-      'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/tshirts.webp',
+      '/images/categories/tshirt_white.webp',
     ],
     colors: [
       { name: 'Optical White', hex: '#FFFFFF' },
@@ -284,8 +281,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'casual',
     gender: 'unisex',
     images: [
-      'https://images.unsplash.com/photo-1549298916-b41d501d3772?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/footwear.webp',
     ],
     colors: [
       { name: 'Chalk White', hex: '#FAFAFA' },
@@ -317,8 +313,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'gym',
     gender: 'unisex',
     images: [
-      'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1608231387042-66d1773070a5?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/footwear.webp',
     ],
     colors: [
       { name: 'Solar Red', hex: '#EF4444' },
@@ -348,8 +343,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'casual',
     gender: 'unisex',
     images: [
-      'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1484704849700-f032a568e944?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/accessories.webp',
     ],
     colors: [
       { name: 'Space Black', hex: '#18181B' },
@@ -387,8 +381,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'formal',
     gender: 'unisex',
     images: [
-      'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1508685096489-7aacd43bd3b1?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/accessories.webp',
     ],
     colors: [
       { name: 'Matte Black', hex: '#18181B' },
@@ -417,8 +410,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'casual',
     gender: 'unisex',
     images: [
-      'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1572635196237-14b3f281503f?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/accessories.webp',
     ],
     colors: [
       { name: 'Tortoise Havana', hex: '#78350F' },
@@ -447,8 +439,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'formal',
     gender: 'unisex',
     images: [
-      'https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/accessories.webp',
     ],
     colors: [
       { name: 'Espresso Brown', hex: '#451A03' },
@@ -476,8 +467,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'casual',
     gender: 'men',
     images: [
-      'https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/shirts.webp',
     ],
     colors: [
       { name: 'Red Plaid', hex: '#B91C1C' },
@@ -506,8 +496,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'formal',
     gender: 'men',
     images: [
-      'https://images.unsplash.com/photo-1586363104862-3a5e2ab60d99?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1625910513413-562947116757?auto=format&fit=crop&w=1000&q=80',
+      '/images/categories/shirts.webp',
     ],
     colors: [
       { name: 'Ocean Cyan', hex: '#0284C7' },
@@ -536,8 +525,7 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'formal',
     gender: 'men',
     images: [
-      'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1594938298603-c8148c4dae35?auto=format&fit=crop&w=1000&q=80',
+      '/images/styles/formal.webp',
     ],
     colors: [
       { name: 'Midnight Navy', hex: '#1E3A8A' },
@@ -563,8 +551,8 @@ export const PRODUCTS: Product[] = [
     dressStyle: 'gym',
     gender: 'men',
     images: [
-      'https://images.unsplash.com/photo-1581655353564-df123a1eb820?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?auto=format&fit=crop&w=1000&q=80',
+      '/images/styles/gym.webp',
+      '/images/categories/shorts.webp',
     ],
     colors: [
       { name: 'Deep Navy', hex: '#1E3A8A' },
@@ -593,22 +581,22 @@ export const DRESS_STYLES = [
   {
     name: 'Casual',
     slug: 'casual',
-    image: 'https://images.unsplash.com/photo-1516257984-b1b4d707412e?auto=format&fit=crop&w=800&q=80',
+    image: '/images/styles/casual.webp',
   },
   {
     name: 'Formal',
     slug: 'formal',
-    image: 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=800&q=80',
+    image: '/images/styles/formal.webp',
   },
   {
     name: 'Party',
     slug: 'party',
-    image: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=800&q=80',
+    image: '/images/styles/party.webp',
   },
   {
     name: 'Gym',
     slug: 'gym',
-    image: 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?auto=format&fit=crop&w=800&q=80',
+    image: '/images/styles/gym.webp',
   },
 ];
 

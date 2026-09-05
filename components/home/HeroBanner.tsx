@@ -56,14 +56,14 @@ export const HeroBanner: React.FC = () => {
               <Sparkle className="w-12 h-12 sm:w-16 sm:h-16 fill-black" />
             </div>
 
-            <div className="relative w-full max-w-lg aspect-[4/5] sm:aspect-[3/4] lg:aspect-[4/5] overflow-hidden">
+            <div className="relative w-full max-w-lg h-[460px] sm:h-[540px] lg:h-[620px] flex items-end justify-center">
               <Image
-                src="https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=1200&q=85"
-                alt="Shop.co models posing in stylish streetwear fashion"
+                src="/images/hero/african_models_hero.webp"
+                alt="African fashion models posing together in stylish dope streetwear"
                 fill
                 priority
                 sizes="(max-width: 1024px) 100vw, 50vw"
-                className="object-cover object-top"
+                className="object-contain object-bottom drop-shadow-xl"
               />
             </div>
           </div>

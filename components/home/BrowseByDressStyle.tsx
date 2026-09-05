@@ -15,88 +15,88 @@ export const BrowseByDressStyle: React.FC = () => {
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6">
-            {/* Casual - Desktop 5 cols */}
+            {/* Casual - Desktop 4 cols */}
             <Link
               href="/category?style=casual"
-              className="md:col-span-4 relative h-48 sm:h-72 bg-white rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
+              className="md:col-span-4 relative h-52 sm:h-72 bg-neutral-900 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
             >
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-black z-10">
+              <div className="absolute inset-0 w-full h-full">
+                <Image
+                  src={DRESS_STYLES[0].image}
+                  alt="Casual dress style"
+                  fill
+                  loading="eager"
+                  sizes="(max-width: 768px) 100vw, 33vw"
+                  className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
+              </div>
+              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-white drop-shadow-md z-10">
                 Casual
               </span>
-              <div className="absolute inset-0 flex justify-end">
-                <div className="relative w-2/3 h-full">
-                  <Image
-                    src={DRESS_STYLES[0].image}
-                    alt="Casual dress style"
-                    fill
-                    sizes="(max-width: 768px) 100vw, 33vw"
-                    className="object-cover object-center group-hover:scale-105 transition-transform duration-500"
-                  />
-                </div>
-              </div>
             </Link>
 
-            {/* Formal - Desktop 7 cols */}
+            {/* Formal - Desktop 8 cols */}
             <Link
               href="/category?style=formal"
-              className="md:col-span-8 relative h-48 sm:h-72 bg-white rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
+              className="md:col-span-8 relative h-52 sm:h-72 bg-neutral-900 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
             >
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-black z-10">
+              <div className="absolute inset-0 w-full h-full">
+                <Image
+                  src={DRESS_STYLES[1].image}
+                  alt="Formal dress style"
+                  fill
+                  loading="eager"
+                  sizes="(max-width: 768px) 100vw, 66vw"
+                  className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
+              </div>
+              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-white drop-shadow-md z-10">
                 Formal
               </span>
-              <div className="absolute inset-0 flex justify-end">
-                <div className="relative w-3/4 sm:w-2/3 h-full">
-                  <Image
-                    src={DRESS_STYLES[1].image}
-                    alt="Formal dress style"
-                    fill
-                    sizes="(max-width: 768px) 100vw, 66vw"
-                    className="object-cover object-center group-hover:scale-105 transition-transform duration-500"
-                  />
-                </div>
-              </div>
             </Link>
 
-            {/* Party - Desktop 7 cols */}
+            {/* Party - Desktop 8 cols */}
             <Link
               href="/category?style=party"
-              className="md:col-span-8 relative h-48 sm:h-72 bg-white rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
+              className="md:col-span-8 relative h-52 sm:h-72 bg-neutral-900 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
             >
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-black z-10">
+              <div className="absolute inset-0 w-full h-full">
+                <Image
+                  src={DRESS_STYLES[2].image}
+                  alt="Party dress style"
+                  fill
+                  loading="eager"
+                  sizes="(max-width: 768px) 100vw, 66vw"
+                  className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
+              </div>
+              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-white drop-shadow-md z-10">
                 Party
               </span>
-              <div className="absolute inset-0 flex justify-end">
-                <div className="relative w-3/4 sm:w-2/3 h-full">
-                  <Image
-                    src={DRESS_STYLES[2].image}
-                    alt="Party dress style"
-                    fill
-                    sizes="(max-width: 768px) 100vw, 66vw"
-                    className="object-cover object-center group-hover:scale-105 transition-transform duration-500"
-                  />
-                </div>
-              </div>
             </Link>
 
-            {/* Gym - Desktop 5 cols */}
+            {/* Gym - Desktop 4 cols */}
             <Link
               href="/category?style=gym"
-              className="md:col-span-4 relative h-48 sm:h-72 bg-white rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
+              className="md:col-span-4 relative h-52 sm:h-72 bg-neutral-900 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
             >
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-black z-10">
+              <div className="absolute inset-0 w-full h-full">
+                <Image
+                  src={DRESS_STYLES[3].image}
+                  alt="Gym dress style"
+                  fill
+                  loading="eager"
+                  sizes="(max-width: 768px) 100vw, 33vw"
+                  className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
+              </div>
+              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-white drop-shadow-md z-10">
                 Gym
               </span>
-              <div className="absolute inset-0 flex justify-end">
-                <div className="relative w-2/3 h-full">
-                  <Image
-                    src={DRESS_STYLES[3].image}
-                    alt="Gym dress style"
-                    fill
-                    sizes="(max-width: 768px) 100vw, 33vw"
-                    className="object-cover object-center group-hover:scale-105 transition-transform duration-500"
-                  />
-                </div>
-              </div>
             </Link>
           </div>
         </div>
