@@ -184,138 +184,173 @@ class CustomerController
         Response::success(null, 'Default address updated.');
     }
 
+    private const MAX_CART_LINES = 30;
+    private const MAX_CART_QUANTITY = 20;
+
     /**
-     * Merge guest local cart items into customer's persistent database cart.
+     * GET /api/v1/customer/cart
+     * The signed-in customer's saved cart, with current prices and stock.
      */
-    public function mergeCart(): void
+    public function getCart(): void
     {
         $user = RequestContext::getUser();
-        if ($user === null) {
-            Response::error('Unauthenticated.', 401, 'UNAUTHENTICATED');
-        }
-
-        $body = JsonBodyMiddleware::getBody();
-        $items = $body['items'] ?? [];
-
-        if (!is_array($items)) {
-            Response::error('Invalid items list.', 400, 'BAD_REQUEST');
-        }
-
-        $userId = (int) $user['id'];
-
-        // Find or create customer cart
-        $cart = $this->db->fetchOne("SELECT id FROM `carts` WHERE `user_id` = ? ORDER BY id DESC LIMIT 1", 'i', [$userId]);
-        if ($cart === null) {
-            $cartId = (int) $this->db->insert(
-                "INSERT INTO `carts` (`user_id`, `currency`) VALUES (?, 'NGN')",
-                'i',
-                [$userId]
-            );
-        } else {
-            $cartId = (int) $cart['id'];
-        }
-
-        // Upsert items into cart_items
-        foreach ($items as $item) {
-            $variantId = (int) ($item['variant_id'] ?? 0);
-            $qty = max(1, (int) ($item['quantity'] ?? 1));
-
-            if ($variantId > 0) {
-                // Check if already in cart
-                $existingItem = $this->db->fetchOne(
-                    "SELECT id, quantity FROM `cart_items` WHERE `cart_id` = ? AND `variant_id` = ? LIMIT 1",
-                    'ii',
-                    [$cartId, $variantId]
-                );
-
-                if ($existingItem !== null) {
-                    $newQty = (int) $existingItem['quantity'] + $qty;
-                    $this->db->execute(
-                        "UPDATE `cart_items` SET `quantity` = ? WHERE `id` = ?",
-                        'ii',
-                        [$newQty, (int) $existingItem['id']]
-                    );
-                } else {
-                    $this->db->execute(
-                        "INSERT INTO `cart_items` (`cart_id`, `variant_id`, `quantity`) VALUES (?, ?, ?)",
-                        'iii',
-                        [$cartId, $variantId, $qty]
-                    );
-                }
-            }
-        }
-
-        // Fetch complete merged cart items
-        $mergedItems = $this->db->fetchAll(
-            "SELECT ci.id, ci.variant_id, ci.quantity, pv.product_id, pv.size, pv.color_name, pv.sku,
-                    COALESCE(pv.price_override, p.base_price) as price, pv.stock_quantity,
-                    p.name as product_name, p.slug as product_slug
-             FROM `cart_items` ci
-             JOIN `product_variants` pv ON pv.id = ci.variant_id
-             JOIN `products` p ON p.id = pv.product_id
-             WHERE ci.cart_id = ?",
-            'i',
-            [$cartId]
-        );
-
-        Response::success([
-            'cart_id' => $cartId,
-            'items' => $mergedItems,
-            'item_count' => count($mergedItems),
-        ], 'Cart merged successfully.');
+        Response::success(['items' => $this->loadCartItems($this->cartIdFor((int) $user['id']))], 'Cart retrieved.');
     }
 
     /**
-     * Merge guest wishlist into customer's persistent database wishlist.
+     * PUT /api/v1/customer/cart
+     * Replace the saved cart with the given lines ({variant_id, quantity}). Unknown, archived or
+     * unpublished variants are dropped; quantities are capped. Prices are never taken from the client.
      */
-    public function mergeWishlist(): void
+    public function replaceCart(): void
     {
         $user = RequestContext::getUser();
-        if ($user === null) {
-            Response::error('Unauthenticated.', 401, 'UNAUTHENTICATED');
-        }
-
         $body = JsonBodyMiddleware::getBody();
-        $productIds = $body['product_ids'] ?? [];
+        $lines = $body['items'] ?? null;
+        if (!is_array($lines)) {
+            Response::error('items must be a list of {variant_id, quantity}.', 422, 'VALIDATION_ERROR');
+        }
 
+        $wanted = [];
+        foreach (array_slice($lines, 0, self::MAX_CART_LINES) as $line) {
+            $variantId = (int) ($line['variant_id'] ?? 0);
+            $qty = (int) ($line['quantity'] ?? 0);
+            if ($variantId > 0 && $qty > 0) {
+                $wanted[$variantId] = min(self::MAX_CART_QUANTITY, ($wanted[$variantId] ?? 0) + $qty);
+            }
+        }
+
+        $valid = [];
+        if (!empty($wanted)) {
+            $ids = array_keys($wanted);
+            $rows = $this->db->fetchAll(
+                "SELECT pv.id FROM `product_variants` pv JOIN `products` p ON p.id = pv.product_id
+                 WHERE pv.id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")
+                   AND pv.is_active = 1 AND p.status = 'published'",
+                str_repeat('i', count($ids)),
+                $ids
+            );
+            foreach ($rows as $row) {
+                $valid[(int) $row['id']] = $wanted[(int) $row['id']];
+            }
+        }
+
+        $cartId = $this->cartIdFor((int) $user['id']);
+        $this->db->transaction(function (Database $db) use ($cartId, $valid): void {
+            $db->execute("DELETE FROM `cart_items` WHERE `cart_id` = ?", 'i', [$cartId]);
+            foreach ($valid as $variantId => $qty) {
+                $db->execute(
+                    "INSERT INTO `cart_items` (`cart_id`, `variant_id`, `quantity`) VALUES (?, ?, ?)",
+                    'iii',
+                    [$cartId, $variantId, $qty]
+                );
+            }
+        });
+
+        Response::success(['items' => $this->loadCartItems($cartId)], 'Cart saved.');
+    }
+
+    /**
+     * GET /api/v1/customer/wishlist
+     */
+    public function getWishlist(): void
+    {
+        $user = RequestContext::getUser();
+        Response::success($this->wishlistPayload($this->wishlistIdFor((int) $user['id'])), 'Wishlist retrieved.');
+    }
+
+    /**
+     * PUT /api/v1/customer/wishlist
+     * Replace the saved wishlist with the given product IDs (published products only).
+     */
+    public function replaceWishlist(): void
+    {
+        $user = RequestContext::getUser();
+        $body = JsonBodyMiddleware::getBody();
+        $productIds = $body['product_ids'] ?? null;
         if (!is_array($productIds)) {
-            Response::error('Invalid product IDs list.', 400, 'BAD_REQUEST');
+            Response::error('product_ids must be a list.', 422, 'VALIDATION_ERROR');
         }
+        $productIds = array_slice(array_values(array_unique(array_filter(array_map('intval', $productIds), static fn (int $v): bool => $v > 0))), 0, 100);
 
-        $userId = (int) $user['id'];
-
-        $wishlist = $this->db->fetchOne("SELECT id FROM `wishlists` WHERE `user_id` = ? LIMIT 1", 'i', [$userId]);
-        if ($wishlist === null) {
-            $wishlistId = (int) $this->db->insert("INSERT INTO `wishlists` (`user_id`) VALUES (?)", 'i', [$userId]);
-        } else {
-            $wishlistId = (int) $wishlist['id'];
-        }
-
-        foreach ($productIds as $pId) {
-            $productId = (int) $pId;
-            if ($productId > 0) {
-                $this->db->execute(
-                    "INSERT IGNORE INTO `wishlist_items` (`wishlist_id`, `product_id`) VALUES (?, ?)",
+        $wishlistId = $this->wishlistIdFor((int) $user['id']);
+        $this->db->transaction(function (Database $db) use ($wishlistId, $productIds): void {
+            $db->execute("DELETE FROM `wishlist_items` WHERE `wishlist_id` = ?", 'i', [$wishlistId]);
+            foreach ($productIds as $productId) {
+                $db->execute(
+                    "INSERT IGNORE INTO `wishlist_items` (`wishlist_id`, `product_id`)
+                     SELECT ?, `id` FROM `products` WHERE `id` = ? AND `status` = 'published'",
                     'ii',
                     [$wishlistId, $productId]
                 );
             }
-        }
+        });
 
-        $items = $this->db->fetchAll(
-            "SELECT wi.id, wi.product_id, p.name, p.slug, p.base_price, p.status
-             FROM `wishlist_items` wi
-             JOIN `products` p ON p.id = wi.product_id
-             WHERE wi.wishlist_id = ?",
+        Response::success($this->wishlistPayload($wishlistId), 'Wishlist saved.');
+    }
+
+    private function cartIdFor(int $userId): int
+    {
+        $cart = $this->db->fetchOne("SELECT `id` FROM `carts` WHERE `user_id` = ? ORDER BY `id` DESC LIMIT 1", 'i', [$userId]);
+        if ($cart !== null) {
+            return (int) $cart['id'];
+        }
+        return (int) $this->db->insert("INSERT INTO `carts` (`user_id`, `currency`) VALUES (?, 'NGN')", 'i', [$userId]);
+    }
+
+    private function wishlistIdFor(int $userId): int
+    {
+        $wishlist = $this->db->fetchOne("SELECT `id` FROM `wishlists` WHERE `user_id` = ? LIMIT 1", 'i', [$userId]);
+        if ($wishlist !== null) {
+            return (int) $wishlist['id'];
+        }
+        return (int) $this->db->insert("INSERT INTO `wishlists` (`user_id`) VALUES (?)", 'i', [$userId]);
+    }
+
+    private function loadCartItems(int $cartId): array
+    {
+        $rows = $this->db->fetchAll(
+            "SELECT ci.variant_id, ci.quantity, pv.product_id, pv.size, pv.color_name, pv.color_hex, pv.sku,
+                    COALESCE(NULLIF(pv.price_override, 0), p.base_price) AS unit_price, p.original_price,
+                    pv.stock_quantity, p.name AS product_name, p.slug AS product_slug,
+                    (pv.is_active = 1 AND p.status = 'published') AS available,
+                    (SELECT pi.image_url FROM product_images pi WHERE pi.product_id = p.id
+                     ORDER BY pi.is_primary DESC, pi.display_order ASC LIMIT 1) AS image_url
+             FROM `cart_items` ci
+             JOIN `product_variants` pv ON pv.id = ci.variant_id
+             JOIN `products` p ON p.id = pv.product_id
+             WHERE ci.cart_id = ?
+             ORDER BY ci.id ASC",
             'i',
-            [$wishlistId]
+            [$cartId]
         );
 
-        Response::success([
-            'wishlist_id' => $wishlistId,
-            'items' => $items,
-            'item_count' => count($items),
-        ], 'Wishlist merged successfully.');
+        foreach ($rows as &$row) {
+            $row['variant_id'] = (int) $row['variant_id'];
+            $row['product_id'] = (int) $row['product_id'];
+            $row['quantity'] = (int) $row['quantity'];
+            $row['stock_quantity'] = (int) $row['stock_quantity'];
+            $row['unit_price'] = (float) $row['unit_price'];
+            $row['original_price'] = $row['original_price'] !== null ? (float) $row['original_price'] : null;
+            $row['available'] = (bool) $row['available'];
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    private function wishlistPayload(int $wishlistId): array
+    {
+        $ids = array_map('intval', array_column(
+            $this->db->fetchAll("SELECT `product_id` FROM `wishlist_items` WHERE `wishlist_id` = ? ORDER BY `id` ASC", 'i', [$wishlistId]),
+            'product_id'
+        ));
+
+        $products = empty($ids)
+            ? []
+            : (new \App\Repositories\ProductRepository())->listPublished(['ids' => $ids], 1, 100)['items'];
+
+        return ['product_ids' => $ids, 'products' => $products];
     }
 
     /**
@@ -334,7 +369,7 @@ class CustomerController
         $orders = $this->db->fetchAll(
             "SELECT `id`, `order_number`, `order_status`, `payment_status`, `currency`,
                     `subtotal`, `discount_amount`, `shipping_fee`, `grand_total`,
-                    `shipping_address_snapshot`, `created_at`, `updated_at`
+                    `shipping_address_snapshot`, `expires_at`, `created_at`, `updated_at`
              FROM `orders`
              WHERE `user_id` = ?
              ORDER BY `id` DESC",
@@ -358,6 +393,7 @@ class CustomerController
                 $item['unit_price'] = (float) $item['unit_price'];
                 $item['line_total'] = (float) $item['line_total'];
             }
+            unset($item);
 
             $order['shipping_address_snapshot'] = is_string($order['shipping_address_snapshot'])
                 ? json_decode($order['shipping_address_snapshot'], true)
@@ -378,6 +414,7 @@ class CustomerController
             );
             $order['shipment'] = $shipment;
         }
+        unset($order);
 
         Response::success($orders, 'Customer orders retrieved.');
     }

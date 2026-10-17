@@ -117,6 +117,7 @@ class AdminOrderController
                 ? json_decode($ord['shipping_address_snapshot'], true)
                 : $ord['shipping_address_snapshot'];
         }
+        unset($ord);
 
         Response::paginated($orders, $total, $page, $perPage, 'Fulfillment order list retrieved.');
     }
@@ -147,6 +148,7 @@ class AdminOrderController
             $log['before_state'] = is_string($log['before_state']) ? json_decode($log['before_state'], true) : $log['before_state'];
             $log['after_state'] = is_string($log['after_state']) ? json_decode($log['after_state'], true) : $log['after_state'];
         }
+        unset($log);
         $orderSnapshot['audit_logs'] = $auditLogs;
 
         Response::success($orderSnapshot, 'Order fulfillment detail retrieved.');

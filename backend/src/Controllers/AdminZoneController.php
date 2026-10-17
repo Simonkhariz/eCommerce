@@ -34,6 +34,7 @@ class AdminZoneController
             $zone['fee'] = (float) $zone['fee'];
             $zone['is_active'] = (bool) $zone['is_active'];
         }
+        unset($zone);
 
         Response::success($zones, 'Shipping destination zones retrieved.');
     }

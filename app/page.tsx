@@ -112,7 +112,7 @@ export default function HomePage() {
         <ProductSection
           title="NEW ARRIVALS"
           products={newArrivals}
-          viewAllHref="/category?newArrivals=true"
+          viewAllHref="/category?sort=newest"
           hasDivider={true}
         />
       )}
@@ -122,7 +122,7 @@ export default function HomePage() {
         <ProductSection
           title="TOP SELLING"
           products={topSelling}
-          viewAllHref="/category?topSelling=true"
+          viewAllHref="/category"
           hasDivider={false}
         />
       )}

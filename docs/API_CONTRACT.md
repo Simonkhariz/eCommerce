@@ -480,3 +480,23 @@ Fulfilment & Delivery  GET  /api/v1/downloads/{downloadToken}             Step 1
 Admin Analytics        GET  /api/v1/admin/analytics/overview              Step 13 & 15
                        GET  /api/v1/admin/audit-logs                      Step 15
 ```
+
+---
+
+## 10. Storefront Endpoints Added in the Audit Fixes (Phase 3)
+
+| Method | Path | Auth | Purpose |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/catalog/facets` | Public | Filter options that exist in the published catalogue: categories (with product counts), colours (name, hex, product count), sizes, dress styles, price min/max. |
+| `POST` | `/api/v1/checkout/cart-check` | Public | Body `{variant_ids: number[]}` (max 50). Returns current `unit_price`, `stock_quantity` and `available` for each variant so the cart can flag price changes, low stock and discontinued options before checkout. |
+| `GET` | `/api/v1/customer/cart` | Customer session | The signed-in customer's saved cart with live prices and stock. |
+| `PUT` | `/api/v1/customer/cart` | Customer session + CSRF | Replace the saved cart: `{items: [{variant_id, quantity}]}`. Unknown, archived or unpublished variants are dropped; quantity capped at 20 per line. |
+| `GET` | `/api/v1/customer/wishlist` | Customer session | Saved wishlist: `{product_ids, products}` (products as catalogue summaries). |
+| `PUT` | `/api/v1/customer/wishlist` | Customer session + CSRF | Replace the saved wishlist: `{product_ids: number[]}` (published products only). |
+
+Behaviour changes:
+- `GET /api/v1/products/{idOrSlug}` now includes `reviews` (approved only). `rating_avg` / `rating_count` are computed from approved reviews (0 when there are none).
+- `GET /api/v1/products` accepts `sort=best_selling` (units on paid orders), `flash_deals=1` and `topSelling=1`; `newArrivals` no longer filters by "featured".
+- Checkout quote/order: `shipping_address.state` must be one of the 36 states or FCT (`Abuja`, `FCT` and `Federal Capital Territory` are equivalent). Unknown states are rejected instead of falling back to the nationwide zone.
+- Checkout orders require the exact `variant_id` (legacy carts may send an exact `size` + `color` pair). `Idempotency-Key` header makes order creation safe to retry.
+- Verified magic-link (or verified-email password) sign-in links earlier guest orders placed with that email to the account.

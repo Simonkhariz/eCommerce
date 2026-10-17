@@ -13,7 +13,7 @@ export const Toast: React.FC = () => {
   if (!toast) return null;
 
   return (
-    <div className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-6 sm:bottom-6 z-50 max-w-sm sm:w-auto animate-in fade-in slide-in-from-bottom-2 duration-200">
+    <div role="status" aria-live="polite" className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-6 sm:bottom-6 z-50 max-w-sm sm:w-auto animate-in fade-in slide-in-from-bottom-2 duration-200">
       <div className="bg-neutral-900/95 backdrop-blur-md text-white pl-2.5 pr-2 py-2 rounded-2xl shadow-xl flex items-center gap-2.5 border border-white/10">
         {toast.image ? (
           <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-neutral-800 shrink-0 border border-neutral-700">
@@ -33,16 +33,18 @@ export const Toast: React.FC = () => {
 
         <div className="flex-1 min-w-0 pr-1">
           <p className="text-xs font-bold text-white truncate">{toast.title}</p>
-          <p className="text-[11px] text-neutral-400 truncate">{toast.message}</p>
+          <p className="text-xs text-neutral-300 truncate">{toast.message}</p>
         </div>
 
-        <Link
-          href="/cart"
-          onClick={hideToast}
-          className="bg-white text-black hover:bg-neutral-200 text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0 transition-colors"
-        >
-          Cart
-        </Link>
+        {toast.showCartAction && (
+          <Link
+            href="/cart"
+            onClick={hideToast}
+            className="bg-white text-black hover:bg-neutral-200 text-xs font-bold px-2.5 py-1 rounded-full shrink-0 transition-colors"
+          >
+            View cart
+          </Link>
+        )}
 
         <button
           onClick={hideToast}

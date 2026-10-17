@@ -114,11 +114,13 @@ $router->post('/api/v1/auth/customer/verify', [AuthController::class, 'verifyMag
 $router->get('/api/v1/products', [CatalogController::class, 'index']);
 $router->get('/api/v1/products/{idOrSlug}', [CatalogController::class, 'show']);
 $router->get('/api/v1/categories', [CatalogController::class, 'categories']);
+$router->get('/api/v1/catalog/facets', [CatalogController::class, 'facets']);
 $router->get('/api/v1/storefront/homepage', [CatalogController::class, 'homepage']);
 
 // --- Checkout, Shipping & Order Placement Routes ---
 $router->get('/api/v1/checkout/payment-methods', [CheckoutController::class, 'paymentMethods']);
 $router->post('/api/v1/checkout/quote', [CheckoutController::class, 'quote']);
+$router->post('/api/v1/checkout/cart-check', [CheckoutController::class, 'cartCheck']);
 $router->post('/api/v1/checkout/validate-promo', [CheckoutController::class, 'validatePromo']);
 $router->post('/api/v1/checkout/orders', [CheckoutController::class, 'createOrder']);
 $router->get('/api/v1/checkout/shipping-zones', [CheckoutController::class, 'shippingZones']);
@@ -140,8 +142,10 @@ $router->post('/api/v1/customer/addresses', [CustomerController::class, 'createA
 $router->put('/api/v1/customer/addresses/{id}', [CustomerController::class, 'updateAddress'], $customerGuard);
 $router->delete('/api/v1/customer/addresses/{id}', [CustomerController::class, 'deleteAddress'], $customerGuard);
 $router->post('/api/v1/customer/addresses/{id}/default', [CustomerController::class, 'setDefaultAddress'], $customerGuard);
-$router->post('/api/v1/cart/merge', [CustomerController::class, 'mergeCart'], $customerGuard);
-$router->post('/api/v1/wishlist/merge', [CustomerController::class, 'mergeWishlist'], $customerGuard);
+$router->get('/api/v1/customer/cart', [CustomerController::class, 'getCart'], $customerGuard);
+$router->put('/api/v1/customer/cart', [CustomerController::class, 'replaceCart'], $customerGuard);
+$router->get('/api/v1/customer/wishlist', [CustomerController::class, 'getWishlist'], $customerGuard);
+$router->put('/api/v1/customer/wishlist', [CustomerController::class, 'replaceWishlist'], $customerGuard);
 $router->get('/api/v1/customer/orders', [CustomerController::class, 'getOrders'], $customerGuard);
 
 // --- Protected Admin Routes ---

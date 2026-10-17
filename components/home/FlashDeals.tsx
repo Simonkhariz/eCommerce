@@ -91,7 +91,7 @@ export const FlashDeals: React.FC<FlashDealsProps> = ({ products }) => {
         {/* View All Flash Sale Link */}
         <div className="mt-10 text-center">
           <Link
-            href="/category?onSale=true"
+            href="/category?flash=true"
             className="inline-flex items-center gap-2 bg-black text-white hover:bg-neutral-800 font-semibold px-10 py-3.5 rounded-full transition-colors text-sm shadow-md"
           >
             <span>View All Sale Deals</span>

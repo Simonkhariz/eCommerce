@@ -15,8 +15,6 @@ import {
   apiDeleteAddress,
   apiSetDefaultAddress,
   apiUpdateProfile,
-  apiMergeCart,
-  apiMergeWishlist,
 } from '@/lib/api-client';
 
 interface AuthContextType {
@@ -99,25 +97,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    // The cart and wishlist providers merge this device's guest cart/wishlist into the
+    // account automatically when the signed-in user changes.
     setUser(res.user);
     loadAddresses();
-
-    // Sync any cart items present in localStorage
-    try {
-      const savedCart = localStorage.getItem('shopco_cart_guest');
-      if (savedCart) {
-        const items = JSON.parse(savedCart);
-        if (Array.isArray(items) && items.length > 0) {
-          const payload = items.map((i: any) => ({
-            variant_id: Number(i.variantId || i.id || 1),
-            quantity: Number(i.quantity || 1),
-          }));
-          await apiMergeCart(payload);
-        }
-      }
-    } catch {
-      // Non-blocking merge
-    }
   };
 
   const register = async (data: { full_name: string; email: string; password: string; phone?: string }) => {

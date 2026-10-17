@@ -20,7 +20,6 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
     items,
     subtotal,
     discountAmount,
-    deliveryFee,
     total,
     appliedPromo,
     applyPromoCode,
@@ -60,24 +59,27 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
           <span className="font-bold text-black">{formatPrice(subtotal)}</span>
         </div>
 
-        <div className="flex items-center justify-between text-neutral-600">
-          <span>
-            Discount {appliedPromo ? `(-${appliedPromo.discountPercent}%)` : '(-0%)'}
-          </span>
-          <span className="font-bold text-red-500">-{formatPrice(discountAmount)}</span>
-        </div>
+        {appliedPromo && discountAmount > 0 && (
+          <div className="flex items-center justify-between text-neutral-700">
+            <span>Discount (-{appliedPromo.discountPercent}%)</span>
+            <span className="font-bold text-red-600">-{formatPrice(discountAmount)}</span>
+          </div>
+        )}
 
-        <div className="flex items-center justify-between text-neutral-600">
-          <span>Delivery Fee</span>
-          <span className="font-bold text-black">{formatPrice(deliveryFee)}</span>
+        <div className="flex items-center justify-between text-neutral-700">
+          <span>Delivery</span>
+          <span className="text-sm text-neutral-600">Calculated at checkout</span>
         </div>
 
         <hr className="border-neutral-200" />
 
         <div className="flex items-center justify-between text-base sm:text-lg">
-          <span className="font-medium text-black">Total</span>
+          <span className="font-medium text-black">Total before delivery</span>
           <span className="font-bold text-xl sm:text-2xl text-black">{formatPrice(total)}</span>
         </div>
+        <p className="text-xs text-neutral-600">
+          Delivery depends on your state and is added at checkout. Prices and stock are confirmed when you place the order.
+        </p>
       </div>
 
       {/* Promo Code Form */}
@@ -105,8 +107,11 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none">
                   <HugeiconsIcon icon={Tag01Icon} size={20} />
                 </div>
+                <label htmlFor="promo-code" className="sr-only">Promo code</label>
                 <input
+                  id="promo-code"
                   type="text"
+                  autoComplete="off"
                   value={promoInput}
                   onChange={(e) => {
                     setPromoInput(e.target.value);
@@ -127,11 +132,8 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
             </div>
 
             {promoError && (
-              <p className="text-xs text-red-500 pl-4">{promoError}</p>
+              <p role="alert" className="text-xs text-red-600 pl-4">{promoError}</p>
             )}
-            <p className="text-[11px] text-neutral-400 pl-4">
-              Tip: Try codes <span className="font-mono font-bold text-black">PANTO10</span> or <span className="font-mono font-bold text-black">SHOP20</span>
-            </p>
           </form>
         )}
       </div>

@@ -555,6 +555,13 @@ class CheckoutService
             throw new InvalidArgumentException('Destination state is required to calculate shipping.');
         }
 
+        // Only real states can match a zone; a typo must never fall through to the nationwide fee.
+        $canonicalState = self::canonicalState($state);
+        if ($canonicalState === null) {
+            throw new InvalidArgumentException("'{$state}' is not a Nigerian state. Please choose your state from the list.");
+        }
+        $state = $canonicalState;
+
         // Domestic Nigeria store policy check
         $validCountryNames = ['nigeria', 'ng', 'nga'];
         if ($country !== '' && !in_array(strtolower($country), $validCountryNames, true)) {
@@ -588,7 +595,7 @@ class CheckoutService
                 $coveredTrimmed = strtolower(trim((string) $covered));
                 if ($coveredTrimmed === '*') {
                     $hasWildcard = true;
-                } elseif ($coveredTrimmed === $normalizedState) {
+                } elseif (strtolower((string) (self::canonicalState($coveredTrimmed) ?? $coveredTrimmed)) === $normalizedState) {
                     $hasDirectMatch = true;
                     break;
                 }
@@ -630,6 +637,41 @@ class CheckoutService
             'selected_zone' => $selectedZone,
             'eligible_zones' => $eligibleZones,
         ];
+    }
+
+    /** The 36 states and the Federal Capital Territory. */
+    private const NIGERIAN_STATES = [
+        'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno', 'Cross River',
+        'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT', 'Gombe', 'Imo', 'Jigawa', 'Kaduna', 'Kano',
+        'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo',
+        'Plateau', 'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara',
+    ];
+
+    /**
+     * Map user/admin spellings to one canonical state name, or null if it is not a state.
+     * "Abuja", "FCT", "Abuja (FCT)" and "Federal Capital Territory" are the same place.
+     */
+    public static function canonicalState(string $value): ?string
+    {
+        $v = strtolower(trim(preg_replace('/\s+/', ' ', $value) ?? ''));
+        $v = preg_replace('/\s+state$/', '', $v) ?? $v;
+
+        if (in_array($v, ['fct', 'abuja', 'abuja (fct)', 'abuja fct', 'federal capital territory', 'abuja federal capital territory'], true)) {
+            return 'FCT';
+        }
+        if ($v === 'nassarawa') {
+            return 'Nasarawa';
+        }
+        if ($v === 'akwa-ibom') {
+            return 'Akwa Ibom';
+        }
+
+        foreach (self::NIGERIAN_STATES as $state) {
+            if (strtolower($state) === $v) {
+                return $state;
+            }
+        }
+        return null;
     }
 
     /**

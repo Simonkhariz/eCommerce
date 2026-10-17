@@ -1,55 +1,59 @@
 'use client';
 
 import React from 'react';
-import { Product, ProductColor, SizeType } from '@/types';
+import { Product } from '@/types';
 import { formatPrice } from '@/lib/currency';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ShoppingBag01Icon, FireIcon } from '@hugeicons/core-free-icons';
 
 interface StickyMobileBarProps {
   product: Product;
-  selectedColor: ProductColor;
-  selectedSize: SizeType | string;
+  /** Price of the selected variant. */
+  price: number;
+  /** e.g. "Large • Black", or a prompt to choose options. */
+  selectionLabel: string;
+  canPurchase: boolean;
   onAddToCart: () => void;
   onBuyNow: () => void;
 }
 
 export const StickyMobileBar: React.FC<StickyMobileBarProps> = ({
   product,
-  selectedColor,
-  selectedSize,
+  price,
+  selectionLabel,
+  canPurchase,
   onAddToCart,
   onBuyNow,
 }) => {
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-neutral-200 p-3 px-4 shadow-2xl flex items-center justify-between gap-3 animate-in slide-in-from-bottom">
-      <div className="flex flex-col">
-        <span className="text-[10px] text-neutral-500 font-medium truncate max-w-[120px]">
-          {selectedSize} • {selectedColor.name}
-        </span>
+    <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-neutral-200 p-3 px-4 shadow-2xl flex items-center justify-between gap-3">
+      <div className="flex flex-col min-w-0">
+        <span className="text-xs text-neutral-600 font-medium truncate max-w-[140px]">{selectionLabel}</span>
         <div className="flex items-baseline gap-1.5">
-          <span className="font-bold text-lg text-black">{formatPrice(product.price)}</span>
-          {product.originalPrice && product.originalPrice > product.price && (
-            <span className="text-xs text-neutral-400 line-through">
-              {formatPrice(product.originalPrice)}
-            </span>
+          <span className="font-bold text-lg text-black">{formatPrice(price)}</span>
+          {product.originalPrice && product.originalPrice > price && (
+            <span className="text-xs text-neutral-500 line-through">{formatPrice(product.originalPrice)}</span>
           )}
         </div>
       </div>
 
       <div className="flex items-center gap-2 flex-1 max-w-[240px]">
         <button
+          type="button"
           onClick={onAddToCart}
-          className="flex-1 bg-black text-white active:bg-neutral-800 text-xs font-bold py-3 rounded-full flex items-center justify-center gap-1.5 shadow-md"
+          disabled={!canPurchase}
+          className="flex-1 bg-black text-white active:bg-neutral-800 text-xs font-bold py-3 rounded-full flex items-center justify-center gap-1.5 shadow-md disabled:bg-neutral-300 disabled:text-neutral-500 disabled:shadow-none"
         >
           <HugeiconsIcon icon={ShoppingBag01Icon} size={14} />
-          <span>Add to Cart</span>
+          <span>{canPurchase ? 'Add to Cart' : 'Unavailable'}</span>
         </button>
         <button
+          type="button"
           onClick={onBuyNow}
-          className="bg-[#F0F0F0] active:bg-neutral-200 text-black text-xs font-bold p-3 rounded-full flex items-center justify-center shadow-sm"
-          title="Buy Now"
-          aria-label="Buy Now"
+          disabled={!canPurchase}
+          className="bg-[#F0F0F0] active:bg-neutral-200 text-black text-xs font-bold p-3 rounded-full flex items-center justify-center shadow-sm disabled:opacity-50"
+          title="Buy now"
+          aria-label="Buy now"
         >
           <HugeiconsIcon icon={FireIcon} size={14} className="text-red-500 fill-current" />
         </button>

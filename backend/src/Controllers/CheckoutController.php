@@ -61,6 +61,57 @@ class CheckoutController
     }
 
     /**
+     * Current price, stock and availability for each cart line, so the cart can show
+     * "price changed" / "only N left" / "no longer available" before checkout.
+     * POST /api/v1/checkout/cart-check  {variant_ids: number[]}
+     */
+    public function cartCheck(): void
+    {
+        RateLimiter::attempt('cart_check', RequestContext::clientIp(), 300, 600);
+        $body = JsonBodyMiddleware::getBody();
+        $ids = array_slice(array_values(array_unique(array_filter(
+            array_map('intval', is_array($body['variant_ids'] ?? null) ? $body['variant_ids'] : []),
+            static fn (int $v): bool => $v > 0
+        ))), 0, 50);
+
+        if (empty($ids)) {
+            Response::success(['lines' => []], 'Nothing to check.');
+        }
+
+        $rows = $this->db->fetchAll(
+            "SELECT pv.id AS variant_id, pv.product_id, pv.sku, pv.size, pv.color_name, pv.color_hex,
+                    COALESCE(NULLIF(pv.price_override, 0), p.base_price) AS unit_price, p.original_price,
+                    pv.stock_quantity, p.name AS product_name, p.slug AS product_slug,
+                    (pv.is_active = 1 AND p.status = 'published' AND p.product_type = 'physical') AS available
+             FROM `product_variants` pv
+             JOIN `products` p ON p.id = pv.product_id
+             WHERE pv.id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")",
+            str_repeat('i', count($ids)),
+            $ids
+        );
+
+        $lines = [];
+        foreach ($rows as $row) {
+            $lines[] = [
+                'variant_id' => (int) $row['variant_id'],
+                'product_id' => (int) $row['product_id'],
+                'sku' => $row['sku'],
+                'size' => $row['size'],
+                'color_name' => $row['color_name'],
+                'color_hex' => $row['color_hex'],
+                'unit_price' => (float) $row['unit_price'],
+                'original_price' => $row['original_price'] !== null ? (float) $row['original_price'] : null,
+                'stock_quantity' => max(0, (int) $row['stock_quantity']),
+                'product_name' => $row['product_name'],
+                'product_slug' => $row['product_slug'],
+                'available' => (bool) $row['available'],
+            ];
+        }
+
+        Response::success(['lines' => $lines], 'Cart lines checked.');
+    }
+
+    /**
      * Create a pending order and reserve inventory inside a database transaction.
      * POST /api/v1/checkout/orders
      */
@@ -114,6 +165,7 @@ class CheckoutController
             $zone['fee'] = (float) $zone['fee'];
             $zone['is_active'] = (bool) $zone['is_active'];
         }
+        unset($zone);
 
         $origin = $this->checkoutService->getStoreOrigin();
 
@@ -175,6 +227,7 @@ class CheckoutController
             $item['unit_price'] = (float) $item['unit_price'];
             $item['line_total'] = (float) $item['line_total'];
         }
+        unset($item);
 
         // Fetch Status History
         $history = $this->db->fetchAll(

@@ -41,9 +41,10 @@ class CatalogController
             'size' => $_GET['size'] ?? null,
             'sizes' => $_GET['sizes'] ?? null,
             'on_sale' => !empty($_GET['on_sale']) || !empty($_GET['onSale']),
-            'is_featured' => !empty($_GET['is_featured']) || !empty($_GET['newArrivals']) || !empty($_GET['featured']),
+            'is_featured' => !empty($_GET['is_featured']) || !empty($_GET['featured']),
+            'is_flash_deal' => !empty($_GET['flash_deals']) || !empty($_GET['flashDeals']),
             'product_type' => 'physical',
-            'sort' => $_GET['sort'] ?? 'newest',
+            'sort' => $_GET['sort'] ?? (!empty($_GET['topSelling']) ? 'best_selling' : 'newest'),
         ];
 
         $page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
@@ -84,7 +85,21 @@ class CatalogController
             );
         }
 
+        $product['reviews'] = $this->productRepo->approvedReviews((int) $product['id']);
+
         Response::success($product, 'Product details retrieved successfully.');
+    }
+
+    /**
+     * GET /api/v1/catalog/facets
+     * Filter options (categories, colours, sizes, styles, price range) that exist in the catalogue.
+     */
+    public function facets(): void
+    {
+        $facets = $this->productRepo->facets();
+        $facets['categories'] = $this->categoryRepo->getAllActive();
+
+        Response::success($facets, 'Catalogue filter options retrieved.');
     }
 
     /**

@@ -196,7 +196,7 @@ export const Header: React.FC = () => {
             <Link href="/category?onSale=true" className="hover:text-black transition-colors">
               On Sale
             </Link>
-            <Link href="/category?newArrivals=true" className="hover:text-black transition-colors">
+            <Link href="/category?sort=newest" className="hover:text-black transition-colors">
               New Arrivals
             </Link>
             <Link href="/track-order" className="hover:text-black transition-colors font-medium text-emerald-800">

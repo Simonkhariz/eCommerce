@@ -3,10 +3,13 @@
  * Communicates with the PHP 8+ REST backend API running on XAMPP / local server.
  */
 
-import { Product, ProductColor, Review } from '@/types';
+import { Product, ProductColor, ProductVariant, Review } from '@/types';
 
 // Same-origin by default: next.config.mjs proxies /api/v1/* to the PHP backend so the
 // HTTP-only session cookies work without exposing session tokens to JavaScript.
+/** Neutral stand-in shown when a product has no photos yet. */
+export const PRODUCT_IMAGE_PLACEHOLDER = '/images/placeholder-product.svg';
+
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '/api/v1';
 
 export interface ApiProductSummary {
@@ -57,6 +60,16 @@ export interface ApiProductVariant {
   in_stock: boolean;
 }
 
+export interface ApiProductReview {
+  id: number;
+  author: string;
+  rating: number;
+  title?: string | null;
+  comment: string;
+  verified: boolean;
+  created_at: string;
+}
+
 export interface ApiProductDetail extends ApiProductSummary {
   status: string;
   updated_at: string;
@@ -64,6 +77,15 @@ export interface ApiProductDetail extends ApiProductSummary {
   variants: ApiProductVariant[];
   available_colors: Array<{ name: string; hex: string }>;
   available_sizes: string[];
+  reviews?: ApiProductReview[];
+}
+
+export interface CatalogFacets {
+  categories: ApiCategory[];
+  colors: Array<{ name: string; hex: string; product_count: number }>;
+  sizes: string[];
+  dress_styles: string[];
+  price: { min: number; max: number };
 }
 
 export interface ApiCategory {
@@ -138,6 +160,7 @@ export interface ProductQueryParams {
   sizes?: string[];
   on_sale?: boolean;
   is_featured?: boolean;
+  flash_deals?: boolean;
   sort?: 'popularity' | 'price_asc' | 'price_desc' | 'latest' | 'rating_desc' | string;
   page?: number;
   per_page?: number;
@@ -307,107 +330,78 @@ async function fetchFromApi<T>(
 }
 
 /**
- * Maps an API product summary or detail into the Storefront's Product interface.
- * Preserves compatibility with existing ProductCard, ImageGallery, and PDP components.
+ * Maps an API product summary or detail into the storefront Product shape.
+ * Only real data is used: no invented reviews, ratings, specifications, FAQs,
+ * colours or sizes. Missing information stays empty and the UI shows nothing for it.
  */
-export function mapApiProductToStorefront(
-  item: ApiProductSummary | ApiProductDetail
-): Product & { product_type: 'physical'; total_stock: number; in_stock: boolean } {
-  // Extract images
-  let images: string[] = [];
-  if ('images' in item && Array.isArray(item.images) && item.images.length > 0) {
-    images = item.images.map((img) => img.image_url);
-  } else if (item.primary_image) {
-    images = [item.primary_image];
-  } else {
-    images = ['/images/categories/tshirts.webp'];
-  }
+export function mapApiProductToStorefront(item: ApiProductSummary | ApiProductDetail): Product {
+  const images =
+    'images' in item && Array.isArray(item.images) && item.images.length > 0
+      ? item.images.map((img) => img.image_url)
+      : item.primary_image
+        ? [item.primary_image]
+        : [PRODUCT_IMAGE_PLACEHOLDER];
 
-  // Extract colors
-  let colors: ProductColor[] = [];
-  if ('available_colors' in item && Array.isArray(item.available_colors) && item.available_colors.length > 0) {
-    colors = item.available_colors.map((c) => ({
-      name: c.name,
-      hex: c.hex || '#000000',
-    }));
-  } else {
-    colors = [{ name: 'Default', hex: '#000000' }];
-  }
+  const colors: ProductColor[] = Array.isArray(item.available_colors)
+    ? item.available_colors.map((c) => ({ name: c.name, hex: c.hex || '#000000' }))
+    : [];
+  const sizes: string[] = Array.isArray(item.available_sizes) ? item.available_sizes : [];
 
-  // Extract sizes
-  let sizes: string[] = [];
-  if ('available_sizes' in item && Array.isArray(item.available_sizes) && item.available_sizes.length > 0) {
-    sizes = item.available_sizes;
-  } else {
-    sizes = ['Medium', 'Large'];
-  }
+  const basePrice = Number(item.base_price);
+  const variants: ProductVariant[] | undefined =
+    'variants' in item && Array.isArray(item.variants)
+      ? item.variants.map((v) => ({
+          id: Number(v.id),
+          sku: v.sku,
+          size: v.size,
+          color: { name: v.color_name, hex: v.color_hex || '#000000' },
+          price: v.price_override !== null && Number(v.price_override) > 0 ? Number(v.price_override) : basePrice,
+          stock: Math.max(0, Number(v.stock_quantity) || 0),
+        }))
+      : undefined;
 
-  const dressStyle = item.dress_style
-    ? [item.dress_style.toLowerCase() as any]
-    : (['casual'] as any);
+  const reviews: Review[] =
+    'reviews' in item && Array.isArray(item.reviews)
+      ? item.reviews.map((r) => ({
+          id: String(r.id),
+          author: r.author,
+          rating: Number(r.rating),
+          verified: Boolean(r.verified),
+          comment: r.comment,
+          date: new Date(r.created_at.replace(' ', 'T')).toLocaleDateString('en-NG', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          }),
+        }))
+      : [];
 
-  // Generate structured details from description or product properties
-  const details = [
-    'Crafted with premium materials tailored for durability and breathability.',
-    `Product SKU: ${item.sku}`,
-    `Stock Status: ${item.in_stock ? `${item.total_stock} units available` : 'Out of stock'}`,
-    `Category: ${item.category_name}`,
-  ];
-
-  const defaultReviews: Review[] = [
-    {
-      id: `rev-${item.id}-1`,
-      author: 'Chinedu O.',
-      rating: 5,
-      verified: true,
-      comment:
-        'Great quality piece! Fast delivery to Enugu and the fabric feels really premium. Definitely recommending Shop.co.',
-      date: 'October 12, 2026',
-    },
-    {
-      id: `rev-${item.id}-2`,
-      author: 'Amina B.',
-      rating: 4.5,
-      verified: true,
-      comment:
-        'Fit is true to size and colors are exactly as shown on the website. Will order again.',
-      date: 'October 8, 2026',
-    },
-  ];
+  const details = [item.sku ? `SKU: ${item.sku}` : '', item.category_name ? `Category: ${item.category_name}` : ''].filter(Boolean);
 
   return {
     id: String(item.id),
     name: item.name,
     slug: item.slug,
-    description: item.description,
-    price: Number(item.base_price),
+    description: item.description || '',
+    price: basePrice,
     originalPrice: item.original_price ? Number(item.original_price) : undefined,
     discountPercent: item.discount_percent > 0 ? item.discount_percent : undefined,
-    rating: Number(item.rating_avg) || 4.5,
-    reviewCount: Number(item.rating_count) || 12,
+    rating: Number(item.rating_avg) || 0,
+    reviewCount: Number(item.rating_count) || 0,
     category: item.category_slug,
-    dressStyle,
+    categoryName: item.category_name,
+    dressStyle: item.dress_style ? [item.dress_style.toLowerCase()] : [],
     gender: 'unisex',
     images,
     colors,
     sizes,
-    isNewArrival: true,
-    isTopSelling: item.is_featured || item.rating_count > 30,
+    variants,
+    totalStock: Number(item.total_stock) || 0,
+    inStock: Boolean(item.in_stock),
+    sku: item.sku,
     details,
-    faqs: [
-      {
-        question: 'What is the delivery time?',
-        answer: 'Deliveries within Enugu city arrive in 24–48 hours. Regional deliveries across Nigeria take 2–4 business days.',
-      },
-      {
-        question: 'What is your return policy?',
-        answer: 'We offer an easy 7-day exchange window for unwashed, unworn physical items with original tags attached.',
-      },
-    ],
-    reviews: defaultReviews,
-    product_type: 'physical',
-    total_stock: item.total_stock,
-    in_stock: item.in_stock,
+    faqs: [],
+    reviews,
   };
 }
 
@@ -432,6 +426,7 @@ export async function getProducts(params: ProductQueryParams = {}): Promise<Prod
   if (params.sizes && params.sizes.length > 0) query.set('sizes', params.sizes.join(','));
   if (params.on_sale) query.set('on_sale', '1');
   if (params.is_featured) query.set('is_featured', '1');
+  if (params.flash_deals) query.set('flash_deals', '1');
   if (params.sort) query.set('sort', params.sort);
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.per_page !== undefined) query.set('per_page', String(params.per_page));
@@ -472,6 +467,13 @@ export async function getProducts(params: ProductQueryParams = {}): Promise<Prod
  */
 export async function getProductDetail(idOrSlug: string | number): Promise<ApiProductDetail> {
   return fetchFromApi<ApiProductDetail>(`/products/${encodeURIComponent(idOrSlug)}`);
+}
+
+/**
+ * Filter options that exist in the published catalogue.
+ */
+export async function getCatalogFacets(): Promise<CatalogFacets> {
+  return fetchFromApi<CatalogFacets>('/catalog/facets');
 }
 
 /**
@@ -670,23 +672,82 @@ export async function apiSetDefaultAddress(id: number): Promise<void> {
   });
 }
 
+export interface ApiSavedCartItem {
+  variant_id: number;
+  product_id: number;
+  quantity: number;
+  size: string;
+  color_name: string;
+  color_hex: string;
+  sku: string;
+  unit_price: number;
+  original_price: number | null;
+  stock_quantity: number;
+  product_name: string;
+  product_slug: string;
+  available: boolean;
+  image_url: string | null;
+}
+
+export interface CartLineCheck {
+  variant_id: number;
+  product_id: number;
+  sku: string;
+  size: string;
+  color_name: string;
+  color_hex: string;
+  unit_price: number;
+  original_price: number | null;
+  stock_quantity: number;
+  product_name: string;
+  product_slug: string;
+  available: boolean;
+}
+
 /**
- * Merge local guest cart into customer database cart.
+ * Live price, stock and availability for cart lines (no sign-in needed).
  */
-export async function apiMergeCart(items: Array<{ variant_id: number; quantity: number }>): Promise<any> {
-  return fetchFromApi<any>('/cart/merge', {
+export async function apiCheckCartLines(variantIds: number[]): Promise<{ lines: CartLineCheck[] }> {
+  if (variantIds.length === 0) return { lines: [] };
+  return fetchFromApi<{ lines: CartLineCheck[] }>('/checkout/cart-check', {
     method: 'POST',
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ variant_ids: variantIds }),
   });
 }
 
 /**
- * Merge local guest wishlist into customer database wishlist.
+ * The signed-in customer's saved cart (current prices and stock).
  */
-export async function apiMergeWishlist(product_ids: number[]): Promise<any> {
-  return fetchFromApi<any>('/wishlist/merge', {
-    method: 'POST',
-    body: JSON.stringify({ product_ids }),
+export async function apiGetSavedCart(): Promise<ApiSavedCartItem[]> {
+  const res = await fetchFromApi<{ items: ApiSavedCartItem[] }>('/customer/cart');
+  return res.items || [];
+}
+
+/**
+ * Replace the signed-in customer's saved cart.
+ */
+export async function apiSaveCart(items: Array<{ variant_id: number; quantity: number }>): Promise<ApiSavedCartItem[]> {
+  const res = await fetchFromApi<{ items: ApiSavedCartItem[] }>('/customer/cart', {
+    method: 'PUT',
+    body: JSON.stringify({ items }),
+  });
+  return res.items || [];
+}
+
+/**
+ * The signed-in customer's saved wishlist.
+ */
+export async function apiGetSavedWishlist(): Promise<{ product_ids: number[]; products: ApiProductSummary[] }> {
+  return fetchFromApi<{ product_ids: number[]; products: ApiProductSummary[] }>('/customer/wishlist');
+}
+
+/**
+ * Replace the signed-in customer's saved wishlist.
+ */
+export async function apiSaveWishlist(productIds: number[]): Promise<{ product_ids: number[]; products: ApiProductSummary[] }> {
+  return fetchFromApi<{ product_ids: number[]; products: ApiProductSummary[] }>('/customer/wishlist', {
+    method: 'PUT',
+    body: JSON.stringify({ product_ids: productIds }),
   });
 }
 
@@ -1111,6 +1172,8 @@ export interface PaymentVerificationResponse {
   currency: string;
   verified_at?: string;
   failure_reason?: string;
+  message?: string;
+  expires_at?: string | null;
   source: string;
 }
 

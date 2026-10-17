@@ -576,6 +576,13 @@ class AdminOperationsController
         }
 
         $this->db->executeUpdate("UPDATE `reviews` SET `status` = ? WHERE `id` = ?", 'si', [$status, $id]);
+
+        // Keep the product's displayed rating in line with its approved reviews.
+        $review = $this->db->fetchOne("SELECT `product_id` FROM `reviews` WHERE `id` = ?", 'i', [$id]);
+        if ($review !== null) {
+            (new \App\Repositories\ProductRepository())->refreshRating((int) $review['product_id']);
+        }
+
         Response::success(['id' => $id, 'status' => $status], "Review status changed to $status.");
     }
 

@@ -3,12 +3,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
-import confetti from 'canvas-confetti';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Cancel01Icon,
   CheckmarkBadge01Icon,
-  CheckmarkCircle01Icon,
   DeliveryTruck01Icon,
   Ticket02Icon,
   AlertCircleIcon,
@@ -16,73 +14,53 @@ import {
   Tick02Icon,
   ArrowRight01Icon,
 } from '@hugeicons/core-free-icons';
-import Link from 'next/link';
-import { ShieldCheck } from 'lucide-react';
 import { formatPrice } from '@/lib/currency';
 import {
   apiGetCheckoutQuote,
   apiCreateCheckoutOrder,
   apiInitializePayment,
-  apiGetPaymentMethods,
-  PaymentMethodItem,
+  apiGetOrder,
   CheckoutQuoteResponse,
-  CheckoutOrderResponse,
-  ShippingZone,
 } from '@/lib/api-client';
-import { buildWhatsAppInvoiceUrl, SUPPORT_PHONE_FORMATTED } from '@/lib/whatsapp';
-
-function WhatsAppIcon({ className = 'w-4 h-4' }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-    </svg>
-  );
-}
+import { buildWhatsAppInvoiceUrl } from '@/lib/whatsapp';
+import { useStoreSupport } from '@/lib/use-store-support';
+import {
+  cartSignature,
+  clearPendingOrder,
+  readGuestToken,
+  readPendingOrder,
+  saveGuestToken,
+  savePendingOrder,
+} from '@/lib/pending-order';
 
 interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+/** The 36 states and the FCT, as accepted by the delivery-zone resolver. */
 const NIGERIAN_STATES = [
-  'Enugu',
-  'Lagos',
-  'Abuja (FCT)',
-  'Abia',
-  'Adamawa',
-  'Akwa Ibom',
-  'Anambra',
-  'Bauchi',
-  'Bayelsa',
-  'Benue',
-  'Borno',
-  'Cross River',
-  'Delta',
-  'Ebonyi',
-  'Edo',
-  'Ekiti',
-  'Gombe',
-  'Imo',
-  'Jigawa',
-  'Kaduna',
-  'Kano',
-  'Katsina',
-  'Kebbi',
-  'Kogi',
-  'Kwara',
-  'Nasarawa',
-  'Niger',
-  'Ogun',
-  'Ondo',
-  'Osun',
-  'Oyo',
-  'Plateau',
-  'Rivers',
-  'Sokoto',
-  'Taraba',
-  'Yobe',
-  'Zamfara',
+  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno', 'Cross River',
+  'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT', 'Gombe', 'Imo', 'Jigawa', 'Kaduna', 'Kano',
+  'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo',
+  'Plateau', 'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara',
 ];
+
+type PaymentMethodId = 'monnify' | 'kora' | 'whatsapp';
+
+/** What the payment step needs, whether the order was just placed or is being resumed. */
+interface PayableOrder {
+  order_number: string;
+  guest_email: string;
+  guest_access_token?: string;
+  subtotal: number;
+  discount_amount: number;
+  shipping_fee: number;
+  grand_total: number;
+  expires_at?: string | null;
+  shipping_address: { full_name?: string; phone?: string; address_line1?: string; city?: string; state?: string };
+  items: Array<{ name: string; quantity: number; size?: string; line_total?: number; price?: number }>;
+}
 
 function newIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -93,129 +71,177 @@ function newIdempotencyKey(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose }) => {
-  const { items, appliedPromo, clearCart } = useCart();
-  const { user, addresses } = useAuth();
+const fieldClass =
+  'w-full bg-[#F0F0F0] rounded-xl px-3.5 py-2.5 text-sm text-black placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-black';
+const labelClass = 'text-xs font-semibold text-neutral-700 block mb-1';
 
-  const [step, setStep] = useState<'details' | 'success'>('details');
-  const [isQuoting, setIsQuoting] = useState<boolean>(false);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose }) => {
+  const { items, appliedPromo } = useCart();
+  const { user, addresses } = useAuth();
+  const { supportPhone, paymentMethods } = useStoreSupport();
+
+  const [step, setStep] = useState<'details' | 'payment'>('details');
+  const [isQuoting, setIsQuoting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-
   const [quote, setQuote] = useState<CheckoutQuoteResponse | null>(null);
-  const [createdOrder, setCreatedOrder] = useState<CheckoutOrderResponse | null>(null);
-  const [savedOrderItems, setSavedOrderItems] = useState<any[]>([]);
-  const [savedOrderQuote, setSavedOrderQuote] = useState<CheckoutQuoteResponse | null>(null);
-  const [copiedToken, setCopiedToken] = useState<boolean>(false);
-  const [isInitializingPayment, setIsInitializingPayment] = useState<boolean>(false);
+  const [order, setOrder] = useState<PayableOrder | null>(null);
+  const [copiedToken, setCopiedToken] = useState(false);
+  const [isInitializingPayment, setIsInitializingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethodId | null>(null);
 
-  // Dynamic payment methods list (Monnify is first, Kora is second, Request from WhatsApp is last)
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodItem[]>([
-    { id: 'monnify', name: 'Monnify', description: 'Pay via Card, Bank Transfer, USSD, or Phone', badge: 'Instant & Secure', is_default: true },
-    { id: 'kora', name: 'Kora', description: 'Pay securely with Card, Bank Transfer, or Mobile Money', badge: 'Secure Checkout', is_default: false },
-    { id: 'whatsapp', name: 'Request from WhatsApp', description: 'Send your invoice directly to our support team on WhatsApp', badge: 'Manual Support', is_default: false },
-  ]);
-  const [selectedMethod, setSelectedMethod] = useState<'monnify' | 'kora' | 'whatsapp'>('monnify');
   // One key per checkout attempt: a double click or a retry after a dropped response
   // returns the same order instead of creating (and reserving stock for) a second one.
   const idempotencyKeyRef = useRef<string | null>(null);
-
+  // Only the latest quote request may update the screen.
+  const quoteRequestRef = useRef(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const defaultAddr = addresses.find((a) => a.is_default) || addresses[0];
 
-  // DEV TESTING PREFILL (Temporary - will be removed after development)
   const [formData, setFormData] = useState({
-    fullName: 'Emeka Obi',
-    email: 'test@shopco.ng',
-    phone: '09066707079',
-    address: '12 Chime Avenue, New Haven',
-    city: 'Enugu',
-    state: 'Enugu',
-    notes: 'Please call upon arrival at the gate.',
+    fullName: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: '',
+    state: '',
+    notes: '',
     selectedZoneId: undefined as number | undefined,
   });
 
-  // Prefill user details if available
+  // Prefill from the signed-in customer and their default address (never overwrites typing).
   useEffect(() => {
-    if (user) {
-      setFormData((prev) => ({
-        ...prev,
-        fullName: prev.fullName || user.full_name || '',
-        email: prev.email || user.email || '',
-        phone: prev.phone || user.phone || defaultAddr?.phone || '',
-        address: prev.address || defaultAddr?.street_address || '',
-        city: prev.city || defaultAddr?.city || '',
-        state: prev.state || defaultAddr?.state || 'Enugu',
-      }));
-    }
+    if (!user) return;
+    setFormData((prev) => ({
+      ...prev,
+      fullName: prev.fullName || defaultAddr?.recipient_name || user.full_name || '',
+      email: prev.email || user.email || '',
+      phone: prev.phone || defaultAddr?.phone || user.phone || '',
+      address: prev.address || defaultAddr?.street_address || '',
+      city: prev.city || defaultAddr?.city || '',
+      state: prev.state || (defaultAddr?.state && NIGERIAN_STATES.includes(defaultAddr.state) ? defaultAddr.state : ''),
+    }));
   }, [user, defaultAddr]);
 
-  // Transform cart items to API checkout items
-  const prepareCheckoutItems = useCallback(() => {
-    return items.map((item) => {
-      const pid = parseInt(item.productId, 10) || 1;
-      return {
-        product_id: pid,
+  const busy = isSubmitting || isInitializingPayment;
+
+  const handleClose = useCallback(() => {
+    if (busy) return;
+    onClose();
+  }, [busy, onClose]);
+
+  // Default payment method once the store's methods load.
+  useEffect(() => {
+    if (!selectedMethod && paymentMethods.length > 0) {
+      const def = paymentMethods.find((m) => m.is_default) || paymentMethods[0];
+      setSelectedMethod(def.id as PaymentMethodId);
+    }
+  }, [paymentMethods, selectedMethod]);
+
+  // On open: resume this cart's unpaid order if there is one, otherwise start at the details step.
+  useEffect(() => {
+    if (!isOpen) return;
+    setSubmitError(null);
+    setPaymentError(null);
+
+    const pending = readPendingOrder();
+    if (!pending || pending.cartSignature !== cartSignature(items)) {
+      setStep('details');
+      setOrder(null);
+      return;
+    }
+
+    const token = readGuestToken(pending.orderNumber);
+    apiGetOrder(pending.orderNumber, token ? { token } : undefined)
+      .then((o: any) => {
+        if (o.order_status !== 'pending_payment') {
+          clearPendingOrder(pending.orderNumber);
+          setStep('details');
+          return;
+        }
+        setOrder({
+          order_number: o.order_number,
+          guest_email: o.guest_email,
+          guest_access_token: token,
+          subtotal: Number(o.subtotal),
+          discount_amount: Number(o.discount_amount),
+          shipping_fee: Number(o.shipping_fee),
+          grand_total: Number(o.grand_total),
+          expires_at: o.expires_at,
+          shipping_address: o.shipping_address_snapshot || {},
+          items: (o.items || []).map((it: any) => ({
+            name: it.item_name,
+            quantity: Number(it.quantity),
+            size: it.variant_options?.size,
+            line_total: Number(it.line_total),
+          })),
+        });
+        setStep('payment');
+      })
+      .catch(() => {
+        clearPendingOrder(pending.orderNumber);
+        setStep('details');
+      });
+    // Only when the modal opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // Escape closes; focus moves into the dialog when it opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose();
+    };
+    window.addEventListener('keydown', onKey);
+    const firstField = dialogRef.current?.querySelector<HTMLElement>('input, select, button:not([aria-label="Close checkout"])');
+    firstField?.focus();
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, step, handleClose]);
+
+  const checkoutItems = useCallback(
+    () =>
+      items.map((item) => ({
+        product_id: parseInt(item.productId, 10),
+        variant_id: item.variantId,
         quantity: item.quantity,
-        size: typeof item.size === 'string' ? item.size : undefined,
-        color: item.color?.name,
-      };
-    });
-  }, [items]);
+      })),
+    [items]
+  );
 
-  // Fetch real-time server quote whenever state, items, or coupon changes
+  // Server quote for the chosen state: authoritative prices, discount and delivery fee.
   const fetchQuote = useCallback(async () => {
-    if (items.length === 0 || !formData.state) return;
-
+    if (items.length === 0 || !formData.state) {
+      setQuote(null);
+      return;
+    }
+    const requestId = ++quoteRequestRef.current;
     setIsQuoting(true);
     setQuoteError(null);
 
     try {
-      const checkoutItems = prepareCheckoutItems();
       const quoteData = await apiGetCheckoutQuote({
-        items: checkoutItems,
-        shipping_address: {
-          state: formData.state.replace(' (FCT)', ''),
-          country: 'Nigeria',
-        },
+        items: checkoutItems(),
+        shipping_address: { state: formData.state, country: 'Nigeria' },
         shipping_zone_id: formData.selectedZoneId,
         coupon_code: appliedPromo?.code,
       });
-
+      if (requestId !== quoteRequestRef.current) return;
       setQuote(quoteData);
-      if (quoteData.shipping_zone && !formData.selectedZoneId) {
-        setFormData((prev) => ({ ...prev, selectedZoneId: quoteData.shipping_zone?.id }));
-      }
     } catch (err: any) {
+      if (requestId !== quoteRequestRef.current) return;
       setQuote(null);
-      setQuoteError(err.message || 'Unable to resolve delivery zone for this location.');
+      setQuoteError(err?.message || 'We could not calculate delivery for this address.');
     } finally {
-      setIsQuoting(false);
+      if (requestId === quoteRequestRef.current) setIsQuoting(false);
     }
-  }, [items, formData.state, formData.selectedZoneId, appliedPromo, prepareCheckoutItems]);
+  }, [items.length, checkoutItems, formData.state, formData.selectedZoneId, appliedPromo?.code]);
 
   useEffect(() => {
-    if (isOpen) {
-      fetchQuote();
-    }
-  }, [isOpen, fetchQuote]);
-
-  // Fetch store configured payment methods on mount
-  useEffect(() => {
-    apiGetPaymentMethods()
-      .then((res) => {
-        if (res?.methods && res.methods.length > 0) {
-          setPaymentMethods(res.methods);
-          const defaultMethod = res.methods.find((m) => m.is_default) || res.methods[0];
-          setSelectedMethod(defaultMethod.id as any);
-        }
-      })
-      .catch((err) => {
-        console.warn('Could not load payment methods from backend:', err);
-      });
-  }, []);
+    if (isOpen && step === 'details') fetchQuote();
+  }, [isOpen, step, fetchQuote]);
 
   if (!isOpen) return null;
 
@@ -227,120 +253,121 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
       setSubmitError('Your cart is empty.');
       return;
     }
-
-    if (!quote || !quote.shipping_zone) {
-      setSubmitError('Please select a valid delivery zone before placing order.');
+    if (items.some((i) => typeof i.variantId !== 'number')) {
+      setSubmitError('Some items need their size and colour chosen again. Please review your cart.');
+      return;
+    }
+    if (!quote?.shipping_zone) {
+      setSubmitError('Choose a delivery state we deliver to before placing your order.');
       return;
     }
 
     setIsSubmitting(true);
-
     if (!idempotencyKeyRef.current) {
       idempotencyKeyRef.current = newIdempotencyKey();
     }
 
     try {
-      const checkoutItems = prepareCheckoutItems();
-      const orderData = await apiCreateCheckoutOrder({
-        email: formData.email,
-        items: checkoutItems,
-        shipping_address: {
-          full_name: formData.fullName,
-          phone: formData.phone,
-          address_line1: formData.address,
-          city: formData.city,
-          state: formData.state.replace(' (FCT)', ''),
-          country: 'Nigeria',
+      const placed = await apiCreateCheckoutOrder(
+        {
+          email: formData.email.trim(),
+          items: checkoutItems(),
+          shipping_address: {
+            full_name: formData.fullName.trim(),
+            phone: formData.phone.trim(),
+            address_line1: formData.address.trim(),
+            city: formData.city.trim(),
+            state: formData.state,
+            country: 'Nigeria',
+          },
+          shipping_zone_id: quote.shipping_zone.id,
+          coupon_code: appliedPromo?.code,
+          notes: formData.notes.trim() || undefined,
         },
-        shipping_zone_id: quote.shipping_zone.id,
-        coupon_code: appliedPromo?.code,
-        notes: formData.notes,
-      }, idempotencyKeyRef.current);
+        idempotencyKeyRef.current
+      );
 
       idempotencyKeyRef.current = null;
-      setSavedOrderItems([...items]);
-      setSavedOrderQuote(quote);
-      setCreatedOrder(orderData);
-      setStep('success');
-      clearCart();
+      saveGuestToken(placed.order_number, placed.guest_access_token);
+      // The cart stays as it is until payment is verified; remember which order it belongs to.
+      savePendingOrder({
+        orderNumber: placed.order_number,
+        cartSignature: cartSignature(items),
+        expiresAt: placed.expires_at ?? null,
+        createdAt: placed.created_at,
+      });
 
-      // Persist guest token to localStorage for frictionless payment verification callback
-      if (typeof window !== 'undefined' && orderData.guest_access_token) {
-        try {
-          localStorage.setItem(`shopco_guest_token_${orderData.order_number}`, orderData.guest_access_token);
-          localStorage.setItem('shopco_latest_guest_token', orderData.guest_access_token);
-          localStorage.setItem('shopco_latest_order_number', orderData.order_number);
-        } catch (e) {
-          console.warn('Could not persist guest token to localStorage', e);
-        }
-      }
-
-      // Trigger celebration confetti
-      try {
-        confetti({
-          particleCount: 120,
-          spread: 70,
-          origin: { y: 0.6 },
-        });
-      } catch (err) {
-        console.log('Confetti triggered', err);
-      }
+      setOrder({
+        order_number: placed.order_number,
+        guest_email: placed.guest_email,
+        guest_access_token: placed.guest_access_token,
+        subtotal: placed.subtotal,
+        discount_amount: placed.discount_amount,
+        shipping_fee: placed.shipping_fee,
+        grand_total: placed.grand_total,
+        expires_at: placed.expires_at,
+        shipping_address: placed.shipping_address,
+        items: (placed.items || []).map((it: any) => ({
+          name: it.name,
+          quantity: Number(it.quantity),
+          size: it.variant_options?.size,
+          line_total: Number(it.line_total),
+        })),
+      });
+      setStep('payment');
     } catch (err: any) {
-      setSubmitError(err.message || 'Failed to place order. Please review your cart and retry.');
+      setSubmitError(err?.message || 'We could not place your order. Please review your details and try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleCopyGuestToken = () => {
-    if (createdOrder?.guest_access_token) {
-      navigator.clipboard.writeText(createdOrder.guest_access_token);
+  const handleCopyGuestToken = async () => {
+    if (!order?.guest_access_token) return;
+    try {
+      await navigator.clipboard.writeText(order.guest_access_token);
       setCopiedToken(true);
       setTimeout(() => setCopiedToken(false), 2500);
+    } catch {
+      // Clipboard blocked: the key is still visible to copy by hand.
     }
   };
 
+  const whatsappInvoice = order
+    ? buildWhatsAppInvoiceUrl(
+        {
+          order_number: order.order_number,
+          grand_total: order.grand_total,
+          subtotal: order.subtotal,
+          shipping_fee: order.shipping_fee,
+          discount_amount: order.discount_amount,
+          items: order.items,
+          guest_email: order.guest_email,
+          shipping_address: order.shipping_address,
+        },
+        supportPhone
+      )
+    : '';
 
   const handlePayOrder = async () => {
-    if (!createdOrder) return;
+    if (!order || !selectedMethod) return;
     setIsInitializingPayment(true);
     setPaymentError(null);
 
-    const redirectUrl =
-      typeof window !== 'undefined'
-        ? `${window.location.origin}/checkout/callback?order=${encodeURIComponent(createdOrder.order_number)}`
-        : undefined;
-
+    const redirectUrl = `${window.location.origin}/checkout/callback?order=${encodeURIComponent(order.order_number)}`;
     // Open the WhatsApp tab synchronously (inside the click) so pop-up blockers allow it.
     const whatsappTab = selectedMethod === 'whatsapp' ? window.open('about:blank', '_blank') : null;
 
     try {
-      // Every method starts a server-side payment attempt: for WhatsApp this keeps the
-      // order's stock reserved while the customer arranges the transfer.
-      const res = await apiInitializePayment(
-        createdOrder.order_number,
-        createdOrder.guest_access_token,
-        redirectUrl,
-        selectedMethod
-      );
+      // Every method starts a server-side payment attempt; for WhatsApp this keeps the stock
+      // reserved longer while the customer arranges the transfer.
+      const res = await apiInitializePayment(order.order_number, order.guest_access_token, redirectUrl, selectedMethod);
 
       if (selectedMethod === 'whatsapp') {
-        const url = buildWhatsAppInvoiceUrl({
-          order_number: createdOrder.order_number,
-          grand_total: createdOrder.grand_total,
-          subtotal: createdOrder.subtotal ?? savedOrderQuote?.subtotal,
-          shipping_fee: createdOrder.shipping_fee ?? savedOrderQuote?.shipping_fee,
-          discount_amount: createdOrder.discount_amount ?? savedOrderQuote?.discount_amount,
-          items: savedOrderItems.length > 0 ? savedOrderItems : (createdOrder as any).items,
-          guest_email: createdOrder.guest_email,
-          payment_status: createdOrder.payment_status,
-          guest_access_token: createdOrder.guest_access_token,
-          shipping_address: createdOrder.shipping_address,
-        });
-        if (whatsappTab) {
-          whatsappTab.location.href = url;
-        } else {
-          window.location.href = url;
+        if (whatsappTab) whatsappTab.location.href = whatsappInvoice;
+        else window.location.href = whatsappInvoice;
+        if (res.expires_at) {
+          setOrder((prev) => (prev ? { ...prev, expires_at: res.expires_at } : prev));
         }
         setIsInitializingPayment(false);
         return;
@@ -357,22 +384,39 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
     }
   };
 
+  const startOver = () => {
+    if (order) clearPendingOrder(order.order_number);
+    setOrder(null);
+    setStep('details');
+  };
+
+  const expiresLabel = order?.expires_at
+    ? new Date(order.expires_at.replace(' ', 'T')).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })
+    : null;
+
+  const zones = quote?.eligible_zones ?? [];
+  const methodAccent: Record<PaymentMethodId, string> = {
+    monnify: 'bg-[#002244] hover:bg-[#001730]',
+    kora: 'bg-[#055B5C] hover:bg-[#044748]',
+    whatsapp: 'bg-[#1DA851] hover:bg-[#178a43]',
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={() => {
-          if (!isSubmitting) onClose();
-        }}
-      />
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} aria-hidden="true" />
 
-      {/* Modal Card */}
-      <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 max-w-md w-full z-10 shadow-2xl relative max-h-[92vh] overflow-y-auto">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="checkout-title"
+        className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 max-w-md w-full z-10 shadow-2xl relative max-h-[92vh] overflow-y-auto"
+      >
         <button
-          onClick={onClose}
-          disabled={isSubmitting}
-          className="absolute top-4 right-4 p-2 rounded-full text-neutral-400 hover:text-black hover:bg-neutral-100 disabled:opacity-50"
+          type="button"
+          onClick={handleClose}
+          disabled={busy}
+          className="absolute top-4 right-4 p-2 rounded-full text-neutral-500 hover:text-black hover:bg-neutral-100 disabled:opacity-50"
           aria-label="Close checkout"
         >
           <HugeiconsIcon icon={Cancel01Icon} size={18} />
@@ -382,375 +426,287 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
           <div>
             <div className="flex items-center gap-2 mb-4">
               <HugeiconsIcon icon={DeliveryTruck01Icon} size={20} className="text-black" />
-              <h3 className="font-bold text-lg text-black">Express Checkout</h3>
+              <h2 id="checkout-title" className="font-bold text-lg text-black">Delivery details</h2>
             </div>
 
             {submitError && (
-              <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2 text-xs text-red-700">
-                <HugeiconsIcon icon={AlertCircleIcon} size={16} className="shrink-0 mt-0.5 text-red-500" />
+              <div role="alert" className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2 text-sm text-red-800">
+                <HugeiconsIcon icon={AlertCircleIcon} size={16} className="shrink-0 mt-0.5 text-red-600" />
                 <span>{submitError}</span>
               </div>
             )}
 
-            <form onSubmit={handleSubmitOrder} className="space-y-3">
+            <form onSubmit={handleSubmitOrder} className="space-y-3" noValidate={false}>
               <div>
-                <label className="text-[11px] font-semibold text-neutral-600 block mb-1">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Alex Johnson"
-                  value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                  className="w-full bg-[#F0F0F0] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-black placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-black"
-                />
+                <label htmlFor="co-name" className={labelClass}>Full name</label>
+                <input id="co-name" type="text" required autoComplete="name" value={formData.fullName}
+                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} className={fieldClass} />
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
-                  <label className="text-[11px] font-semibold text-neutral-600 block mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    placeholder="e.g. 08012345678"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="w-full bg-[#F0F0F0] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-black placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-black"
-                  />
+                  <label htmlFor="co-phone" className={labelClass}>Phone number</label>
+                  <input id="co-phone" type="tel" required autoComplete="tel" inputMode="tel" placeholder="080..." value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className={fieldClass} />
                 </div>
-
                 <div>
-                  <label className="text-[11px] font-semibold text-neutral-600 block mb-1">
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="e.g. alex@example.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full bg-[#F0F0F0] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-black placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-black"
-                  />
+                  <label htmlFor="co-email" className={labelClass}>Email</label>
+                  <input id="co-email" type="email" required autoComplete="email" value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })} className={fieldClass} />
                 </div>
               </div>
 
               <div>
-                <label className="text-[11px] font-semibold text-neutral-600 block mb-1">
-                  Delivery Address
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Street address, apartment or suite"
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  className="w-full bg-[#F0F0F0] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-black placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-black"
-                />
+                <label htmlFor="co-address" className={labelClass}>Street address</label>
+                <input id="co-address" type="text" required autoComplete="street-address" placeholder="House number, street, area"
+                  value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} className={fieldClass} />
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="text-[11px] font-semibold text-neutral-600 block mb-1">
-                    State
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={formData.state}
-                      onChange={(e) => {
-                        const newState = e.target.value;
-                        setFormData((prev) => ({
-                          ...prev,
-                          state: newState,
-                          selectedZoneId: undefined,
-                        }));
-                      }}
-                      className="w-full bg-[#F0F0F0] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-black font-medium appearance-none focus:outline-none focus:ring-1 focus:ring-black cursor-pointer pr-7"
-                    >
-                      {NIGERIAN_STATES.map((st) => (
-                        <option key={st} value={st}>
-                          {st}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-neutral-500">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
+                  <label htmlFor="co-state" className={labelClass}>State</label>
+                  <select
+                    id="co-state"
+                    required
+                    value={formData.state}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, state: e.target.value, selectedZoneId: undefined }))}
+                    className={`${fieldClass} cursor-pointer`}
+                  >
+                    <option value="" disabled>Select state</option>
+                    {NIGERIAN_STATES.map((st) => (
+                      <option key={st} value={st}>{st === 'FCT' ? 'Abuja (FCT)' : st}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="co-city" className={labelClass}>City / town</label>
+                  <input id="co-city" type="text" required autoComplete="address-level2" value={formData.city}
+                    onChange={(e) => setFormData({ ...formData, city: e.target.value })} className={fieldClass} />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="co-notes" className={labelClass}>Delivery note (optional)</label>
+                <input id="co-notes" type="text" maxLength={300} placeholder="e.g. landmark, gate instructions" value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className={fieldClass} />
+              </div>
+
+              {/* Delivery zone & fee from the server */}
+              <div aria-live="polite">
+                {!formData.state ? (
+                  <p className="text-xs text-neutral-600">Choose your state to see the delivery fee.</p>
+                ) : isQuoting && !quote ? (
+                  <p className="text-xs text-neutral-600">Calculating delivery…</p>
+                ) : quoteError ? (
+                  <div role="alert" className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-900">
+                    {quoteError}
                   </div>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-semibold text-neutral-600 block mb-1">
-                    City
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Ikeja"
-                    value={formData.city}
-                    onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                    className="w-full bg-[#F0F0F0] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-black placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-black"
-                  />
-                </div>
+                ) : zones.length > 1 ? (
+                  <fieldset className="space-y-1.5">
+                    <legend className={labelClass}>Delivery option</legend>
+                    {zones.map((z) => (
+                      <label key={z.id} className="flex items-center justify-between gap-2 rounded-xl border border-neutral-200 px-3 py-2 text-sm cursor-pointer has-[:checked]:border-black">
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="zone"
+                            checked={(formData.selectedZoneId ?? quote?.shipping_zone?.id) === z.id}
+                            onChange={() => setFormData((prev) => ({ ...prev, selectedZoneId: z.id }))}
+                          />
+                          <span>{z.name} <span className="text-neutral-600">· {z.estimated_days}</span></span>
+                        </span>
+                        <span className="font-semibold">{formatPrice(z.fee)}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                ) : quote?.shipping_zone ? (
+                  <p className="text-xs text-neutral-700">
+                    Delivery to {formData.state === 'FCT' ? 'Abuja (FCT)' : formData.state}: <strong>{quote.shipping_zone.name}</strong> · {quote.shipping_zone.estimated_days}
+                  </p>
+                ) : null}
               </div>
 
-              {/* Promo Code Summary if applied */}
               {quote?.applied_coupon && (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-xs text-emerald-800 font-medium">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-sm text-emerald-900 font-medium">
                   <div className="flex items-center gap-1.5">
-                    <HugeiconsIcon icon={Ticket02Icon} size={14} className="text-emerald-600" />
+                    <HugeiconsIcon icon={Ticket02Icon} size={14} className="text-emerald-700" />
                     <span>Coupon <strong>{quote.applied_coupon.code}</strong></span>
                   </div>
                   <span className="font-bold">-{quote.applied_coupon.discount_percent}%</span>
                 </div>
               )}
 
-              {/* Financial Calculation Breakdown */}
-              <div className="pt-2.5 border-t border-neutral-100 space-y-1.5 text-xs text-neutral-600">
+              <div className="pt-2.5 border-t border-neutral-100 space-y-1.5 text-sm text-neutral-700">
                 <div className="flex justify-between">
-                  <span>Subtotal ({quote?.items_count ?? items.length} items)</span>
+                  <span>Subtotal ({quote?.total_quantity ?? items.reduce((n, i) => n + i.quantity, 0)} items)</span>
                   <span className="font-semibold text-black">
                     {formatPrice(quote ? quote.subtotal : items.reduce((acc, i) => acc + i.price * i.quantity, 0))}
                   </span>
                 </div>
-
                 {Boolean(quote?.discount_amount) && (
-                  <div className="flex justify-between text-red-600">
+                  <div className="flex justify-between text-red-700">
                     <span>Discount</span>
                     <span className="font-semibold">-{formatPrice(quote?.discount_amount)}</span>
                   </div>
                 )}
-
                 <div className="flex justify-between">
                   <span>Delivery</span>
                   <span className="font-semibold text-black">
-                    {quote?.shipping_zone ? formatPrice(quote.shipping_fee) : (isQuoting ? 'Calculating...' : '...')}
+                    {quote?.shipping_zone ? formatPrice(quote.shipping_fee) : '—'}
                   </span>
                 </div>
-
                 <div className="flex justify-between items-center pt-2 border-t border-neutral-200">
-                  <span className="font-bold text-black text-sm">Total:</span>
+                  <span className="font-bold text-black">Total</span>
                   <span className="font-black text-lg sm:text-xl text-black">
-                    {formatPrice(
-                      quote
-                        ? quote.grand_total
-                        : items.reduce((acc, i) => acc + i.price * i.quantity, 0)
-                    )}
+                    {quote?.shipping_zone ? formatPrice(quote.grand_total) : '—'}
                   </span>
                 </div>
 
                 <button
                   type="submit"
                   disabled={isSubmitting || isQuoting || !quote?.shipping_zone}
-                  className="w-full bg-black text-white hover:bg-neutral-800 disabled:opacity-50 font-bold py-3.5 rounded-full text-xs sm:text-sm transition-all shadow-md mt-2 flex items-center justify-center gap-2"
+                  className="w-full bg-black text-white hover:bg-neutral-800 disabled:opacity-50 font-bold py-3.5 rounded-full text-sm transition-all shadow-md mt-2 flex items-center justify-center gap-2"
                 >
                   {isSubmitting ? (
-                    <span>Placing Order...</span>
+                    <span>Placing order…</span>
                   ) : (
                     <>
-                      <span>Proceed</span>
+                      <span>Continue to payment</span>
                       <HugeiconsIcon icon={ArrowRight01Icon} size={15} />
                     </>
                   )}
                 </button>
+                <p className="text-xs text-neutral-600 text-center">
+                  Your items are reserved for 60 minutes while you pay.
+                </p>
               </div>
             </form>
           </div>
-        ) : (
-          <div className="text-center py-2 space-y-4">
-            <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm border border-emerald-200">
-              <HugeiconsIcon icon={CheckmarkBadge01Icon} size={36} className="text-emerald-600" />
-            </div>
-
-            <div>
-              <div className="inline-flex items-center px-3 py-0.5 bg-neutral-100 text-neutral-800 rounded-full text-[11px] font-semibold mb-1">
-                <span>Official Proforma Invoice</span>
+        ) : order ? (
+          <div className="space-y-4">
+            <div className="text-center">
+              <div className="w-12 h-12 bg-emerald-50 text-emerald-700 rounded-full flex items-center justify-center mx-auto border border-emerald-200">
+                <HugeiconsIcon icon={CheckmarkBadge01Icon} size={28} />
               </div>
-              <h3 className="font-extrabold text-xl text-black">Order Placed!</h3>
-              <p className="text-xs text-neutral-500 mt-0.5">
-                Ref: <strong className="text-black font-mono">{createdOrder?.order_number}</strong>
+              <h2 id="checkout-title" className="font-extrabold text-xl text-black mt-2">Complete your payment</h2>
+              <p className="text-sm text-neutral-700 mt-0.5">
+                Order <strong className="font-mono">{order.order_number}</strong> is reserved
+                {expiresLabel ? <> until <strong>{expiresLabel}</strong></> : null}.
               </p>
             </div>
 
-            {/* Itemized Invoice & Calculations Card (Matches Receipt Design) */}
-            <div className="bg-[#FAFAFA] rounded-2xl p-4 text-xs text-left space-y-3">
-              {/* Items List */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-neutral-400 font-bold text-[11px] uppercase tracking-wider">
-                  <span>Items Ordered ({savedOrderItems.length || createdOrder?.items_count || 1})</span>
-                  <span>Amount</span>
-                </div>
-                <div className="divide-y divide-neutral-100 max-h-36 overflow-y-auto">
-                  {savedOrderItems.map((item, idx) => (
-                    <div key={idx} className="py-2 flex items-center justify-between">
-                      <div className="pr-2 min-w-0">
-                        <p className="font-semibold text-black truncate">{item.name}</p>
-                        <p className="text-[11px] text-neutral-400">
-                          Qty: {item.quantity}{item.size ? ` · Size: ${item.size}` : ''}
-                        </p>
-                      </div>
-                      <span className="font-mono text-black font-medium shrink-0">
-                        {formatPrice(item.price * item.quantity)}
-                      </span>
+            <div className="bg-[#FAFAFA] rounded-2xl p-4 text-sm space-y-3">
+              <ul className="divide-y divide-neutral-100 max-h-36 overflow-y-auto">
+                {order.items.map((item, idx) => (
+                  <li key={`${item.name}-${idx}`} className="py-2 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-black truncate">{item.name}</p>
+                      <p className="text-xs text-neutral-600">
+                        Qty {item.quantity}{item.size ? ` · ${item.size}` : ''}
+                      </p>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Financial Calculation Breakdown */}
-              <div className="pt-2 border-t border-neutral-200 space-y-1.5 text-neutral-600">
-                <div className="flex justify-between">
-                  <span>Subtotal:</span>
-                  <span className="font-medium text-black">
-                    {formatPrice(createdOrder?.subtotal ?? savedOrderQuote?.subtotal ?? 0)}
-                  </span>
-                </div>
-
-                {Boolean(createdOrder?.discount_amount || savedOrderQuote?.discount_amount) && (
-                  <div className="flex justify-between text-emerald-700">
-                    <span>Discount:</span>
-                    <span className="font-semibold">
-                      -{formatPrice(createdOrder?.discount_amount || savedOrderQuote?.discount_amount || 0)}
+                    <span className="font-medium text-black shrink-0">
+                      {formatPrice(item.line_total ?? (item.price ?? 0) * item.quantity)}
                     </span>
-                  </div>
+                  </li>
+                ))}
+              </ul>
+              <div className="pt-2 border-t border-neutral-200 space-y-1 text-neutral-700">
+                <div className="flex justify-between"><span>Subtotal</span><span className="text-black">{formatPrice(order.subtotal)}</span></div>
+                {order.discount_amount > 0 && (
+                  <div className="flex justify-between text-emerald-800"><span>Discount</span><span>-{formatPrice(order.discount_amount)}</span></div>
                 )}
-
-                <div className="flex justify-between">
-                  <span>Delivery:</span>
-                  <span className="font-medium text-black">
-                    {formatPrice(createdOrder?.shipping_fee ?? savedOrderQuote?.shipping_fee ?? 0)}
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-center pt-2 border-t border-neutral-200 text-sm font-bold text-black">
-                  <span>Amount Due:</span>
-                  <span className="font-black text-base font-mono">
-                    {formatPrice(createdOrder?.grand_total ?? savedOrderQuote?.grand_total ?? 0)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Delivery Details */}
-              <div className="pt-2 border-t border-neutral-200 flex justify-between items-center text-[11px] text-neutral-500">
-                <span>Deliver To:</span>
-                <span className="font-medium text-black text-right truncate max-w-[200px]">
-                  {createdOrder?.shipping_address?.city}, {createdOrder?.shipping_address?.state}
-                </span>
-              </div>
-            </div>
-
-            {/* Choose Payment Method Dropdown */}
-            <div className="text-left space-y-1 pt-1">
-              <label className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 block">
-                Choose Payment Method
-              </label>
-              <div className="relative">
-                <select
-                  value={selectedMethod}
-                  onChange={(e) => setSelectedMethod(e.target.value as any)}
-                  className="w-full bg-[#F0F0F0] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-black font-semibold appearance-none focus:outline-none focus:ring-1 focus:ring-black cursor-pointer pr-8"
-                >
-                  {paymentMethods.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} ({m.badge})
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-neutral-500">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                  </svg>
+                <div className="flex justify-between"><span>Delivery</span><span className="text-black">{formatPrice(order.shipping_fee)}</span></div>
+                <div className="flex justify-between pt-1 border-t border-neutral-200 font-bold text-black">
+                  <span>Amount due</span><span>{formatPrice(order.grand_total)}</span>
                 </div>
               </div>
             </div>
 
-            <div className="space-y-2 pt-1">
-              {selectedMethod === 'monnify' ? (
-                <button
-                  onClick={handlePayOrder}
-                  disabled={isInitializingPayment}
-                  className="w-full bg-[#002244] hover:bg-[#001730] text-white font-bold py-3.5 rounded-full text-xs sm:text-sm transition-all shadow-md flex items-center justify-center gap-1.5"
-                >
-                  {isInitializingPayment ? (
-                    <span>Opening Monnify...</span>
-                  ) : (
-                    <>
-                      <span>Pay with Monnify ({formatPrice(createdOrder?.grand_total)})</span>
-                      <HugeiconsIcon icon={ArrowRight01Icon} size={15} />
-                    </>
-                  )}
-                </button>
-              ) : selectedMethod === 'kora' ? (
-                <button
-                  onClick={handlePayOrder}
-                  disabled={isInitializingPayment}
-                  className="w-full bg-[#055B5C] hover:bg-[#044748] text-white font-bold py-3.5 rounded-full text-xs sm:text-sm transition-all shadow-md flex items-center justify-center gap-1.5"
-                >
-                  {isInitializingPayment ? (
-                    <span>Connecting to Kora...</span>
-                  ) : (
-                    <>
-                      <span>Pay with Kora ({formatPrice(createdOrder?.grand_total)})</span>
-                      <HugeiconsIcon icon={ArrowRight01Icon} size={15} />
-                    </>
-                  )}
-                </button>
-              ) : (
-                <button
-                  onClick={handlePayOrder}
-                  disabled={isInitializingPayment}
-                  className="w-full bg-[#25D366] hover:bg-[#20ba59] text-white font-bold py-3.5 rounded-full text-xs sm:text-sm transition-all shadow-md flex items-center justify-center gap-1.5"
-                >
-                  <WhatsAppIcon className="w-4 h-4 text-white shrink-0" />
-                  <span>Send Order via WhatsApp ({formatPrice(createdOrder?.grand_total)})</span>
-                </button>
-              )}
-
-              {paymentError && (
-                <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-left">
-                  {paymentError}
-                </div>
-              )}
-
-              <div className="flex items-center gap-2 pt-1">
-                {createdOrder && (
-                  <a
-                    href={buildWhatsAppInvoiceUrl({
-                      order_number: createdOrder.order_number,
-                      grand_total: createdOrder.grand_total,
-                      subtotal: createdOrder.subtotal ?? savedOrderQuote?.subtotal,
-                      shipping_fee: createdOrder.shipping_fee ?? savedOrderQuote?.shipping_fee,
-                      discount_amount: createdOrder.discount_amount ?? savedOrderQuote?.discount_amount,
-                      items: savedOrderItems.length > 0 ? savedOrderItems : (createdOrder as any).items,
-                      guest_email: createdOrder.guest_email,
-                      payment_status: createdOrder.payment_status,
-                      guest_access_token: createdOrder.guest_access_token,
-                      shipping_address: createdOrder.shipping_address,
-                    })}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-900 font-semibold py-2.5 px-3 rounded-full text-xs transition-colors flex items-center justify-center gap-1.5"
+            {order.guest_access_token && !user && (
+              <div className="rounded-2xl border border-neutral-200 p-3 text-xs text-neutral-700 space-y-1.5">
+                <p>
+                  <strong className="text-black">Your order access key.</strong> It is saved on this device. Keep a copy to track
+                  this order elsewhere, or use your order number and email.
+                </p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 truncate rounded-lg bg-neutral-100 px-2 py-1 font-mono text-[11px]">{order.guest_access_token}</code>
+                  <button
+                    type="button"
+                    onClick={handleCopyGuestToken}
+                    className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-neutral-900 px-2.5 py-1 text-white"
+                    aria-label="Copy order access key"
                   >
-                    <WhatsAppIcon className="w-4 h-4 text-[#25D366] shrink-0" />
-                    <span>WhatsApp Support</span>
-                  </a>
-                )}
-
-                <button
-                  onClick={onClose}
-                  className="px-5 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-semibold rounded-full text-xs transition-colors"
-                >
-                  Close
-                </button>
+                    <HugeiconsIcon icon={copiedToken ? Tick02Icon : Copy01Icon} size={12} />
+                    {copiedToken ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
               </div>
+            )}
+
+            <fieldset className="space-y-2">
+              <legend className="text-xs font-bold uppercase tracking-wider text-neutral-700 mb-1">Payment method</legend>
+              {paymentMethods.length === 0 && (
+                <p className="text-sm text-neutral-600">Loading payment methods…</p>
+              )}
+              {paymentMethods.map((m) => (
+                <label
+                  key={m.id}
+                  className="flex items-start gap-3 rounded-2xl border border-neutral-200 p-3 cursor-pointer has-[:checked]:border-black has-[:checked]:bg-neutral-50"
+                >
+                  <input
+                    type="radio"
+                    name="payment-method"
+                    className="mt-1"
+                    checked={selectedMethod === m.id}
+                    onChange={() => setSelectedMethod(m.id as PaymentMethodId)}
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-black">{m.name}</span>
+                    <span className="block text-xs text-neutral-600">{m.description}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+
+            {paymentError && (
+              <div role="alert" className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                {paymentError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handlePayOrder}
+              disabled={isInitializingPayment || !selectedMethod}
+              className={`w-full text-white font-bold py-3.5 rounded-full text-sm transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60 ${
+                selectedMethod ? methodAccent[selectedMethod] : 'bg-black'
+              }`}
+            >
+              {isInitializingPayment ? (
+                <span>Opening secure payment…</span>
+              ) : selectedMethod === 'whatsapp' ? (
+                <span>Send invoice on WhatsApp ({formatPrice(order.grand_total)})</span>
+              ) : (
+                <>
+                  <span>Pay {formatPrice(order.grand_total)}</span>
+                  <HugeiconsIcon icon={ArrowRight01Icon} size={15} />
+                </>
+              )}
+            </button>
+
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <button type="button" onClick={startOver} disabled={busy} className="text-neutral-700 underline hover:no-underline disabled:opacity-50">
+                Change delivery details
+              </button>
+              <button type="button" onClick={handleClose} disabled={busy} className="text-neutral-700 underline hover:no-underline disabled:opacity-50">
+                Pay later
+              </button>
             </div>
           </div>
+        ) : (
+          <div className="py-10 text-center text-sm text-neutral-600" role="status">Loading your order…</div>
         )}
-
       </div>
     </div>
   );

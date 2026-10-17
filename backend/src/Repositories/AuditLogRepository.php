@@ -94,6 +94,7 @@ class AuditLogRepository
             $row['before_state'] = $row['before_state'] ? json_decode($row['before_state'], true) : null;
             $row['after_state'] = $row['after_state'] ? json_decode($row['after_state'], true) : null;
         }
+        unset($row);
 
         return $rows;
     }

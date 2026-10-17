@@ -36,6 +36,7 @@ class CategoryRepository
             $row['display_order'] = (int) $row['display_order'];
             $row['product_count'] = (int) $row['product_count'];
         }
+        unset($row);
         return $rows;
     }
 

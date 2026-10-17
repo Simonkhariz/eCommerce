@@ -23,17 +23,14 @@ import {
 } from 'lucide-react';
 import { formatPrice } from '@/lib/currency';
 import { apiGetOrder, apiInitializePayment } from '@/lib/api-client';
-import {
-  buildWhatsAppInvoiceUrl,
-  SUPPORT_PHONE_FORMATTED,
-} from '@/lib/whatsapp';
+import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, formatSupportPhone } from '@/lib/whatsapp';
+import { useStoreSupport } from '@/lib/use-store-support';
+import { getOrderStatusDisplay, STATUS_TONE_CLASSES } from '@/lib/order-status';
+import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 
-function WhatsAppIcon({ className = 'w-4 h-4' }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-    </svg>
-  );
+/** Safari-safe parsing of MySQL "YYYY-MM-DD HH:MM:SS" timestamps. */
+function toDate(value: string): Date {
+  return new Date(String(value).replace(' ', 'T'));
 }
 
 function TrackOrderContent() {
@@ -48,7 +45,9 @@ function TrackOrderContent() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isInitializingPayment, setIsInitializingPayment] = useState<string | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
-  const [selectedGateway, setSelectedGateway] = useState<'kora' | 'monnify' | 'whatsapp'>('kora');
+  const { supportPhone, paymentMethods } = useStoreSupport();
+  const [selectedGateway, setSelectedGateway] = useState<string>('');
+  const wantsToPay = searchParams.get('pay') === '1';
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [order, setOrder] = useState<any>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
@@ -160,7 +159,13 @@ function TrackOrderContent() {
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   };
 
-  const handleInitiatePayment = async (gatewayOverride?: 'kora' | 'monnify' | 'whatsapp') => {
+  useEffect(() => {
+    if (!selectedGateway && paymentMethods.length > 0) {
+      setSelectedGateway((paymentMethods.find((m) => m.is_default) || paymentMethods[0]).id);
+    }
+  }, [paymentMethods, selectedGateway]);
+
+  const handleInitiatePayment = async (gatewayOverride?: string) => {
     if (!order) return;
     const gateway = gatewayOverride || selectedGateway;
 
@@ -204,11 +209,19 @@ function TrackOrderContent() {
   };
 
   const rawStatus = order?.status || order?.order_status || 'pending_payment';
-  const isPaid = order?.payment_status === 'successful' || rawStatus === 'paid';
+  const statusDisplay = order ? getOrderStatusDisplay(rawStatus, order.payment_status, order.expires_at) : null;
+  const canPay = Boolean(statusDisplay?.canPay);
+  const isPaid = ['successful', 'partially_refunded', 'refunded'].includes(order?.payment_status);
+  const isOffTrack = ['cancelled', 'returned', 'refund_pending', 'refunded'].includes(rawStatus);
+
+  // "Pay now" from My orders opens the payment options straight away.
+  useEffect(() => {
+    if (wantsToPay && canPay) setShowPaymentModal(true);
+  }, [wantsToPay, canPay]);
 
   // Determine stage index
   const getStageIndex = (statusStr: string, paymentStatus: string) => {
-    if (statusStr === 'delivered') return 4;
+    if (statusStr === 'delivered' || statusStr === 'completed') return 4;
     if (statusStr === 'shipped') return 3;
     if (statusStr === 'processing') return 2;
     if (paymentStatus === 'successful' || statusStr === 'paid') return 1;
@@ -218,34 +231,27 @@ function TrackOrderContent() {
   const currentStage = order ? getStageIndex(rawStatus, order.payment_status || '') : 0;
 
   const steps = [
-    { title: 'Order Placed', tooltip: 'Order details recorded and items reserved in warehouse' },
-    {
-      title: 'Payment Confirmed',
-      tooltip: order?.payment?.provider
-        ? `Payment verified authoritatively by ${getGatewayDisplayName(order.payment.provider)}`
-        : 'Payment verified authoritatively by payment gateway',
-    },
-    { title: 'Processing', tooltip: 'Quality check and parcel packaging at Enugu Hub' },
-    { title: 'In Transit', tooltip: 'Handed over to regional courier for delivery' },
-    { title: 'Delivered', tooltip: 'Package handed over and signed' },
+    { title: 'Order placed', tooltip: 'Your order was received and the items reserved.' },
+    { title: 'Payment confirmed', tooltip: 'Payment was confirmed with the payment provider.' },
+    { title: 'Processing', tooltip: 'Your order is being packed.' },
+    { title: 'In transit', tooltip: 'Your parcel is with the courier.' },
+    { title: 'Delivered', tooltip: 'Your parcel was delivered.' },
   ];
 
   const whatsAppInvoiceUrl = order
-    ? buildWhatsAppInvoiceUrl({
-        order_number: order.order_number,
-        grand_total: order.grand_total,
-        subtotal: order.subtotal,
-        shipping_fee: order.shipping_fee,
-        discount_amount: order.discount_amount,
-        items: order.items,
-        guest_email: order.guest_email,
-        payment_status: order.payment_status,
-        guest_access_token:
-          typeof window !== 'undefined'
-            ? localStorage.getItem(`shopco_guest_token_${order.order_number}`) || undefined
-            : undefined,
-        shipping_address: order.shipping_address_snapshot,
-      })
+    ? buildWhatsAppInvoiceUrl(
+        {
+          order_number: order.order_number,
+          grand_total: order.grand_total,
+          subtotal: order.subtotal,
+          shipping_fee: order.shipping_fee,
+          discount_amount: order.discount_amount,
+          items: (order.items || []).map((it: any) => ({ name: it.item_name, quantity: it.quantity, line_total: it.line_total, size: it.variant_options?.size })),
+          guest_email: order.guest_email,
+          shipping_address: order.shipping_address_snapshot,
+        },
+        supportPhone
+      )
     : '';
 
   return (
@@ -262,13 +268,13 @@ function TrackOrderContent() {
           </Link>
 
           <a
-            href={`https://wa.me/2349066707079?text=${encodeURIComponent('Hello SHOP.CO Support! I have a question regarding my order.')}`}
+            href={buildWhatsAppMessageUrl('Hello! I have a question about my order.', supportPhone)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-full hover:bg-emerald-100 transition-colors"
           >
             <WhatsAppIcon className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Help: {SUPPORT_PHONE_FORMATTED}</span>
+            <span>Help: {formatSupportPhone(supportPhone)}</span>
           </a>
         </div>
 
@@ -277,8 +283,8 @@ function TrackOrderContent() {
           <h1 className="text-2xl sm:text-3xl font-black text-black tracking-tight">
             Track Your Package
           </h1>
-          <p className="text-xs sm:text-sm text-neutral-500 max-w-md mx-auto">
-            Check real-time milestone progress and courier status for your order.
+          <p className="text-sm text-neutral-700 max-w-md mx-auto">
+            See your order&apos;s payment, packing and delivery status.
           </p>
         </div>
 
@@ -382,50 +388,22 @@ function TrackOrderContent() {
                     #{order.order_number}
                   </h2>
 
-                  {/* Clean Status Badge */}
-                  {rawStatus === 'delivered' ? (
-                    <span className="inline-flex items-center gap-1 bg-neutral-100 text-neutral-900 text-xs font-semibold px-2.5 py-0.5 rounded-full">
-                      <svg className="w-3.5 h-3.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20 6L9 17l-5-5" />
-                      </svg>
-                      <span>Delivered</span>
-                    </span>
-                  ) : rawStatus === 'shipped' ? (
-                    <span className="inline-flex items-center gap-1 bg-neutral-100 text-neutral-900 text-xs font-semibold px-2.5 py-0.5 rounded-full">
-                      <Truck className="w-3.5 h-3.5 text-blue-600" />
-                      <span>In Transit</span>
-                    </span>
-                  ) : isPaid ? (
-                    <span className="inline-flex items-center gap-1 bg-neutral-100 text-neutral-900 text-xs font-semibold px-2.5 py-0.5 rounded-full">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <span>Processing Order</span>
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 bg-neutral-100 text-neutral-800 text-xs font-semibold px-2.5 py-0.5 rounded-full">
-                      <Clock className="w-3.5 h-3.5 text-amber-600" />
-                      <span>Awaiting Payment</span>
+                  {statusDisplay && (
+                    <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded-full ${STATUS_TONE_CLASSES[statusDisplay.tone]}`}>
+                      {statusDisplay.label}
                     </span>
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5 text-xs text-neutral-500">
-                  <span>Placed {new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                  <div className="group relative cursor-pointer inline-flex items-center text-neutral-400 hover:text-black">
-                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10"/>
-                      <path d="M12 16v-4M12 8h.01"/>
-                    </svg>
-                    <div className="pointer-events-none absolute bottom-full left-0 mb-2 hidden group-hover:block z-20 w-48 bg-neutral-900 text-white text-[10px] rounded-xl px-2.5 py-1.5 shadow-lg text-left">
-                      Fulfilled via SHOP.CO Regional Logistics Hub in Enugu Central.
-                      <div className="absolute top-full left-4 border-4 border-transparent border-t-neutral-900" />
-                    </div>
-                  </div>
-                </div>
+                <p className="text-sm text-neutral-700">
+                  Placed {toDate(order.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {statusDisplay?.description ? ` · ${statusDisplay.description}` : ''}
+                </p>
               </div>
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2 w-full sm:w-auto">
-                {!isPaid ? (
+                {canPay ? (
                   <>
                     <button
                       onClick={() => setShowPaymentModal(true)}
@@ -440,7 +418,7 @@ function TrackOrderContent() {
                       href={whatsAppInvoiceUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="p-2.5 bg-neutral-100 hover:bg-neutral-200 text-[#25D366] rounded-full transition-colors relative group shrink-0"
+                      className="p-2.5 bg-neutral-100 hover:bg-neutral-200 text-[#128C7E] rounded-full transition-colors relative group shrink-0"
                       aria-label="Send invoice to WhatsApp"
                     >
                       <WhatsAppIcon className="w-4 h-4" />
@@ -451,7 +429,7 @@ function TrackOrderContent() {
                   </>
                 ) : (
                   <a
-                    href={`https://wa.me/2349066707079?text=${encodeURIComponent(`Hello Support! I am checking on my paid order #${order.order_number}.`)}`}
+                    href={buildWhatsAppMessageUrl(`Hello! I'm checking on my order #${order.order_number}.`, supportPhone)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-semibold px-4 py-2 rounded-full text-xs transition-colors"
@@ -463,7 +441,15 @@ function TrackOrderContent() {
               </div>
             </div>
 
+            {isOffTrack && statusDisplay && (
+              <div role="status" className={`rounded-3xl p-5 sm:p-6 ${STATUS_TONE_CLASSES[statusDisplay.tone]}`}>
+                <p className="font-bold">{statusDisplay.label}</p>
+                <p className="text-sm mt-1">{statusDisplay.description}</p>
+              </div>
+            )}
+
             {/* Stepper Progress Timeline with Connected Bar */}
+            {!isOffTrack && (
             <div className="bg-white rounded-3xl p-5 sm:p-7 border border-neutral-100 shadow-sm space-y-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -473,16 +459,6 @@ function TrackOrderContent() {
                   <p className="text-xs text-neutral-400">Step {currentStage + 1} of 5 &bull; {steps[currentStage]?.title}</p>
                 </div>
 
-                <div className="group relative cursor-pointer text-neutral-400 hover:text-black">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 16v-4M12 8h.01"/>
-                  </svg>
-                  <div className="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:block z-20 w-52 bg-neutral-900 text-white text-[10px] rounded-xl px-2.5 py-1.5 shadow-lg text-left">
-                    Milestones are updated in real-time as parcels are packaged, scanned, and dispatched.
-                    <div className="absolute top-full right-2 border-4 border-transparent border-t-neutral-900" />
-                  </div>
-                </div>
               </div>
 
               {/* Connected Visual Progression Bar */}
@@ -543,6 +519,8 @@ function TrackOrderContent() {
                 </div>
               </div>
             </div>
+
+            )}
 
             {/* Courier & Shipment Details Card (if shipment exists) */}
             {order.shipment && (
@@ -608,7 +586,7 @@ function TrackOrderContent() {
                     </span>
                     <span className="text-xs font-bold text-neutral-800">
                       {order.shipment.shipped_at
-                        ? new Date(order.shipment.shipped_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+                        ? toDate(order.shipment.shipped_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })
                         : 'Scheduled for dispatch'}
                     </span>
                   </div>
@@ -619,7 +597,7 @@ function TrackOrderContent() {
                     </span>
                     <span className="text-xs font-bold text-neutral-800">
                       {order.shipment.delivered_at
-                        ? `Delivered on ${new Date(order.shipment.delivered_at).toLocaleDateString('en-GB', { dateStyle: 'medium' })}`
+                        ? `Delivered on ${toDate(order.shipment.delivered_at).toLocaleDateString('en-NG', { dateStyle: 'medium' })}`
                         : order.shipment.status === 'out_for_delivery'
                         ? 'Out for Delivery today'
                         : 'Package in transit'}
@@ -671,7 +649,7 @@ function TrackOrderContent() {
                     </div>
                   )}
                   <div className="flex justify-between">
-                    <span>Delivery ({order.shipping_zone_snapshot?.zone_name || 'Standard'}):</span>
+                    <span>Delivery{order.shipping_zone_snapshot?.name ? ` (${order.shipping_zone_snapshot.name})` : ''}:</span>
                     <span className="font-semibold text-black">{formatPrice(order.shipping_fee)}</span>
                   </div>
                   <div className="flex justify-between text-sm font-extrabold text-black pt-2 border-t border-neutral-200">
@@ -719,7 +697,7 @@ function TrackOrderContent() {
                       ) : (
                         <Clock className="w-3 h-3 text-amber-700" />
                       )}
-                      <span>{isPaid ? 'Settled' : 'Pending'}</span>
+                      <span>{isPaid ? 'Paid' : order.payment_status === 'cancelled' ? 'Cancelled' : 'Not paid'}</span>
                     </span>
                   </div>
 
@@ -727,7 +705,7 @@ function TrackOrderContent() {
                     <div className="flex justify-between">
                       <span>Gateway:</span>
                       <span className="font-medium text-black">
-                        {getGatewayDisplayName(order.payment?.provider) || (isPaid ? 'Settled' : 'Not Selected')}
+                        {order.payment?.provider ? getGatewayDisplayName(order.payment.provider) : 'Not started'}
                       </span>
                     </div>
                     {order.payment?.provider_reference && (
@@ -742,25 +720,20 @@ function TrackOrderContent() {
                       <div className="flex justify-between text-[11px]">
                         <span>Verified:</span>
                         <span className="text-neutral-500">
-                          {new Date(order.payment.verified_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          {toDate(order.payment.verified_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Trust Badge */}
-                <div className="bg-neutral-50 rounded-2xl p-4 border border-neutral-200 text-xs text-neutral-500 flex items-center gap-2.5">
-                  <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <span>Buyer Protection active. Direct dispatch from Enugu logistics hub.</span>
-                </div>
               </div>
             </div>
           </div>
         )}
 
         {/* Payment Options Modal */}
-        {showPaymentModal && order && !isPaid && (
+        {showPaymentModal && order && canPay && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div
               className="fixed inset-0 bg-black/60 backdrop-blur-sm animate-fade"
@@ -793,112 +766,40 @@ function TrackOrderContent() {
                 </div>
               )}
 
-              <div className="space-y-3">
-                {/* Kora Option */}
-                <div
-                  onClick={() => setSelectedGateway('kora')}
-                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3.5 ${
-                    selectedGateway === 'kora'
-                      ? 'border-[#055B5C] bg-[#055B5C]/5 shadow-sm'
-                      : 'border-neutral-200 hover:border-neutral-300 bg-white'
-                  }`}
-                >
-                  <div
-                    className={`size-4 rounded-full border-2 mt-0.5 flex items-center justify-center shrink-0 ${
-                      selectedGateway === 'kora' ? 'border-[#055B5C]' : 'border-neutral-400'
-                    }`}
+              <fieldset className="space-y-3">
+                <legend className="sr-only">Payment method</legend>
+                {paymentMethods.length === 0 && <p className="text-sm text-neutral-700">Loading payment methods…</p>}
+                {paymentMethods.map((m) => (
+                  <label
+                    key={m.id}
+                    className="p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3.5 border-neutral-200 hover:border-neutral-300 has-[:checked]:border-black has-[:checked]:bg-neutral-50"
                   >
-                    {selectedGateway === 'kora' && (
-                      <div className="size-2 rounded-full bg-[#055B5C]" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-bold text-sm text-black">Kora Checkout</span>
-                      <span className="text-[10px] font-semibold bg-[#055B5C]/10 text-[#055B5C] px-2 py-0.5 rounded-full">
-                        Card & Bank
-                      </span>
-                    </div>
-                    <p className="text-xs text-neutral-500 mt-0.5">
-                      Pay with Debit/Credit Card, Bank Transfer, or Virtual Account. Instant verification.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Monnify Option */}
-                <div
-                  onClick={() => setSelectedGateway('monnify')}
-                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3.5 ${
-                    selectedGateway === 'monnify'
-                      ? 'border-[#002244] bg-[#002244]/5 shadow-sm'
-                      : 'border-neutral-200 hover:border-neutral-300 bg-white'
-                  }`}
-                >
-                  <div
-                    className={`size-4 rounded-full border-2 mt-0.5 flex items-center justify-center shrink-0 ${
-                      selectedGateway === 'monnify' ? 'border-[#002244]' : 'border-neutral-400'
-                    }`}
-                  >
-                    {selectedGateway === 'monnify' && (
-                      <div className="size-2 rounded-full bg-[#002244]" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-bold text-sm text-black">Monnify Gateway</span>
-                      <span className="text-[10px] font-semibold bg-[#002244]/10 text-[#002244] px-2 py-0.5 rounded-full">
-                        Card & USSD
-                      </span>
-                    </div>
-                    <p className="text-xs text-neutral-500 mt-0.5">
-                      Pay via Cards, Bank Transfer, or USSD (*737#, etc.). Instant settlement.
-                    </p>
-                  </div>
-                </div>
-
-                {/* WhatsApp Support Option */}
-                <div
-                  onClick={() => setSelectedGateway('whatsapp')}
-                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3.5 ${
-                    selectedGateway === 'whatsapp'
-                      ? 'border-[#25D366] bg-[#25D366]/5 shadow-sm'
-                      : 'border-neutral-200 hover:border-neutral-300 bg-white'
-                  }`}
-                >
-                  <div
-                    className={`size-4 rounded-full border-2 mt-0.5 flex items-center justify-center shrink-0 ${
-                      selectedGateway === 'whatsapp' ? 'border-[#25D366]' : 'border-neutral-400'
-                    }`}
-                  >
-                    {selectedGateway === 'whatsapp' && (
-                      <div className="size-2 rounded-full bg-[#25D366]" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-bold text-sm text-black">WhatsApp Support</span>
-                      <span className="text-[10px] font-semibold bg-[#25D366]/10 text-[#25D366] px-2 py-0.5 rounded-full">
-                        Chat Agent
-                      </span>
-                    </div>
-                    <p className="text-xs text-neutral-500 mt-0.5">
-                      Chat directly with customer support to pay via bank transfer and confirm receipt manually.
-                    </p>
-                  </div>
-                </div>
-              </div>
+                    <input
+                      type="radio"
+                      name="track-payment-method"
+                      className="mt-1"
+                      checked={selectedGateway === m.id}
+                      onChange={() => setSelectedGateway(m.id)}
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block font-bold text-sm text-black">{m.name}</span>
+                      <span className="block text-xs text-neutral-700 mt-0.5">{m.description}</span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
 
               <div className="pt-2">
                 <button
                   type="button"
                   onClick={() => handleInitiatePayment()}
-                  disabled={Boolean(isInitializingPayment)}
+                  disabled={Boolean(isInitializingPayment) || !selectedGateway}
                   className={`w-full py-3.5 rounded-full text-white font-bold text-xs sm:text-sm transition-all shadow-md flex items-center justify-center gap-2 ${
                     selectedGateway === 'kora'
                       ? 'bg-[#055B5C] hover:bg-[#044748]'
                       : selectedGateway === 'monnify'
                       ? 'bg-[#002244] hover:bg-[#001730]'
-                      : 'bg-[#25D366] hover:bg-[#1EBE5D]'
+                      : 'bg-[#1DA851] hover:bg-[#178a43]'
                   } disabled:opacity-60`}
                 >
                   {isInitializingPayment ? (

@@ -1,10 +1,19 @@
 /**
- * WhatsApp Helper Utilities for Order Invoices (Pre-Payment), Receipts (Post-Payment), and Support.
- * Official Support WhatsApp: +2349066707079
+ * WhatsApp helpers for order invoices (before payment), receipts (after payment) and support.
+ * The store's number comes from the backend (STORE_WHATSAPP_PHONE via /checkout/payment-methods);
+ * the constant below is only a fallback until that has loaded.
  */
 
 export const SUPPORT_WHATSAPP_NUMBER = '2349066707079';
 export const SUPPORT_PHONE_FORMATTED = '+234 906 670 7079';
+
+/** Normalise a configured phone number ("+234 906 ...", "0906...") to wa.me digits. */
+export function toWhatsAppDigits(phone?: string | null): string {
+  const digits = (phone || '').replace(/D/g, '');
+  if (!digits) return SUPPORT_WHATSAPP_NUMBER;
+  if (digits.startsWith('0') && digits.length === 11) return `234${digits.slice(1)}`;
+  return digits;
+}
 
 export interface WhatsAppOrderItem {
   name: string;
@@ -47,10 +56,7 @@ function formatCurrency(amount: number): string {
  * Proforma Invoice sent BEFORE payment is completed.
  * Includes complete itemized product list, pricing, subtotal, delivery, and total.
  */
-export function buildWhatsAppInvoiceUrl(
-  order: WhatsAppOrderDetails,
-  baseUrl?: string
-): string {
+export function buildWhatsAppInvoiceUrl(order: WhatsAppOrderDetails, supportPhone?: string | null): string {
   const customerName = order.shipping_address?.full_name || 'Customer';
   const deliveryCity = [order.shipping_address?.city, order.shipping_address?.state]
     .filter(Boolean)
@@ -101,20 +107,16 @@ export function buildWhatsAppInvoiceUrl(
   lines.push(``);
   lines.push(`I would like to verify payment or complete it via direct bank transfer. Please assist me!`);
 
-  return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(lines.join('\n'))}`;
+  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(lines.join('\n'))}`;
 }
 
 /**
  * Official Payment Receipt sent AFTER payment is confirmed.
  */
-export function buildWhatsAppReceiptUrl(
-  order: WhatsAppOrderDetails,
-  baseUrl?: string
-): string {
-  const origin = baseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
-  const trackingUrl = order.guest_access_token
-    ? `${origin}/track-order?order=${encodeURIComponent(order.order_number)}&token=${encodeURIComponent(order.guest_access_token)}`
-    : `${origin}/track-order?order=${encodeURIComponent(order.order_number)}`;
+export function buildWhatsAppReceiptUrl(order: WhatsAppOrderDetails, supportPhone?: string | null): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  // The guest access key is never put in a chat message; the store tracks orders by number.
+  const trackingUrl = `${origin}/track-order?order=${encodeURIComponent(order.order_number)}`;
 
   const customerName = order.shipping_address?.full_name || 'Customer';
   const deliveryCity = [order.shipping_address?.city, order.shipping_address?.state]
@@ -167,15 +169,15 @@ export function buildWhatsAppReceiptUrl(
   lines.push(``);
   lines.push(`Please provide packaging and courier dispatch updates. Thank you!`);
 
-  return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(lines.join('\n'))}`;
+  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(lines.join('\n'))}`;
 }
 
 /**
  * Builds pre-payment trust link for customers who wish to inquire before placing an order.
  */
-export function buildWhatsAppPrePaymentHelpUrl(orderNumber?: string, totalAmount?: number): string {
+export function buildWhatsAppPrePaymentHelpUrl(orderNumber?: string, totalAmount?: number, supportPhone?: string | null): string {
   if (orderNumber && totalAmount) {
-    return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(
+    return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(
       [
         `*SHOP.CO — CUSTOMER INQUIRY*`,
         `━━━━━━━━━━━━━━━━━━━━`,
@@ -189,7 +191,21 @@ export function buildWhatsAppPrePaymentHelpUrl(orderNumber?: string, totalAmount
     )}`;
   }
 
-  return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(
+  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(
     'Hello SHOP.CO Support! I am shopping on your store and have an inquiry.'
   )}`;
+}
+
+/** Plain support chat link with a prefilled message. */
+export function buildWhatsAppMessageUrl(message: string, supportPhone?: string | null): string {
+  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(message)}`;
+}
+
+/** Human-readable form of the configured support number. */
+export function formatSupportPhone(supportPhone?: string | null): string {
+  const digits = toWhatsAppDigits(supportPhone);
+  if (digits.startsWith('234') && digits.length === 13) {
+    return `+234 ${digits.slice(3, 6)} ${digits.slice(6, 9)} ${digits.slice(9)}`;
+  }
+  return `+${digits}`;
 }

@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
-import { useCart } from '@/context/CartContext';
+import { useCart, MAX_QUANTITY_PER_LINE } from '@/context/CartContext';
 import { useWishlist } from '@/context/WishlistContext';
 import { ImageGallery } from '@/components/product/ImageGallery';
-import { VariantSelector } from '@/components/product/VariantSelector';
+import { VariantSelector, OptionState } from '@/components/product/VariantSelector';
 import { StickyMobileBar } from '@/components/product/StickyMobileBar';
 import { ProductTabs } from '@/components/product/ProductTabs';
 import { ProductCard } from '@/components/ui/ProductCard';
@@ -16,7 +16,7 @@ import {
   getProducts,
   mapApiProductToStorefront,
 } from '@/lib/api-client';
-import { Product, ProductColor, SizeType } from '@/types';
+import { Product, ProductColor, ProductVariant } from '@/types';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   StarIcon,
@@ -35,8 +35,8 @@ export default function ProductDetailPage() {
   const [product, setProduct] = useState<Product | null>(null);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
 
-  const [selectedColor, setSelectedColor] = useState<ProductColor>({ name: 'Default', hex: '#000000' });
-  const [selectedSize, setSelectedSize] = useState<SizeType | string>('Medium');
+  const [selectedColor, setSelectedColor] = useState<ProductColor | null>(null);
+  const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
 
   const { addToCart } = useCart();
@@ -52,13 +52,13 @@ export default function ProductDetailPage() {
       const apiData = await getProductDetail(id);
       const mapped = mapApiProductToStorefront(apiData);
       setProduct(mapped);
+      setQuantity(1);
 
-      if (mapped.colors && mapped.colors.length > 0) {
-        setSelectedColor(mapped.colors[0]);
-      }
-      if (mapped.sizes && mapped.sizes.length > 0) {
-        setSelectedSize(mapped.sizes[0]);
-      }
+      // Start on the first option that is actually in stock (else the first option).
+      const variants = mapped.variants ?? [];
+      const initial = variants.find((v) => v.stock > 0) ?? variants[0];
+      setSelectedColor(initial ? initial.color : null);
+      setSelectedSize(initial ? initial.size : null);
 
       // Fetch related products in same category
       try {
@@ -96,14 +96,69 @@ export default function ProductDetailPage() {
     router.prefetch('/cart');
   }, [router]);
 
+  const variants: ProductVariant[] = useMemo(() => product?.variants ?? [], [product]);
+
+  const selectedVariant = useMemo(
+    () => variants.find((v) => v.color.name === selectedColor?.name && v.size === selectedSize) ?? null,
+    [variants, selectedColor, selectedSize]
+  );
+
+  // Which sizes exist (and are in stock) for the selected colour.
+  const sizeStates = useMemo(() => {
+    const states: Record<string, OptionState> = {};
+    for (const size of product?.sizes ?? []) {
+      const v = variants.find((x) => x.size === size && x.color.name === selectedColor?.name);
+      states[size] = !v ? 'unavailable' : v.stock > 0 ? 'available' : 'sold-out';
+    }
+    return states;
+  }, [product, variants, selectedColor]);
+
+  const colorInStock = useMemo(() => {
+    const map: Record<string, boolean> = {};
+    for (const v of variants) {
+      map[v.color.name] = (map[v.color.name] ?? false) || v.stock > 0;
+    }
+    return map;
+  }, [variants]);
+
+  const handleSelectColor = (color: ProductColor) => {
+    setSelectedColor(color);
+    setQuantity(1);
+    // Keep the size if it exists in the new colour, otherwise move to its best available size.
+    const forColor = variants.filter((v) => v.color.name === color.name);
+    if (!forColor.some((v) => v.size === selectedSize)) {
+      const best = forColor.find((v) => v.stock > 0) ?? forColor[0];
+      setSelectedSize(best ? best.size : null);
+    }
+  };
+
+  const handleSelectSize = (size: string) => {
+    setSelectedSize(size);
+    setQuantity(1);
+  };
+
+  const stock = selectedVariant?.stock ?? 0;
+  const maxQuantity = Math.max(1, Math.min(MAX_QUANTITY_PER_LINE, stock));
+  const canPurchase = !!selectedVariant && stock > 0;
+  const displayPrice = selectedVariant?.price ?? product?.price ?? 0;
+  const stockMessage = !selectedVariant
+    ? variants.length === 0
+      ? 'This product is not available to order right now.'
+      : 'Choose an available colour and size.'
+    : stock === 0
+      ? 'Sold out in this colour and size.'
+      : stock <= 5
+        ? `Only ${stock} left in this size.`
+        : null;
+
   const handleAddToCart = () => {
-    if (!product) return;
-    addToCart(product, selectedColor, selectedSize, quantity);
+    if (!product || !selectedVariant || !canPurchase) return;
+    addToCart(product, selectedVariant, quantity);
   };
 
   const handleBuyNow = () => {
-    if (!product) return;
-    addToCart(product, selectedColor, selectedSize, quantity);
+    if (!product || !selectedVariant || !canPurchase) return;
+    addToCart(product, selectedVariant, quantity);
     router.push('/cart');
   };
 
@@ -177,9 +232,7 @@ export default function ProductDetailPage() {
 
   if (!product) return null;
 
-  const isDigital = (product as any).product_type === 'digital';
-  const totalStock = (product as any).total_stock ?? 10;
-  const inStock = (product as any).in_stock ?? true;
+  const inStock = variants.some((v) => v.stock > 0);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24 md:pb-12">
@@ -194,10 +247,10 @@ export default function ProductDetailPage() {
         </Link>
         <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-400 shrink-0" />
         <Link
-          href={`/category?cat=${product.category}`}
+          href={`/category?category=${product.category}`}
           className="hover:text-black transition-colors capitalize"
         >
-          {product.category}
+          {product.categoryName || product.category}
         </Link>
         <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-400 shrink-0" />
         <span className="text-black font-medium truncate">{product.name}</span>
@@ -229,34 +282,37 @@ export default function ProductDetailPage() {
               {product.name}
             </h1>
 
-            {/* Star Rating */}
-            <div className="flex items-center gap-2 mt-3">
-              <div className="flex items-center text-[#FFC633]">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <span
-                    key={i}
-                    className={i < Math.floor(product.rating) ? 'text-[#FFC633]' : 'text-neutral-300'}
-                  >
-                    <HugeiconsIcon
-                      icon={StarIcon}
-                      size={16}
-                      className={i < Math.floor(product.rating) ? 'fill-current' : ''}
-                    />
-                  </span>
-                ))}
+            {/* Star Rating (only from approved reviews) */}
+            {product.reviewCount > 0 ? (
+              <div className="flex items-center gap-2 mt-3" aria-label={`Rated ${product.rating.toFixed(1)} out of 5 from ${product.reviewCount} reviews`}>
+                <div className="flex items-center text-[#FFC633]" aria-hidden="true">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <span key={i} className={i < Math.round(product.rating) ? 'text-[#FFC633]' : 'text-neutral-300'}>
+                      <HugeiconsIcon
+                        icon={StarIcon}
+                        size={16}
+                        className={i < Math.round(product.rating) ? 'fill-current' : ''}
+                      />
+                    </span>
+                  ))}
+                </div>
+                <span className="text-sm font-medium text-black">
+                  {product.rating.toFixed(1)}/<span className="text-neutral-500">5</span>
+                </span>
+                <span className="text-xs text-neutral-500">
+                  ({product.reviewCount} {product.reviewCount === 1 ? 'review' : 'reviews'})
+                </span>
               </div>
-              <span className="text-sm font-medium text-black">
-                {product.rating}/<span className="text-neutral-400">5</span>
-              </span>
-              <span className="text-xs text-neutral-400">({product.reviewCount} reviews)</span>
-            </div>
+            ) : (
+              <p className="mt-3 text-xs text-neutral-500">No reviews yet</p>
+            )}
 
             {/* Price Row (NGN) */}
             <div className="flex items-center gap-3 mt-3">
               <span className="font-bold text-2xl sm:text-3xl text-black">
-                {formatPrice(product.price)}
+                {formatPrice(displayPrice)}
               </span>
-              {product.originalPrice && product.originalPrice > product.price && (
+              {product.originalPrice && product.originalPrice > displayPrice && (
                 <>
                   <span className="font-bold text-2xl sm:text-3xl text-neutral-400 line-through">
                     {formatPrice(product.originalPrice)}
@@ -279,13 +335,18 @@ export default function ProductDetailPage() {
           {/* Modular Variant Selector Component */}
           <VariantSelector
             colors={product.colors}
-            sizes={product.sizes}
+            sizes={product.sizes as string[]}
             selectedColor={selectedColor}
-            onSelectColor={setSelectedColor}
+            onSelectColor={handleSelectColor}
             selectedSize={selectedSize}
-            onSelectSize={setSelectedSize}
+            onSelectSize={handleSelectSize}
+            sizeStates={sizeStates}
+            colorInStock={colorInStock}
             quantity={quantity}
+            maxQuantity={maxQuantity}
             onQuantityChange={setQuantity}
+            canPurchase={canPurchase}
+            stockMessage={stockMessage}
             onAddToCart={handleAddToCart}
             onBuyNow={handleBuyNow}
             isWishlisted={isWishlisted}
@@ -314,8 +375,9 @@ export default function ProductDetailPage() {
       {/* Sticky Mobile Purchase Bar */}
       <StickyMobileBar
         product={product}
-        selectedColor={selectedColor}
-        selectedSize={selectedSize}
+        price={displayPrice}
+        selectionLabel={selectedVariant ? `${selectedVariant.size} • ${selectedVariant.color.name}` : 'Choose colour & size'}
+        canPurchase={canPurchase}
         onAddToCart={handleAddToCart}
         onBuyNow={handleBuyNow}
       />

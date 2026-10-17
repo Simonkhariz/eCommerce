@@ -309,6 +309,16 @@ class AuthService
     private function startSession(array $user, ?string $previousToken): array
     {
         $scope = SessionCookie::scopeForRole((string) $user['role']);
+
+        // Orders placed as a guest with this (verified) email now belong to the account, so they
+        // appear under "My orders". Unverified emails never claim orders.
+        if ($user['role'] === 'customer' && !empty($user['email_verified_at'])) {
+            $this->db->execute(
+                "UPDATE `orders` SET `user_id` = ? WHERE `user_id` IS NULL AND LOWER(`guest_email`) = ?",
+                'is',
+                [(int) $user['id'], strtolower((string) $user['email'])]
+            );
+        }
         $sessionData = $this->sessionRepo->rotate(
             $previousToken,
             (int) $user['id'],

@@ -44,6 +44,19 @@ class ProductRepository
             }
         }
 
+        // Specific products (e.g. a customer's saved wishlist)
+        if (!empty($filters['ids']) && is_array($filters['ids'])) {
+            $ids = array_values(array_filter(array_map('intval', $filters['ids']), static fn (int $v): bool => $v > 0));
+            if (empty($ids)) {
+                $ids = [0];
+            }
+            $conditions[] = "p.id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")";
+            foreach ($ids as $pid) {
+                $params[] = $pid;
+                $types .= "i";
+            }
+        }
+
         // Search query
         if (!empty($filters['search'])) {
             $searchTerm = '%' . trim((string) $filters['search']) . '%';
@@ -168,9 +181,16 @@ class ProductRepository
             case 'rating_desc':
                 $sortOrder = "p.rating_avg DESC, p.rating_count DESC";
                 break;
+            case 'best_selling':
             case 'popular':
             case 'popularity':
-                $sortOrder = "p.rating_count DESC, p.rating_avg DESC";
+                // Real sales: units on paid orders (refunded/cancelled orders don't count).
+                $sortOrder = "(SELECT COALESCE(SUM(oi.quantity), 0)
+                               FROM order_items oi
+                               JOIN orders o ON o.id = oi.order_id
+                               WHERE oi.product_id = p.id
+                                 AND o.payment_status IN ('successful', 'partially_refunded')
+                                 AND o.order_status NOT IN ('cancelled', 'refunded')) DESC, p.created_at DESC";
                 break;
             case 'newest':
             case 'latest':
@@ -272,6 +292,7 @@ class ProductRepository
                     $row['discount_percent'] = 0;
                 }
             }
+            unset($row);
         }
 
         return [
@@ -339,6 +360,7 @@ class ProductRepository
             $v['stock_quantity'] = (int) $v['stock_quantity'];
             $v['in_stock'] = $v['stock_quantity'] > 0;
         }
+        unset($v);
 
         // 3. Collect distinct sizes and color options for convenient frontend consumption
         $colors = [];
@@ -398,7 +420,109 @@ class ProductRepository
      */
     public function getTopSelling(int $limit = 4): array
     {
-        return $this->listPublished(['sort' => 'popular'], 1, $limit)['items'];
+        return $this->listPublished(['sort' => 'best_selling'], 1, $limit)['items'];
+    }
+
+    /**
+     * Filter options that actually exist in the published catalogue.
+     *
+     * @return array{colors: array, sizes: string[], dress_styles: string[], price: array{min: float, max: float}}
+     */
+    public function facets(): array
+    {
+        $published = "p.status = 'published' AND p.product_type = 'physical'";
+
+        $colors = $this->db->fetchAll(
+            "SELECT pv.color_name AS name, MIN(pv.color_hex) AS hex, COUNT(DISTINCT p.id) AS product_count
+             FROM product_variants pv
+             JOIN products p ON p.id = pv.product_id
+             WHERE {$published} AND pv.is_active = 1
+             GROUP BY pv.color_name
+             ORDER BY product_count DESC, pv.color_name ASC"
+        );
+        foreach ($colors as &$c) {
+            $c['product_count'] = (int) $c['product_count'];
+        }
+        unset($c);
+
+        $sizeRows = $this->db->fetchAll(
+            "SELECT DISTINCT pv.size AS size
+             FROM product_variants pv
+             JOIN products p ON p.id = pv.product_id
+             WHERE {$published} AND pv.is_active = 1"
+        );
+        $order = ['XX-Small', 'X-Small', 'XS', 'Small', 'S', 'Medium', 'M', 'Large', 'L', 'X-Large', 'XL', 'XX-Large', 'XXL', '3X-Large', '3XL', '4X-Large', '4XL', 'One Size'];
+        $sizes = array_column($sizeRows, 'size');
+        usort($sizes, static function (string $a, string $b) use ($order): int {
+            $ia = array_search($a, $order, true);
+            $ib = array_search($b, $order, true);
+            if ($ia !== false && $ib !== false) {
+                return $ia <=> $ib;
+            }
+            if ($ia !== false) {
+                return -1;
+            }
+            if ($ib !== false) {
+                return 1;
+            }
+            return strnatcasecmp($a, $b);
+        });
+
+        $styleRows = $this->db->fetchAll(
+            "SELECT DISTINCT p.dress_style AS style FROM products p
+             WHERE {$published} AND p.dress_style IS NOT NULL AND p.dress_style <> ''
+             ORDER BY p.dress_style ASC"
+        );
+
+        $price = $this->db->fetchOne(
+            "SELECT COALESCE(MIN(p.base_price), 0) AS min_price, COALESCE(MAX(p.base_price), 0) AS max_price
+             FROM products p WHERE {$published}"
+        );
+
+        return [
+            'colors' => $colors,
+            'sizes' => $sizes,
+            'dress_styles' => array_column($styleRows, 'style'),
+            'price' => ['min' => (float) $price['min_price'], 'max' => (float) $price['max_price']],
+        ];
+    }
+
+    /**
+     * Approved reviews for a product, newest first.
+     */
+    public function approvedReviews(int $productId, int $limit = 50): array
+    {
+        $rows = $this->db->fetchAll(
+            "SELECT id, author_name AS author, rating, title, comment, is_verified_purchase AS verified, created_at
+             FROM reviews
+             WHERE product_id = ? AND status = 'approved'
+             ORDER BY created_at DESC
+             LIMIT ?",
+            'ii',
+            [$productId, $limit]
+        );
+        foreach ($rows as &$r) {
+            $r['id'] = (int) $r['id'];
+            $r['rating'] = (int) $r['rating'];
+            $r['verified'] = (bool) $r['verified'];
+        }
+        unset($r);
+        return $rows;
+    }
+
+    /**
+     * Recompute a product's rating from its approved reviews.
+     */
+    public function refreshRating(int $productId): void
+    {
+        $this->db->execute(
+            "UPDATE products
+             SET rating_avg = (SELECT COALESCE(ROUND(AVG(rating), 2), 0) FROM reviews WHERE product_id = ? AND status = 'approved'),
+                 rating_count = (SELECT COUNT(*) FROM reviews WHERE product_id = ? AND status = 'approved')
+             WHERE id = ?",
+            'iii',
+            [$productId, $productId, $productId]
+        );
     }
 
     /**
@@ -538,6 +662,7 @@ class ProductRepository
                     $hasLowStock = true;
                 }
             }
+            unset($v);
             $row['variants'] = $variants;
             $row['variants_count'] = count($variants);
             $row['is_low_stock'] = $hasLowStock;
@@ -555,6 +680,7 @@ class ProductRepository
 
             $row['digital_deliverable'] = null;
         }
+        unset($row);
 
         return [
             'items' => $rows,

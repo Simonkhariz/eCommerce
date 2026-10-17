@@ -4,7 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useWishlist } from '@/context/WishlistContext';
-import { useCart } from '@/context/CartContext';
+import { formatPrice } from '@/lib/currency';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Cancel01Icon,
@@ -16,14 +16,8 @@ import {
 
 export const WishlistDrawer: React.FC = () => {
   const { wishlist, isWishlistOpen, closeWishlist, removeFromWishlist } = useWishlist();
-  const { addToCart } = useCart();
 
   if (!isWishlistOpen) return null;
-
-  const handleMoveToCart = (product: any) => {
-    addToCart(product, product.colors[0], product.sizes[0] || 'Medium', 1);
-    removeFromWishlist(product.id);
-  };
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden animate-in fade-in duration-200">
@@ -87,10 +81,10 @@ export const WishlistDrawer: React.FC = () => {
                     {product.category}
                   </p>
                   <div className="flex items-center gap-2 mt-1.5">
-                    <span className="font-bold text-sm text-black">${product.price}</span>
-                    {product.originalPrice && (
-                      <span className="text-xs text-neutral-400 line-through">
-                        ${product.originalPrice}
+                    <span className="font-bold text-sm text-black">{formatPrice(product.price)}</span>
+                    {product.originalPrice && product.originalPrice > product.price && (
+                      <span className="text-xs text-neutral-500 line-through">
+                        {formatPrice(product.originalPrice)}
                       </span>
                     )}
                   </div>
@@ -98,14 +92,15 @@ export const WishlistDrawer: React.FC = () => {
 
                 {/* Actions */}
                 <div className="flex flex-col gap-2 shrink-0">
-                  <button
-                    onClick={() => handleMoveToCart(product)}
+                  <Link
+                    href={`/products/${product.slug}`}
+                    onClick={closeWishlist}
                     className="bg-black text-white hover:bg-neutral-800 p-2 rounded-xl text-xs font-semibold flex items-center gap-1 shadow-sm transition-colors"
-                    title="Move to cart"
+                    aria-label={`Choose size and colour for ${product.name}`}
                   >
                     <HugeiconsIcon icon={ShoppingBag01Icon} size={14} />
-                    <span>Move</span>
-                  </button>
+                    <span>Choose</span>
+                  </Link>
                   <button
                     onClick={() => removeFromWishlist(product.id)}
                     className="text-neutral-400 hover:text-red-500 p-1.5 self-center transition-colors"
