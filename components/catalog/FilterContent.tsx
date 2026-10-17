@@ -1,8 +1,8 @@
-'use client';
-
 import React, { useState } from 'react';
 import { CATEGORIES_LIST, DRESS_STYLES, FILTER_COLORS, FILTER_SIZES } from '@/data/mockData';
 import { FilterState } from '@/types';
+import { ApiCategory } from '@/lib/api-client';
+import { formatPrice } from '@/lib/currency';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   ArrowRight01Icon,
@@ -17,6 +17,7 @@ interface FilterContentProps {
   onApply?: () => void;
   onReset?: () => void;
   isMobile?: boolean;
+  categories?: ApiCategory[];
 }
 
 export const FilterContent: React.FC<FilterContentProps> = ({
@@ -25,6 +26,7 @@ export const FilterContent: React.FC<FilterContentProps> = ({
   onApply,
   onReset,
   isMobile = false,
+  categories,
 }) => {
   const [priceOpen, setPriceOpen] = useState(true);
   const [colorsOpen, setColorsOpen] = useState(true);
@@ -32,28 +34,36 @@ export const FilterContent: React.FC<FilterContentProps> = ({
   const [dressStyleOpen, setDressStyleOpen] = useState(true);
 
   const toggleColor = (colorName: string) => {
-    const updated = filters.selectedColors.includes(colorName)
-      ? filters.selectedColors.filter((c) => c !== colorName)
+    const isPresent = filters.selectedColors.some(
+      (c) => c.toLowerCase() === colorName.toLowerCase()
+    );
+    const updated = isPresent
+      ? filters.selectedColors.filter((c) => c.toLowerCase() !== colorName.toLowerCase())
       : [...filters.selectedColors, colorName];
     onFilterChange({ selectedColors: updated });
   };
 
   const toggleSize = (sizeName: string) => {
-    const updated = filters.selectedSizes.includes(sizeName)
-      ? filters.selectedSizes.filter((s) => s !== sizeName)
+    const isPresent = filters.selectedSizes.some(
+      (s) => s.toLowerCase() === sizeName.toLowerCase()
+    );
+    const updated = isPresent
+      ? filters.selectedSizes.filter((s) => s.toLowerCase() !== sizeName.toLowerCase())
       : [...filters.selectedSizes, sizeName];
     onFilterChange({ selectedSizes: updated });
   };
 
   const handleCategorySelect = (categorySlug: string) => {
     onFilterChange({
-      category: filters.category === categorySlug ? null : categorySlug,
+      category:
+        filters.category?.toLowerCase() === categorySlug.toLowerCase() ? null : categorySlug,
     });
   };
 
   const handleDressStyleSelect = (styleSlug: string) => {
     onFilterChange({
-      dressStyle: filters.dressStyle === styleSlug ? null : styleSlug,
+      dressStyle:
+        filters.dressStyle?.toLowerCase() === styleSlug.toLowerCase() ? null : styleSlug,
     });
   };
 
@@ -79,8 +89,11 @@ export const FilterContent: React.FC<FilterContentProps> = ({
 
       {/* Category List */}
       <div className="space-y-3 pb-6 border-b border-neutral-200">
-        {CATEGORIES_LIST.map((cat) => {
-          const isActive = filters.category === cat.slug;
+        {(categories && categories.length > 0
+          ? categories.map((c) => ({ label: c.name, slug: c.slug }))
+          : CATEGORIES_LIST
+        ).map((cat) => {
+          const isActive = filters.category?.toLowerCase() === cat.slug.toLowerCase();
           return (
             <button
               key={cat.slug}
@@ -122,16 +135,16 @@ export const FilterContent: React.FC<FilterContentProps> = ({
           <div className="space-y-4">
             <input
               type="range"
-              min={50}
-              max={350}
-              step={10}
+              min={0}
+              max={50000}
+              step={1000}
               value={filters.maxPrice}
               onChange={(e) => onFilterChange({ maxPrice: Number(e.target.value) })}
               className="w-full"
             />
             <div className="flex items-center justify-between text-sm font-semibold text-neutral-800">
-              <span>${filters.minPrice}</span>
-              <span>${filters.maxPrice}</span>
+              <span>{formatPrice(filters.minPrice)}</span>
+              <span>{formatPrice(filters.maxPrice)}</span>
             </div>
           </div>
         )}
@@ -156,7 +169,9 @@ export const FilterContent: React.FC<FilterContentProps> = ({
         {colorsOpen && (
           <div className="grid grid-cols-5 gap-3">
             {FILTER_COLORS.map((col) => {
-              const isSelected = filters.selectedColors.includes(col.name);
+              const isSelected = filters.selectedColors.some(
+                (c) => c.toLowerCase() === col.name.toLowerCase()
+              );
               const isWhite = col.hex.toLowerCase() === '#ffffff';
               return (
                 <button
@@ -202,7 +217,9 @@ export const FilterContent: React.FC<FilterContentProps> = ({
         {sizeOpen && (
           <div className="flex flex-wrap gap-2">
             {FILTER_SIZES.map((size) => {
-              const isSelected = filters.selectedSizes.includes(size);
+              const isSelected = filters.selectedSizes.some(
+                (s) => s.toLowerCase() === size.toLowerCase()
+              );
               return (
                 <button
                   key={size}
@@ -240,7 +257,7 @@ export const FilterContent: React.FC<FilterContentProps> = ({
         {dressStyleOpen && (
           <div className="space-y-3">
             {DRESS_STYLES.map((style) => {
-              const isActive = filters.dressStyle === style.slug;
+              const isActive = filters.dressStyle?.toLowerCase() === style.slug.toLowerCase();
               return (
                 <button
                   key={style.slug}

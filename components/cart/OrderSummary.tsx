@@ -9,6 +9,7 @@ import {
   Tick02Icon,
   Cancel01Icon,
 } from '@hugeicons/core-free-icons';
+import { formatPrice } from '@/lib/currency';
 
 interface OrderSummaryProps {
   onCheckout: () => void;
@@ -28,17 +29,23 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
 
   const [promoInput, setPromoInput] = useState('');
   const [promoError, setPromoError] = useState('');
+  const [isApplying, setIsApplying] = useState(false);
 
-  const handleApplyPromo = (e: React.FormEvent) => {
+  const handleApplyPromo = async (e: React.FormEvent) => {
     e.preventDefault();
     setPromoError('');
-    if (!promoInput.trim()) return;
+    if (!promoInput.trim() || isApplying) return;
 
-    const result = applyPromoCode(promoInput);
-    if (!result.success) {
-      setPromoError(result.message);
-    } else {
-      setPromoInput('');
+    setIsApplying(true);
+    try {
+      const result = await applyPromoCode(promoInput);
+      if (!result.success) {
+        setPromoError(result.message);
+      } else {
+        setPromoInput('');
+      }
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -50,26 +57,26 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
       <div className="space-y-4 text-sm sm:text-base">
         <div className="flex items-center justify-between text-neutral-600">
           <span>Subtotal</span>
-          <span className="font-bold text-black">${subtotal}</span>
+          <span className="font-bold text-black">{formatPrice(subtotal)}</span>
         </div>
 
         <div className="flex items-center justify-between text-neutral-600">
           <span>
             Discount {appliedPromo ? `(-${appliedPromo.discountPercent}%)` : '(-0%)'}
           </span>
-          <span className="font-bold text-red-500">-${discountAmount}</span>
+          <span className="font-bold text-red-500">-{formatPrice(discountAmount)}</span>
         </div>
 
         <div className="flex items-center justify-between text-neutral-600">
           <span>Delivery Fee</span>
-          <span className="font-bold text-black">${deliveryFee}</span>
+          <span className="font-bold text-black">{formatPrice(deliveryFee)}</span>
         </div>
 
         <hr className="border-neutral-200" />
 
         <div className="flex items-center justify-between text-base sm:text-lg">
           <span className="font-medium text-black">Total</span>
-          <span className="font-bold text-xl sm:text-2xl text-black">${total}</span>
+          <span className="font-bold text-xl sm:text-2xl text-black">{formatPrice(total)}</span>
         </div>
       </div>
 
@@ -112,9 +119,10 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
 
               <button
                 type="submit"
-                className="bg-black text-white hover:bg-neutral-800 text-xs sm:text-sm font-semibold px-6 sm:px-8 py-3 sm:py-3.5 rounded-full transition-colors shrink-0"
+                disabled={isApplying}
+                className="bg-black text-white hover:bg-neutral-800 disabled:opacity-50 text-xs sm:text-sm font-semibold px-6 sm:px-8 py-3 sm:py-3.5 rounded-full transition-colors shrink-0"
               >
-                Apply
+                {isApplying ? 'Applying...' : 'Apply'}
               </button>
             </div>
 
@@ -132,7 +140,7 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
       <button
         disabled={items.length === 0}
         onClick={onCheckout}
-        className="w-full bg-black text-white hover:bg-neutral-800 disabled:opacity-50 font-semibold py-4 rounded-full transition-all shadow-lg flex items-center justify-center gap-2 text-sm sm:text-base group"
+        className="w-full bg-black text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-black font-semibold py-4 rounded-full transition-all shadow-lg flex items-center justify-center gap-2 text-sm sm:text-base group"
       >
         <span>Go to Checkout</span>
         <HugeiconsIcon

@@ -2,12 +2,16 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { PRODUCTS } from '@/data/mockData';
+import { Product } from '@/types';
 import { ProductCard } from '@/components/ui/ProductCard';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { FireIcon, Clock01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
 
-export const FlashDeals: React.FC = () => {
+interface FlashDealsProps {
+  products?: Product[];
+}
+
+export const FlashDeals: React.FC<FlashDealsProps> = ({ products }) => {
   // 24-hour dynamic countdown timer simulation
   const [timeLeft, setTimeLeft] = useState({
     hours: 14,
@@ -31,10 +35,14 @@ export const FlashDeals: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // Filter products with high discounts for the flash sale
-  const flashProducts = PRODUCTS.filter(
-    (p) => (p.discountPercent && p.discountPercent >= 20) || p.isTopSelling
-  ).slice(0, 4);
+  // Use live products passed from homepage API
+  const flashProducts = products && products.length > 0
+    ? products.slice(0, 4)
+    : [];
+
+  if (flashProducts.length === 0) {
+    return null;
+  }
 
   return (
     <section className="py-12 sm:py-16 bg-neutral-50/70 border-y border-neutral-100">
@@ -46,7 +54,7 @@ export const FlashDeals: React.FC = () => {
               <HugeiconsIcon icon={FireIcon} size={14} className="text-red-600 animate-bounce" />
               Limited Time Deals
             </div>
-            <h2 className="font-integral text-2xl sm:text-4xl text-black">
+            <h2 className="font-integral text-2xl sm:text-4xl lg:text-5xl text-black tracking-tight">
               FLASH SALE OFFERS
             </h2>
           </div>

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Product, ProductColor, SizeType } from '@/types';
+import { formatPrice } from '@/lib/currency';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ShoppingBag01Icon, FireIcon } from '@hugeicons/core-free-icons';
 
@@ -27,10 +28,10 @@ export const StickyMobileBar: React.FC<StickyMobileBarProps> = ({
           {selectedSize} • {selectedColor.name}
         </span>
         <div className="flex items-baseline gap-1.5">
-          <span className="font-bold text-lg text-black">${product.price}</span>
-          {product.originalPrice && (
+          <span className="font-bold text-lg text-black">{formatPrice(product.price)}</span>
+          {product.originalPrice && product.originalPrice > product.price && (
             <span className="text-xs text-neutral-400 line-through">
-              ${product.originalPrice}
+              {formatPrice(product.originalPrice)}
             </span>
           )}
         </div>

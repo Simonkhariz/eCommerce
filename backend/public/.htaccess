@@ -1,0 +1,25 @@
+# -----------------------------------------------------------------------------
+# Apache URL Rewriting for Shop.co PHP API
+# Directs all requests to index.php while preserving static files
+# -----------------------------------------------------------------------------
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Prevent directory browsing
+    Options -Indexes
+
+    # Pass Authorization header to PHP
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Redirect all non-existent files and directories to index.php
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# Block hidden files (.env, .git)
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>

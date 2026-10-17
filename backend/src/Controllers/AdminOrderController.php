@@ -1,0 +1,284 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Controllers;
+
+use App\Database\Database;
+use App\Middleware\JsonBodyMiddleware;
+use App\Services\FulfillmentService;
+use App\Support\RequestContext;
+use App\Support\Response;
+use InvalidArgumentException;
+
+/**
+ * Administrative controller for order management, physical parcel fulfillment,
+ * carrier tracking updates, and delivery lifecycle confirmation.
+ */
+class AdminOrderController
+{
+    private Database $db;
+    private FulfillmentService $fulfillmentService;
+
+    public function __construct(?Database $db = null, ?FulfillmentService $fulfillmentService = null)
+    {
+        $this->db = $db ?? Database::getInstance();
+        $this->fulfillmentService = $fulfillmentService ?? new FulfillmentService($this->db);
+    }
+
+    /**
+     * List all orders for administrative fulfillment queue with filters and pagination.
+     * GET /api/v1/admin/orders
+     */
+    public function index(): void
+    {
+        $status = isset($_GET['status']) ? trim(strtolower((string) $_GET['status'])) : '';
+        $search = isset($_GET['search']) ? trim((string) $_GET['search']) : '';
+        $page = max(1, (int) ($_GET['page'] ?? 1));
+        $perPage = min(100, max(1, (int) ($_GET['per_page'] ?? 20)));
+        $offset = ($page - 1) * $perPage;
+
+        $where = [];
+        $params = [];
+        $types = '';
+
+        if ($status !== '' && $status !== 'all') {
+            $where[] = "o.order_status = ?";
+            $params[] = $status;
+            $types .= 's';
+        }
+
+        if ($search !== '') {
+            $where[] = "(o.order_number LIKE ? OR o.guest_email LIKE ? OR o.shipping_address_snapshot LIKE ? OR s.tracking_number LIKE ?)";
+            $term = "%{$search}%";
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+            $types .= 'ssss';
+        }
+
+        $whereSql = !empty($where) ? "WHERE " . implode(' AND ', $where) : "";
+
+        // Total count
+        $countSql = "SELECT COUNT(DISTINCT o.id) as total
+                     FROM `orders` o
+                     LEFT JOIN `shipments` s ON s.order_id = o.id
+                     {$whereSql}";
+        $totalRow = $this->db->fetchOne($countSql, $types, $params);
+        $total = (int) ($totalRow['total'] ?? 0);
+
+        // Fetch orders
+        $sql = "SELECT o.id, o.order_number, o.user_id, o.guest_email, o.order_status, o.payment_status,
+                       o.currency, o.subtotal, o.shipping_fee, o.discount_amount, o.grand_total,
+                       o.shipping_zone_snapshot, o.shipping_address_snapshot, o.created_at, o.updated_at,
+                       p.provider as payment_provider, p.provider_reference as payment_reference, p.status as payment_record_status,
+                       s.carrier, s.tracking_number, s.tracking_url, s.status as shipment_status, s.shipped_at, s.delivered_at,
+                       (SELECT COUNT(*) FROM `order_items` oi WHERE oi.order_id = o.id) as items_count,
+                       (SELECT SUM(quantity) FROM `order_items` oi WHERE oi.order_id = o.id) as total_quantity
+                FROM `orders` o
+                LEFT JOIN `payments` p ON p.order_id = o.id AND p.id = (SELECT MAX(p2.id) FROM `payments` p2 WHERE p2.order_id = o.id)
+                LEFT JOIN `shipments` s ON s.order_id = o.id AND s.id = (SELECT MAX(s2.id) FROM `shipments` s2 WHERE s2.order_id = o.id)
+                {$whereSql}
+                ORDER BY o.id DESC
+                LIMIT {$perPage} OFFSET {$offset}";
+
+        $orders = $this->db->fetchAll($sql, $types, $params);
+
+        foreach ($orders as &$ord) {
+            $ord['id'] = (int) $ord['id'];
+            $ord['user_id'] = $ord['user_id'] ? (int) $ord['user_id'] : null;
+            $ord['subtotal'] = (float) $ord['subtotal'];
+            $ord['shipping_fee'] = (float) $ord['shipping_fee'];
+            $ord['discount_amount'] = (float) $ord['discount_amount'];
+            $ord['grand_total'] = (float) $ord['grand_total'];
+            $ord['items_count'] = (int) $ord['items_count'];
+            $ord['total_quantity'] = (int) ($ord['total_quantity'] ?? 0);
+
+            $ord['shipping_zone_snapshot'] = is_string($ord['shipping_zone_snapshot'])
+                ? json_decode($ord['shipping_zone_snapshot'], true)
+                : $ord['shipping_zone_snapshot'];
+
+            $ord['shipping_address_snapshot'] = is_string($ord['shipping_address_snapshot'])
+                ? json_decode($ord['shipping_address_snapshot'], true)
+                : $ord['shipping_address_snapshot'];
+        }
+
+        Response::paginated($orders, $total, $page, $perPage, 'Fulfillment order list retrieved.');
+    }
+
+    /**
+     * Get single order detail with item snapshots, shipments, history, and audit log.
+     * GET /api/v1/admin/orders/{idOrNumber}
+     */
+    public function show(array $params): void
+    {
+        $idOrNumber = trim((string) ($params['idOrNumber'] ?? $params['id'] ?? ''));
+        $order = $this->resolveOrder($idOrNumber);
+
+        $orderSnapshot = $this->fulfillmentService->loadOrderSnapshot((int) $order['id']);
+
+        // Attach administrative audit trail
+        $auditLogs = $this->db->fetchAll(
+            "SELECT a.id, a.admin_id, a.action, a.before_state, a.after_state, a.ip_address, a.created_at, u.full_name as admin_name, u.email as admin_email
+             FROM `admin_audit_logs` a
+             LEFT JOIN `users` u ON u.id = a.admin_id
+             WHERE a.entity_type = 'order' AND a.entity_id = ?
+             ORDER BY a.id DESC",
+            's',
+            [(string) $order['id']]
+        );
+
+        foreach ($auditLogs as &$log) {
+            $log['before_state'] = is_string($log['before_state']) ? json_decode($log['before_state'], true) : $log['before_state'];
+            $log['after_state'] = is_string($log['after_state']) ? json_decode($log['after_state'], true) : $log['after_state'];
+        }
+        $orderSnapshot['audit_logs'] = $auditLogs;
+
+        Response::success($orderSnapshot, 'Order fulfillment detail retrieved.');
+    }
+
+    /**
+     * Transition order status adhering to the allowed state machine.
+     * PATCH /api/v1/admin/orders/{idOrNumber}/status
+     */
+    public function updateStatus(array $params): void
+    {
+        $idOrNumber = trim((string) ($params['idOrNumber'] ?? $params['id'] ?? ''));
+        $order = $this->resolveOrder($idOrNumber);
+
+        $body = JsonBodyMiddleware::getBody();
+        $newStatus = trim((string) ($body['status'] ?? ''));
+        $comment = isset($body['comment']) ? trim((string) $body['comment']) : null;
+
+        if ($newStatus === '') {
+            Response::error('New status is required.', 422, 'VALIDATION_ERROR', ['status' => 'Status field cannot be empty.']);
+        }
+
+        $adminUser = RequestContext::getUser();
+        $adminId = $adminUser ? (int) $adminUser['id'] : null;
+
+        try {
+            $updated = $this->fulfillmentService->updateOrderStatus((int) $order['id'], $newStatus, $comment, $adminId);
+            Response::success($updated, "Order status successfully transitioned to '{$newStatus}'.");
+        } catch (InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422, 'INVALID_TRANSITION');
+        } catch (\Throwable $e) {
+            error_log("[Status Transition Failure] " . $e->getMessage());
+            Response::error("Failed to update order status: " . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+        }
+    }
+
+    /**
+     * Settle and confirm manual / WhatsApp payment for an order.
+     * POST /api/v1/admin/orders/{idOrNumber}/confirm-payment
+     */
+    public function confirmPayment(array $params): void
+    {
+        $idOrNumber = trim((string) ($params['idOrNumber'] ?? $params['id'] ?? ''));
+        $order = $this->resolveOrder($idOrNumber);
+
+        $body = JsonBodyMiddleware::getBody();
+        $reference = trim((string) ($body['reference'] ?? ''));
+        $note = trim((string) ($body['note'] ?? $body['comment'] ?? ''));
+        $comment = "Payment confirmed via WhatsApp / manual bank transfer by admin.";
+        if ($note !== '') {
+            $comment .= " Note: {$note}.";
+        }
+        if ($reference !== '') {
+            $comment .= " Reference: {$reference}.";
+        }
+
+        $adminUser = RequestContext::getUser();
+        $adminId = $adminUser ? (int) $adminUser['id'] : null;
+
+        try {
+            $updated = $this->fulfillmentService->updateOrderStatus((int) $order['id'], 'paid', $comment, $adminId);
+            Response::success($updated, 'WhatsApp payment confirmed and order settled as paid successfully.');
+        } catch (InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422, 'INVALID_TRANSITION');
+        } catch (\Throwable $e) {
+            error_log("[Payment Confirmation Failure] " . $e->getMessage());
+            Response::error("Failed to confirm payment: " . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+        }
+    }
+
+    /**
+     * Assign or update physical shipment details (carrier, tracking number, tracking URL, shipped status).
+     * POST /api/v1/admin/orders/{idOrNumber}/shipment
+     */
+    public function assignShipment(array $params): void
+    {
+        $idOrNumber = trim((string) ($params['idOrNumber'] ?? $params['id'] ?? ''));
+        $order = $this->resolveOrder($idOrNumber);
+
+        $body = JsonBodyMiddleware::getBody();
+        $carrier = trim((string) ($body['carrier'] ?? ''));
+
+        if ($carrier === '') {
+            Response::error('Carrier name is required.', 422, 'VALIDATION_ERROR', ['carrier' => 'Please provide a valid carrier (e.g. GIG Logistics, DHL, FedEx).']);
+        }
+
+        $adminUser = RequestContext::getUser();
+        $adminId = $adminUser ? (int) $adminUser['id'] : null;
+
+        try {
+            $updated = $this->fulfillmentService->assignShipment((int) $order['id'], $body, $adminId);
+            Response::success($updated, 'Shipment details and carrier tracking updated successfully.');
+        } catch (InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422, 'VALIDATION_ERROR');
+        } catch (\Throwable $e) {
+            error_log("[Shipment Assignment Failure] " . $e->getMessage());
+            Response::error("Failed to assign shipment: " . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+        }
+    }
+
+    /**
+     * Confirm delivery of physical parcel.
+     * POST /api/v1/admin/orders/{idOrNumber}/delivered
+     */
+    public function confirmDelivery(array $params): void
+    {
+        $idOrNumber = trim((string) ($params['idOrNumber'] ?? $params['id'] ?? ''));
+        $order = $this->resolveOrder($idOrNumber);
+
+        $body = JsonBodyMiddleware::getBody();
+        $comment = isset($body['comment']) ? trim((string) $body['comment']) : null;
+
+        $adminUser = RequestContext::getUser();
+        $adminId = $adminUser ? (int) $adminUser['id'] : null;
+
+        try {
+            $updated = $this->fulfillmentService->markDelivered((int) $order['id'], $comment, $adminId);
+            Response::success($updated, 'Order delivery confirmed successfully.');
+        } catch (InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422, 'INVALID_TRANSITION');
+        } catch (\Throwable $e) {
+            error_log("[Delivery Confirmation Failure] " . $e->getMessage());
+            Response::error("Failed to confirm delivery: " . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+        }
+    }
+
+    /**
+     * Resolve order from sequential ID or public order number.
+     */
+    private function resolveOrder(string $idOrNumber): array
+    {
+        if ($idOrNumber === '') {
+            Response::error('Order identifier is required.', 422, 'VALIDATION_ERROR');
+        }
+
+        $order = null;
+        if (is_numeric($idOrNumber)) {
+            $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `id` = ?", 'i', [(int) $idOrNumber]);
+        } else {
+            $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$idOrNumber]);
+        }
+
+        if ($order === null) {
+            Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
+        }
+
+        return $order;
+    }
+}

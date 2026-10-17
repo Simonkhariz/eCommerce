@@ -1,7 +1,6 @@
-'use client';
-
 import React from 'react';
 import { FilterState } from '@/types';
+import { ApiCategory } from '@/lib/api-client';
 import { FilterContent } from './FilterContent';
 
 interface FilterSidebarProps {
@@ -9,6 +8,7 @@ interface FilterSidebarProps {
   onFilterChange: (newFilters: Partial<FilterState>) => void;
   onReset: () => void;
   onApply: () => void;
+  categories?: ApiCategory[];
 }
 
 export const FilterSidebar: React.FC<FilterSidebarProps> = ({
@@ -16,6 +16,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
   onFilterChange,
   onReset,
   onApply,
+  categories,
 }) => {
   return (
     <aside className="hidden lg:block w-72 shrink-0">
@@ -26,6 +27,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
           onReset={onReset}
           onApply={onApply}
           isMobile={false}
+          categories={categories}
         />
       </div>
     </aside>

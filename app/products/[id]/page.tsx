@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
-import { PRODUCTS } from '@/data/mockData';
 import { useCart } from '@/context/CartContext';
 import { useWishlist } from '@/context/WishlistContext';
 import { ImageGallery } from '@/components/product/ImageGallery';
@@ -11,48 +10,176 @@ import { VariantSelector } from '@/components/product/VariantSelector';
 import { StickyMobileBar } from '@/components/product/StickyMobileBar';
 import { ProductTabs } from '@/components/product/ProductTabs';
 import { ProductCard } from '@/components/ui/ProductCard';
+import { formatPrice } from '@/lib/currency';
+import {
+  getProductDetail,
+  getProducts,
+  mapApiProductToStorefront,
+} from '@/lib/api-client';
+import { Product, ProductColor, SizeType } from '@/types';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { StarIcon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
-import { ProductColor, SizeType } from '@/types';
+import {
+  StarIcon,
+  ArrowRight01Icon,
+  Alert02Icon,
+  RefreshIcon,
+} from '@hugeicons/core-free-icons';
 
 export default function ProductDetailPage() {
   const router = useRouter();
   const params = useParams();
   const id = params?.id as string;
 
-  const product = PRODUCTS.find((p) => p.slug === id || p.id === id);
-  const currentProduct = product || PRODUCTS[0];
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<{ notFound?: boolean; message: string } | null>(null);
+  const [product, setProduct] = useState<Product | null>(null);
+  const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
+
+  const [selectedColor, setSelectedColor] = useState<ProductColor>({ name: 'Default', hex: '#000000' });
+  const [selectedSize, setSelectedSize] = useState<SizeType | string>('Medium');
+  const [quantity, setQuantity] = useState(1);
 
   const { addToCart } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
 
-  const [selectedColor, setSelectedColor] = useState<ProductColor>(
-    currentProduct.colors[0]
-  );
-  const [selectedSize, setSelectedSize] = useState<SizeType | string>(
-    currentProduct.sizes[0] || 'Medium'
-  );
-  const [quantity, setQuantity] = useState(1);
+  // Load product detail from API
+  const loadProduct = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
 
-  const relatedProducts = PRODUCTS.filter((p) => p.id !== currentProduct.id).slice(0, 4);
+    try {
+      const apiData = await getProductDetail(id);
+      const mapped = mapApiProductToStorefront(apiData);
+      setProduct(mapped);
+
+      if (mapped.colors && mapped.colors.length > 0) {
+        setSelectedColor(mapped.colors[0]);
+      }
+      if (mapped.sizes && mapped.sizes.length > 0) {
+        setSelectedSize(mapped.sizes[0]);
+      }
+
+      // Fetch related products in same category
+      try {
+        const relatedRes = await getProducts({
+          category: mapped.category,
+          per_page: 5,
+        });
+        const mappedRelated = relatedRes.items
+          .filter((item) => String(item.id) !== mapped.id && item.slug !== mapped.slug)
+          .slice(0, 4)
+          .map(mapApiProductToStorefront);
+        setRelatedProducts(mappedRelated);
+      } catch (e) {
+        // Non-blocking for related products
+      }
+    } catch (err: any) {
+      console.error('Error loading product details:', err);
+      const is404 = err.statusCode === 404 || err.errorCode === 'RESOURCE_NOT_FOUND';
+      setError({
+        notFound: is404,
+        message: is404
+          ? `Product "${id}" was not found or is no longer available.`
+          : err.message || 'Unable to connect to catalogue API.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    loadProduct();
+  }, [loadProduct]);
 
   useEffect(() => {
     router.prefetch('/cart');
   }, [router]);
 
   const handleAddToCart = () => {
-    addToCart(currentProduct, selectedColor, selectedSize, quantity);
+    if (!product) return;
+    addToCart(product, selectedColor, selectedSize, quantity);
   };
 
   const handleBuyNow = () => {
-    addToCart(currentProduct, selectedColor, selectedSize, quantity);
+    if (!product) return;
+    addToCart(product, selectedColor, selectedSize, quantity);
     router.push('/cart');
   };
 
-  const isWishlisted = isInWishlist(currentProduct.id);
+  const isWishlisted = product ? isInWishlist(product.id) : false;
   const handleToggleWishlist = () => {
-    toggleWishlist(currentProduct);
+    if (product) toggleWishlist(product);
   };
+
+  // 1. Loading State Skeleton
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-pulse">
+        <div className="h-4 bg-neutral-200 rounded w-48 mb-8" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
+          <div className="lg:col-span-6 aspect-square bg-neutral-200 rounded-2xl" />
+          <div className="lg:col-span-6 space-y-4">
+            <div className="h-8 bg-neutral-200 rounded w-3/4" />
+            <div className="h-5 bg-neutral-200 rounded w-1/4" />
+            <div className="h-8 bg-neutral-200 rounded w-1/3" />
+            <div className="h-20 bg-neutral-200 rounded w-full" />
+            <div className="h-12 bg-neutral-200 rounded-full w-full" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Missing Product / 404 State
+  if (error?.notFound) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-20 text-center">
+        <div className="w-16 h-16 bg-neutral-100 text-neutral-400 rounded-full flex items-center justify-center mx-auto mb-4">
+          <HugeiconsIcon icon={Alert02Icon} size={32} />
+        </div>
+        <h1 className="font-integral text-2xl sm:text-3xl text-black mb-3">PRODUCT NOT FOUND</h1>
+        <p className="text-neutral-600 text-sm sm:text-base max-w-md mx-auto mb-8">
+          The item you are looking for does not exist, has been removed, or is currently unpublished.
+        </p>
+        <Link
+          href="/category"
+          className="inline-flex items-center gap-2 bg-black text-white hover:bg-neutral-800 font-semibold px-8 py-3.5 rounded-full text-sm transition-all shadow-md"
+        >
+          <span>Explore All Products</span>
+          <HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+        </Link>
+      </div>
+    );
+  }
+
+  // 3. Connection / API Error State (Never silently fall back to fake prices)
+  if (error) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-20 text-center">
+        <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <HugeiconsIcon icon={Alert02Icon} size={32} />
+        </div>
+        <h1 className="font-integral text-2xl sm:text-3xl text-red-900 mb-3">CANNOT LOAD PRODUCT</h1>
+        <p className="text-red-700 text-sm sm:text-base max-w-md mx-auto mb-8">
+          {error.message} Real prices and inventory cannot be loaded without an active connection to the backend.
+        </p>
+        <button
+          onClick={loadProduct}
+          className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold px-8 py-3.5 rounded-full text-sm transition-all shadow-md"
+        >
+          <HugeiconsIcon icon={RefreshIcon} size={16} />
+          <span>Retry Connection</span>
+        </button>
+      </div>
+    );
+  }
+
+  if (!product) return null;
+
+  const isDigital = (product as any).product_type === 'digital';
+  const totalStock = (product as any).total_stock ?? 10;
+  const inStock = (product as any).in_stock ?? true;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24 md:pb-12">
@@ -67,13 +194,13 @@ export default function ProductDetailPage() {
         </Link>
         <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-400 shrink-0" />
         <Link
-          href={`/category?cat=${currentProduct.category}`}
+          href={`/category?cat=${product.category}`}
           className="hover:text-black transition-colors capitalize"
         >
-          {currentProduct.category}
+          {product.category}
         </Link>
         <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-400 shrink-0" />
-        <span className="text-black font-medium truncate">{currentProduct.name}</span>
+        <span className="text-black font-medium truncate">{product.name}</span>
       </nav>
 
       {/* Main Grid: Gallery on Left + Info & Buying Actions on Right */}
@@ -81,16 +208,25 @@ export default function ProductDetailPage() {
         {/* Left Gallery (6 cols on desktop) */}
         <div className="lg:col-span-6 w-full">
           <ImageGallery
-            images={currentProduct.images}
-            productName={currentProduct.name}
+            images={product.images}
+            productName={product.name}
           />
         </div>
 
         {/* Right Info & Buying Actions (6 cols on desktop) */}
         <div className="lg:col-span-6 space-y-6">
           <div>
+            {/* Badges: Digital Asset / Stock Status */}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              {!inStock && (
+                <span className="inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600">
+                  Out of Stock
+                </span>
+              )}
+            </div>
+
             <h1 className="font-integral text-2xl sm:text-4xl text-black leading-tight uppercase font-black">
-              {currentProduct.name}
+              {product.name}
             </h1>
 
             {/* Star Rating */}
@@ -99,48 +235,51 @@ export default function ProductDetailPage() {
                 {Array.from({ length: 5 }).map((_, i) => (
                   <span
                     key={i}
-                    className={i < Math.floor(currentProduct.rating) ? 'text-[#FFC633]' : 'text-neutral-300'}
+                    className={i < Math.floor(product.rating) ? 'text-[#FFC633]' : 'text-neutral-300'}
                   >
                     <HugeiconsIcon
                       icon={StarIcon}
                       size={16}
-                      className={i < Math.floor(currentProduct.rating) ? 'fill-current' : ''}
+                      className={i < Math.floor(product.rating) ? 'fill-current' : ''}
                     />
                   </span>
                 ))}
               </div>
               <span className="text-sm font-medium text-black">
-                {currentProduct.rating}/<span className="text-neutral-400">5</span>
+                {product.rating}/<span className="text-neutral-400">5</span>
               </span>
+              <span className="text-xs text-neutral-400">({product.reviewCount} reviews)</span>
             </div>
 
-            {/* Price Row */}
+            {/* Price Row (NGN) */}
             <div className="flex items-center gap-3 mt-3">
               <span className="font-bold text-2xl sm:text-3xl text-black">
-                ${currentProduct.price}
+                {formatPrice(product.price)}
               </span>
-              {currentProduct.originalPrice && (
+              {product.originalPrice && product.originalPrice > product.price && (
                 <>
                   <span className="font-bold text-2xl sm:text-3xl text-neutral-400 line-through">
-                    ${currentProduct.originalPrice}
+                    {formatPrice(product.originalPrice)}
                   </span>
-                  <span className="bg-[#FF3333]/10 text-[#FF3333] text-sm font-bold px-3 py-1 rounded-full">
-                    -{currentProduct.discountPercent}%
-                  </span>
+                  {product.discountPercent && (
+                    <span className="bg-[#FF3333]/10 text-[#FF3333] text-sm font-bold px-3 py-1 rounded-full">
+                      -{product.discountPercent}%
+                    </span>
+                  )}
                 </>
               )}
             </div>
 
             {/* Description */}
             <p className="text-neutral-600 text-sm sm:text-base leading-relaxed mt-4 pb-6 border-b border-neutral-200">
-              {currentProduct.description}
+              {product.description}
             </p>
           </div>
 
           {/* Modular Variant Selector Component */}
           <VariantSelector
-            colors={currentProduct.colors}
-            sizes={currentProduct.sizes}
+            colors={product.colors}
+            sizes={product.sizes}
             selectedColor={selectedColor}
             onSelectColor={setSelectedColor}
             selectedSize={selectedSize}
@@ -156,23 +295,25 @@ export default function ProductDetailPage() {
       </div>
 
       {/* Tabs: Specifications Accordion, Rating & Reviews with modal, FAQs */}
-      <ProductTabs product={currentProduct} />
+      <ProductTabs product={product} />
 
       {/* You Might Also Like Section */}
-      <section className="mt-20 pt-10 border-t border-neutral-200">
-        <h2 className="font-integral text-2xl sm:text-4xl text-center text-black mb-10">
-          YOU MIGHT ALSO LIKE
-        </h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-          {relatedProducts.map((p) => (
-            <ProductCard key={p.id} product={p} />
-          ))}
-        </div>
-      </section>
+      {relatedProducts.length > 0 && (
+        <section className="mt-20 pt-10 border-t border-neutral-200">
+          <h2 className="font-integral text-2xl sm:text-4xl text-center text-black mb-10">
+            YOU MIGHT ALSO LIKE
+          </h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+            {relatedProducts.map((p) => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Sticky Mobile Purchase Bar */}
       <StickyMobileBar
-        product={currentProduct}
+        product={product}
         selectedColor={selectedColor}
         selectedSize={selectedSize}
         onAddToCart={handleAddToCart}

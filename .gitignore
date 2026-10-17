@@ -26,3 +26,17 @@ yarn-error.log*
 # Local environment
 .env*.local
 .env
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Backend runtime data (logs contain customer PII; uploads are user content)
+backend/storage/logs/*
+backend/storage/framework/*
+!backend/storage/**/.gitkeep
+backend/public/uploads/*
+!backend/public/uploads/.gitkeep
+backend/vendor/
+
+# Scraped third-party template build (kept outside the repo)
+kravio-dashboard.vercel.app/

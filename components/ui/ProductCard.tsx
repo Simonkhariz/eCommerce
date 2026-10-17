@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Product } from '@/types';
+import { formatPrice } from '@/lib/currency';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { StarIcon, ShoppingBag01Icon, FavouriteIcon } from '@hugeicons/core-free-icons';
 import { useCart } from '@/context/CartContext';
@@ -46,6 +47,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
           className="object-cover group-hover:scale-105 transition-transform duration-300"
         />
+
 
         {/* Wishlist Heart Button in Image Corner (Top-Right) */}
         <button
@@ -93,11 +95,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         {/* Pricing */}
         <div className="flex items-baseline sm:items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
           <span className="font-bold text-base sm:text-xl text-black">
-            ${product.price}
+            {formatPrice(product.price)}
           </span>
-          {product.originalPrice && (
+          {product.originalPrice && product.originalPrice > product.price && (
             <span className="font-semibold text-xs sm:text-sm text-neutral-400 line-through">
-              ${product.originalPrice}
+              {formatPrice(product.originalPrice)}
             </span>
           )}
         </div>

@@ -52,7 +52,7 @@ export interface Product {
   rating: number;
   reviewCount: number;
   category: CategoryType | string;
-  dressStyle: DressStyleType;
+  dressStyle: DressStyleType | (DressStyleType | string)[];
   gender: 'men' | 'women' | 'unisex';
   images: string[];
   colors: ProductColor[];

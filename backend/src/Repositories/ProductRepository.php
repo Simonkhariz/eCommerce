@@ -1,0 +1,957 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Repositories;
+
+use App\Database\Database;
+
+class ProductRepository
+{
+    private Database $db;
+
+    public function __construct()
+    {
+        $this->db = Database::getInstance();
+    }
+
+    /**
+     * List published products with dynamic filtering, sorting, and pagination.
+     *
+     * @param array<string, mixed> $filters
+     * @return array{items: array<int, array<string, mixed>>, total: int, page: int, per_page: int, total_pages: int}
+     */
+    public function listPublished(array $filters = [], int $page = 1, int $perPage = 12): array
+    {
+        $page = max(1, $page);
+        $perPage = min(max(1, $perPage), 100);
+        $offset = ($page - 1) * $perPage;
+
+        $conditions = ["p.status = 'published'"];
+        $params = [];
+        $types = "";
+
+        // Category filter (by ID or Slug)
+        if (!empty($filters['category'])) {
+            if (is_numeric($filters['category'])) {
+                $conditions[] = "p.category_id = ?";
+                $params[] = (int) $filters['category'];
+                $types .= "i";
+            } else {
+                $conditions[] = "c.slug = ?";
+                $params[] = (string) $filters['category'];
+                $types .= "s";
+            }
+        }
+
+        // Search query
+        if (!empty($filters['search'])) {
+            $searchTerm = '%' . trim((string) $filters['search']) . '%';
+            $conditions[] = "(p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ? OR p.dress_style LIKE ?)";
+            $params[] = $searchTerm;
+            $params[] = $searchTerm;
+            $params[] = $searchTerm;
+            $params[] = $searchTerm;
+            $types .= "ssss";
+        }
+
+        // Price range
+        if (isset($filters['min_price']) && is_numeric($filters['min_price'])) {
+            $conditions[] = "p.base_price >= ?";
+            $params[] = (float) $filters['min_price'];
+            $types .= "d";
+        }
+        if (isset($filters['max_price']) && is_numeric($filters['max_price'])) {
+            $conditions[] = "p.base_price <= ?";
+            $params[] = (float) $filters['max_price'];
+            $types .= "d";
+        }
+
+        // Dress style filter (case-insensitive)
+        if (!empty($filters['dress_style'])) {
+            $conditions[] = "LOWER(p.dress_style) = LOWER(?)";
+            $params[] = (string) $filters['dress_style'];
+            $types .= "s";
+        }
+
+        // Color filter (matches color names or keyword families via active variants)
+        if (!empty($filters['colors']) || !empty($filters['color'])) {
+            $rawColors = !empty($filters['colors']) 
+                ? (is_array($filters['colors']) ? $filters['colors'] : explode(',', (string) $filters['colors'])) 
+                : [(string) $filters['color']];
+            
+            $colorFamilies = [
+                'black' => ['black', 'onyx', 'pitch', 'midnight', 'charcoal', 'dark', 'ebony', 'gray', 'grey'],
+                'white' => ['white', 'clean', 'sand', 'ivory', 'cream', 'off-white'],
+                'blue' => ['blue', 'navy', 'indigo', 'ocean', 'cobalt', 'royal', 'denim'],
+                'red' => ['red', 'crimson', 'maroon', 'burgundy', 'ruby'],
+                'green' => ['green', 'olive', 'sage', 'emerald', 'mint'],
+                'yellow' => ['yellow', 'mustard', 'gold', 'amber', 'khaki', 'tan'],
+                'orange' => ['orange', 'rust', 'peach', 'coral'],
+                'cyan' => ['cyan', 'teal', 'aqua', 'turquoise', 'multi-color'],
+                'purple' => ['purple', 'violet', 'lavender', 'plum'],
+                'pink' => ['pink', 'rose', 'blush', 'fuchsia'],
+            ];
+
+            $colorConditions = [];
+            foreach ($rawColors as $col) {
+                $trimmed = strtolower(trim($col));
+                if ($trimmed !== '') {
+                    $familyWords = $colorFamilies[$trimmed] ?? [$trimmed];
+                    $subConditions = [];
+                    foreach ($familyWords as $word) {
+                        $subConditions[] = "LOWER(pv_c.color_name) LIKE ?";
+                        $params[] = '%' . $word . '%';
+                        $types .= "s";
+                    }
+                    if (!empty($subConditions)) {
+                        $colorConditions[] = '(' . implode(' OR ', $subConditions) . ')';
+                    }
+                }
+            }
+            if (!empty($colorConditions)) {
+                $colorSql = implode(' OR ', $colorConditions);
+                $conditions[] = "EXISTS (SELECT 1 FROM product_variants pv_c WHERE pv_c.product_id = p.id AND ({$colorSql}))";
+            }
+        }
+
+        // Size filter (matches variant sizes)
+        if (!empty($filters['sizes']) || !empty($filters['size'])) {
+            $rawSizes = !empty($filters['sizes']) 
+                ? (is_array($filters['sizes']) ? $filters['sizes'] : explode(',', (string) $filters['sizes'])) 
+                : [(string) $filters['size']];
+
+            $sizeConditions = [];
+            foreach ($rawSizes as $sz) {
+                $trimmed = trim($sz);
+                if ($trimmed !== '') {
+                    $sizeConditions[] = "LOWER(pv_s.size) = LOWER(?)";
+                    $params[] = $trimmed;
+                    $types .= "s";
+                }
+            }
+            if (!empty($sizeConditions)) {
+                $sizeSql = implode(' OR ', $sizeConditions);
+                $conditions[] = "EXISTS (SELECT 1 FROM product_variants pv_s WHERE pv_s.product_id = p.id AND ({$sizeSql}))";
+            }
+        }
+
+        // On Sale / Discount filter
+        if (!empty($filters['on_sale'])) {
+            $conditions[] = "p.original_price IS NOT NULL AND p.original_price > p.base_price";
+        }
+
+        // Always enforce physical products
+        $conditions[] = "p.product_type = 'physical'";
+
+        // Flash deals or featured
+        if (!empty($filters['is_flash_deal'])) {
+            $conditions[] = "p.is_flash_deal = 1";
+        }
+        if (!empty($filters['is_featured'])) {
+            $conditions[] = "p.is_featured = 1";
+        }
+
+        $whereSql = implode(' AND ', $conditions);
+
+        // Sorting
+        $sortOrder = "p.created_at DESC";
+        $sortKey = $filters['sort'] ?? 'newest';
+        switch ($sortKey) {
+            case 'price_asc':
+                $sortOrder = "p.base_price ASC";
+                break;
+            case 'price_desc':
+                $sortOrder = "p.base_price DESC";
+                break;
+            case 'rating':
+            case 'rating_desc':
+                $sortOrder = "p.rating_avg DESC, p.rating_count DESC";
+                break;
+            case 'popular':
+            case 'popularity':
+                $sortOrder = "p.rating_count DESC, p.rating_avg DESC";
+                break;
+            case 'newest':
+            case 'latest':
+            default:
+                $sortOrder = "p.created_at DESC";
+                break;
+        }
+
+        // 1. Total matching count
+        $countSql = "SELECT COUNT(DISTINCT p.id) AS total
+                     FROM products p
+                     LEFT JOIN categories c ON c.id = p.category_id
+                     WHERE {$whereSql}";
+        $countResult = $this->db->fetchOne($countSql, $types, $params);
+        $total = $countResult ? (int) $countResult['total'] : 0;
+
+        // 2. Paginated rows with category & primary image
+        $itemsSql = "SELECT p.id, p.uuid, p.name, p.slug, p.description, p.product_type,
+                            p.base_price, p.original_price, p.currency, p.sku,
+                            p.rating_avg, p.rating_count, p.is_featured, p.is_flash_deal, p.dress_style,
+                            p.created_at,
+                            c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
+                            (SELECT pi.image_url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.is_primary DESC, pi.display_order ASC LIMIT 1) AS primary_image,
+                            (SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id) AS total_stock
+                     FROM products p
+                     LEFT JOIN categories c ON c.id = p.category_id
+                     WHERE {$whereSql}
+                     ORDER BY {$sortOrder}
+                     LIMIT ? OFFSET ?";
+
+        $itemParams = $params;
+        $itemParams[] = $perPage;
+        $itemParams[] = $offset;
+        $itemTypes = $types . "ii";
+
+        $rows = $this->db->fetchAll($itemsSql, $itemTypes, $itemParams);
+
+        // Format and enrich each product row with colors and sizes from variants
+        if (!empty($rows)) {
+            $productIds = array_column($rows, 'id');
+            $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+            $variantTypes = str_repeat('i', count($productIds));
+            $variantRows = $this->db->fetchAll(
+                "SELECT product_id, color_name, color_hex, size
+                 FROM product_variants
+                 WHERE product_id IN ({$placeholders})
+                 ORDER BY id ASC",
+                $variantTypes,
+                $productIds
+            );
+
+            $colorsByProduct = [];
+            $sizesByProduct = [];
+            foreach ($variantRows as $v) {
+                $pid = (int) $v['product_id'];
+                if (!isset($colorsByProduct[$pid])) {
+                    $colorsByProduct[$pid] = [];
+                }
+                if (!isset($sizesByProduct[$pid])) {
+                    $sizesByProduct[$pid] = [];
+                }
+
+                if (!empty($v['color_name'])) {
+                    $colorKey = strtolower(trim($v['color_name']));
+                    if (!isset($colorsByProduct[$pid][$colorKey])) {
+                        $colorsByProduct[$pid][$colorKey] = [
+                            'name' => trim($v['color_name']),
+                            'hex' => !empty($v['color_hex']) ? trim($v['color_hex']) : '#000000',
+                        ];
+                    }
+                }
+
+                if (!empty($v['size'])) {
+                    $sizeTrim = trim($v['size']);
+                    if (!in_array($sizeTrim, $sizesByProduct[$pid], true)) {
+                        $sizesByProduct[$pid][] = $sizeTrim;
+                    }
+                }
+            }
+
+            foreach ($rows as &$row) {
+                $pid = (int) $row['id'];
+                $row['id'] = $pid;
+                $row['base_price'] = (float) $row['base_price'];
+                $row['original_price'] = $row['original_price'] !== null ? (float) $row['original_price'] : null;
+                $row['rating_avg'] = (float) $row['rating_avg'];
+                $row['rating_count'] = (int) $row['rating_count'];
+                $row['is_featured'] = (bool) $row['is_featured'];
+                $row['is_flash_deal'] = (bool) $row['is_flash_deal'];
+                $row['total_stock'] = (int) $row['total_stock'];
+                $row['in_stock'] = $row['total_stock'] > 0;
+                $row['available_colors'] = isset($colorsByProduct[$pid]) ? array_values($colorsByProduct[$pid]) : [];
+                $row['available_sizes'] = isset($sizesByProduct[$pid]) ? $sizesByProduct[$pid] : [];
+
+                // Calculate discount percentage if original price is set
+                if ($row['original_price'] && $row['original_price'] > $row['base_price']) {
+                    $row['discount_percent'] = (int) round((($row['original_price'] - $row['base_price']) / $row['original_price']) * 100);
+                } else {
+                    $row['discount_percent'] = 0;
+                }
+            }
+        }
+
+        return [
+            'items' => $rows,
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => (int) ceil($total / $perPage),
+        ];
+    }
+
+    /**
+     * Find single published product details with images and variants.
+     */
+    public function findDetail(string $idOrSlug, bool $allowDraft = false): ?array
+    {
+        $statusCondition = $allowDraft ? "1=1" : "p.status = 'published'";
+
+        if (is_numeric($idOrSlug)) {
+            $whereClause = "p.id = ? AND {$statusCondition}";
+            $types = "i";
+            $params = [(int) $idOrSlug];
+        } else {
+            $whereClause = "(p.slug = ? OR p.uuid = ?) AND {$statusCondition}";
+            $types = "ss";
+            $params = [$idOrSlug, $idOrSlug];
+        }
+
+        $sql = "SELECT p.*, c.name AS category_name, c.slug AS category_slug
+                FROM products p
+                LEFT JOIN categories c ON c.id = p.category_id
+                WHERE {$whereClause}
+                LIMIT 1";
+
+        $product = $this->db->fetchOne($sql, $types, $params);
+        if (!$product) {
+            return null;
+        }
+
+        $productId = (int) $product['id'];
+
+        // 1. Fetch images
+        $images = $this->db->fetchAll(
+            "SELECT id, image_url, alt_text, is_primary, display_order
+             FROM product_images
+             WHERE product_id = ?
+             ORDER BY is_primary DESC, display_order ASC",
+            "i",
+            [$productId]
+        );
+
+        // 2. Fetch variants
+        $variants = $this->db->fetchAll(
+            "SELECT id, sku, size, color_name, color_hex, price_override, stock_quantity, low_stock_threshold
+             FROM product_variants
+             WHERE product_id = ?
+             ORDER BY id ASC",
+            "i",
+            [$productId]
+        );
+
+        foreach ($variants as &$v) {
+            $v['id'] = (int) $v['id'];
+            $v['price_override'] = ($v['price_override'] !== null && (float) $v['price_override'] > 0) ? (float) $v['price_override'] : null;
+            $v['stock_quantity'] = (int) $v['stock_quantity'];
+            $v['in_stock'] = $v['stock_quantity'] > 0;
+        }
+
+        // 3. Collect distinct sizes and color options for convenient frontend consumption
+        $colors = [];
+        $sizes = [];
+        foreach ($variants as $v) {
+            $colorKey = $v['color_name'] . '|' . $v['color_hex'];
+            if (!isset($colors[$colorKey])) {
+                $colors[$colorKey] = ['name' => $v['color_name'], 'hex' => $v['color_hex']];
+            }
+            if (!in_array($v['size'], $sizes, true)) {
+                $sizes[] = $v['size'];
+            }
+        }
+
+        $product['id'] = $productId;
+        $product['base_price'] = (float) $product['base_price'];
+        $product['original_price'] = $product['original_price'] !== null ? (float) $product['original_price'] : null;
+        $product['rating_avg'] = (float) $product['rating_avg'];
+        $product['rating_count'] = (int) $product['rating_count'];
+        $product['is_featured'] = (bool) $product['is_featured'];
+        $product['is_flash_deal'] = (bool) $product['is_flash_deal'];
+        $product['images'] = $images;
+        $product['variants'] = $variants;
+        $product['available_colors'] = array_values($colors);
+        $product['available_sizes'] = $sizes;
+
+        // Digital deliverable metadata (without revealing storage path)
+        return $product;
+    }
+
+    /**
+     * Get top featured products.
+     */
+    public function getFeatured(int $limit = 4): array
+    {
+        return $this->listPublished(['is_featured' => 1], 1, $limit)['items'];
+    }
+
+    /**
+     * Get flash deal products with highest discounts.
+     */
+    public function getFlashDeals(int $limit = 4): array
+    {
+        return $this->listPublished(['is_flash_deal' => 1], 1, $limit)['items'];
+    }
+
+    /**
+     * Get latest new arrival products.
+     */
+    public function getNewArrivals(int $limit = 4): array
+    {
+        return $this->listPublished(['sort' => 'newest'], 1, $limit)['items'];
+    }
+
+    /**
+     * Get top selling / popular products.
+     */
+    public function getTopSelling(int $limit = 4): array
+    {
+        return $this->listPublished(['sort' => 'popular'], 1, $limit)['items'];
+    }
+
+    /**
+     * Admin: List all products with advanced filtering (status, inventory, category, search) and full variant details.
+     */
+    public function listForAdmin(array $filters = [], int $page = 1, int $perPage = 15): array
+    {
+        $page = max(1, $page);
+        $perPage = min(max(1, $perPage), 100);
+        $offset = ($page - 1) * $perPage;
+
+        $conditions = ["1=1"];
+        $params = [];
+        $types = "";
+
+        // Status filter: 'all', 'published', 'draft', 'archived'
+        if (!empty($filters['status']) && $filters['status'] !== 'all') {
+            $conditions[] = "p.status = ?";
+            $params[] = (string) $filters['status'];
+            $types .= "s";
+        }
+
+        // Product type filter: 'all', 'physical', 'digital'
+        if (!empty($filters['product_type']) && $filters['product_type'] !== 'all') {
+            $conditions[] = "p.product_type = ?";
+            $params[] = (string) $filters['product_type'];
+            $types .= "s";
+        }
+
+        // Category filter
+        if (!empty($filters['category']) && $filters['category'] !== 'all') {
+            if (is_numeric($filters['category'])) {
+                $conditions[] = "p.category_id = ?";
+                $params[] = (int) $filters['category'];
+                $types .= "i";
+            } else {
+                $conditions[] = "c.slug = ?";
+                $params[] = (string) $filters['category'];
+                $types .= "s";
+            }
+        }
+
+        // Search (name, slug, SKU, description)
+        if (!empty($filters['search'])) {
+            $search = '%' . trim((string) $filters['search']) . '%';
+            $conditions[] = "(p.name LIKE ? OR p.sku LIKE ? OR p.slug LIKE ? OR p.description LIKE ?)";
+            $params[] = $search;
+            $params[] = $search;
+            $params[] = $search;
+            $params[] = $search;
+            $types .= "ssss";
+        }
+
+        // Inventory status filter (subquery based)
+        if (!empty($filters['inventory']) && $filters['inventory'] !== 'all') {
+            if ($filters['inventory'] === 'out_of_stock') {
+                $conditions[] = "(SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id) = 0";
+            } elseif ($filters['inventory'] === 'low_stock') {
+                $conditions[] = "EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity <= pv.low_stock_threshold AND pv.stock_quantity > 0)";
+            } elseif ($filters['inventory'] === 'in_stock') {
+                $conditions[] = "(SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id) > 0";
+            }
+        }
+
+        $whereSql = implode(' AND ', $conditions);
+
+        // Sorting
+        $sortOrder = "p.created_at DESC";
+        $sort = $filters['sort'] ?? 'newest';
+        if ($sort === 'oldest') {
+            $sortOrder = "p.created_at ASC";
+        } elseif ($sort === 'price_asc') {
+            $sortOrder = "p.base_price ASC";
+        } elseif ($sort === 'price_desc') {
+            $sortOrder = "p.base_price DESC";
+        } elseif ($sort === 'name_asc') {
+            $sortOrder = "p.name ASC";
+        }
+
+        // 1. Total matching count
+        $countSql = "SELECT COUNT(DISTINCT p.id) AS total
+                     FROM products p
+                     LEFT JOIN categories c ON c.id = p.category_id
+                     WHERE {$whereSql}";
+        $countResult = $this->db->fetchOne($countSql, $types, $params);
+        $total = $countResult ? (int) $countResult['total'] : 0;
+
+        // 2. Paginated rows
+        $itemsSql = "SELECT p.id, p.uuid, p.name, p.slug, p.description, p.product_type,
+                            p.status, p.base_price, p.original_price, p.currency, p.sku,
+                            p.rating_avg, p.rating_count, p.is_featured, p.is_flash_deal, p.dress_style,
+                            p.created_at, p.updated_at,
+                            c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
+                            (SELECT pi.image_url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.is_primary DESC, pi.display_order ASC LIMIT 1) AS primary_image,
+                            (SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id) AS total_stock
+                     FROM products p
+                     LEFT JOIN categories c ON c.id = p.category_id
+                     WHERE {$whereSql}
+                     ORDER BY {$sortOrder}
+                     LIMIT ? OFFSET ?";
+
+        $itemParams = $params;
+        $itemParams[] = $perPage;
+        $itemParams[] = $offset;
+        $itemTypes = $types . "ii";
+
+        $rows = $this->db->fetchAll($itemsSql, $itemTypes, $itemParams);
+
+        // Fetch variants, images, and digital metadata for each product
+        foreach ($rows as &$row) {
+            $row['id'] = (int) $row['id'];
+            $row['base_price'] = (float) $row['base_price'];
+            $row['original_price'] = $row['original_price'] !== null ? (float) $row['original_price'] : null;
+            $row['total_stock'] = (int) $row['total_stock'];
+            $row['is_featured'] = (bool) $row['is_featured'];
+            $row['is_flash_deal'] = (bool) $row['is_flash_deal'];
+
+            // Variants
+            $variants = $this->db->fetchAll(
+                "SELECT id, sku, size, color_name, color_hex, price_override, stock_quantity, low_stock_threshold
+                 FROM product_variants
+                 WHERE product_id = ?
+                 ORDER BY id ASC",
+                "i",
+                [$row['id']]
+            );
+
+            $hasLowStock = false;
+            foreach ($variants as &$v) {
+                $v['id'] = (int) $v['id'];
+                $v['price_override'] = ($v['price_override'] !== null && (float) $v['price_override'] > 0) ? (float) $v['price_override'] : null;
+                $v['stock_quantity'] = (int) $v['stock_quantity'];
+                $v['low_stock_threshold'] = (int) ($v['low_stock_threshold'] ?? 5);
+                $v['in_stock'] = $v['stock_quantity'] > 0;
+                $v['is_low_stock'] = $v['stock_quantity'] <= $v['low_stock_threshold'];
+                if ($v['is_low_stock']) {
+                    $hasLowStock = true;
+                }
+            }
+            $row['variants'] = $variants;
+            $row['variants_count'] = count($variants);
+            $row['is_low_stock'] = $hasLowStock;
+
+            // Images
+            $images = $this->db->fetchAll(
+                "SELECT id, image_url, alt_text, is_primary, display_order
+                 FROM product_images
+                 WHERE product_id = ?
+                 ORDER BY is_primary DESC, display_order ASC",
+                "i",
+                [$row['id']]
+            );
+            $row['images'] = $images;
+
+            $row['digital_deliverable'] = null;
+        }
+
+        return [
+            'items' => $rows,
+            'pagination' => [
+                'total' => $total,
+                'page' => $page,
+                'per_page' => $perPage,
+                'total_pages' => (int) ceil($total / $perPage),
+            ],
+        ];
+    }
+
+    /**
+     * Admin: Adjust variant stock quantity with reason and immutable audit log.
+     */
+    public function adjustVariantStock(int $variantId, int $adjustment, string $reason, ?string $notes = null, ?int $adminId = null): array
+    {
+        return $this->db->transaction(function (Database $db) use ($variantId, $adjustment, $reason, $notes, $adminId) {
+            $variant = $db->fetchOne(
+                "SELECT id, product_id, sku, stock_quantity, low_stock_threshold FROM product_variants WHERE id = ? FOR UPDATE",
+                "i",
+                [$variantId]
+            );
+
+            if (!$variant) {
+                throw new \InvalidArgumentException("Variant not found.");
+            }
+
+            $currentStock = (int) $variant['stock_quantity'];
+            $newStock = $currentStock + $adjustment;
+
+            if ($newStock < 0) {
+                throw new \InvalidArgumentException("Cannot reduce stock below zero. Current stock is {$currentStock}, requested adjustment is {$adjustment}.");
+            }
+
+            $db->execute(
+                "UPDATE product_variants SET stock_quantity = ? WHERE id = ?",
+                "ii",
+                [$newStock, $variantId]
+            );
+
+            $productId = (int) $variant['product_id'];
+
+            // Log immutable audit record
+            $auditRepo = new AuditLogRepository();
+            $auditRepo->record(
+                $adminId,
+                'inventory_adjusted',
+                'product_variant',
+                (string) $variantId,
+                [
+                    'sku' => $variant['sku'],
+                    'product_id' => $productId,
+                    'stock_quantity' => $currentStock,
+                ],
+                [
+                    'sku' => $variant['sku'],
+                    'product_id' => $productId,
+                    'stock_quantity' => $newStock,
+                    'adjustment' => $adjustment,
+                    'reason' => $reason,
+                    'notes' => $notes,
+                ]
+            );
+
+            $tot = $db->fetchOne(
+                "SELECT COALESCE(SUM(stock_quantity), 0) AS total_stock FROM product_variants WHERE product_id = ?",
+                "i",
+                [$productId]
+            );
+
+            return [
+                'variant_id' => $variantId,
+                'product_id' => $productId,
+                'sku' => $variant['sku'],
+                'previous_stock' => $currentStock,
+                'adjustment' => $adjustment,
+                'new_stock' => $newStock,
+                'product_total_stock' => (int) ($tot['total_stock'] ?? $newStock),
+                'reason' => $reason,
+                'notes' => $notes,
+            ];
+        });
+    }
+
+    /**
+     * Admin: Quick update product status (draft, published, archived) with audit log.
+     */
+    public function updateStatus(int $productId, string $status, ?int $adminId = null): array
+    {
+        if (!in_array($status, ['draft', 'published', 'archived'], true)) {
+            throw new \InvalidArgumentException("Invalid product status.");
+        }
+
+        $existing = $this->db->fetchOne("SELECT id, name, status FROM products WHERE id = ?", "i", [$productId]);
+        if (!$existing) {
+            throw new \InvalidArgumentException("Product not found.");
+        }
+
+        $oldStatus = $existing['status'];
+        $this->db->execute("UPDATE products SET status = ? WHERE id = ?", "si", [$status, $productId]);
+
+        $auditRepo = new AuditLogRepository();
+        $auditRepo->record(
+            $adminId,
+            'product_status_changed',
+            'product',
+            (string) $productId,
+            ['status' => $oldStatus],
+            ['status' => $status]
+        );
+
+        return [
+            'id' => $productId,
+            'previous_status' => $oldStatus,
+            'status' => $status,
+        ];
+    }
+
+    /**
+     * Admin: Attach or update private digital deliverable metadata (Disabled).
+     */
+    public function saveDigitalDeliverable(int $productId, array $data, ?int $adminId = null): array
+    {
+        throw new \DomainException("Digital products are disabled. The store operates exclusively with physical products.");
+    }
+
+    /**
+     * Auto-generate a readable master SKU based on category, dress style, name, and random salt.
+     */
+    public static function generateSku(array $data): string
+    {
+        $prefix = 'SHOP';
+        if (!empty($data['category_slug'])) {
+            $prefix = strtoupper(substr(str_replace(['-', '_', ' '], '', (string) $data['category_slug']), 0, 3));
+        } elseif (!empty($data['dress_style'])) {
+            $prefix = strtoupper(substr(str_replace(['-', '_', ' '], '', (string) $data['dress_style']), 0, 3));
+        }
+
+        $mid = 'ITEM';
+        if (!empty($data['slug'])) {
+            $words = explode('-', strtolower((string) $data['slug']));
+            $clean = array_filter($words, fn($w) => strlen($w) > 1);
+            if (!empty($clean)) {
+                $mid = strtoupper(substr(implode('-', array_slice($clean, 0, 2)), 0, 8));
+            }
+        } elseif (!empty($data['name'])) {
+            $words = preg_split('/\s+/', strtolower((string) $data['name']));
+            $clean = array_filter($words, fn($w) => strlen($w) > 1);
+            if (!empty($clean)) {
+                $mid = strtoupper(substr(implode('-', array_slice($clean, 0, 2)), 0, 8));
+            }
+        }
+
+        $salt = strtoupper(substr(bin2hex(random_bytes(2)), 0, 4));
+        return sprintf('%s-%s-%s', $prefix, $mid, $salt);
+    }
+
+    /**
+     * Auto-generate a readable variant SKU based on master SKU, color, and size.
+     */
+    public static function generateVariantSku(string $masterSku, string $color, string $size, int $index = 1): string
+    {
+        $colorPart = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $color), 0, 3));
+        if ($colorPart === '') $colorPart = 'DEF';
+
+        $sizePart = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $size), 0, 3));
+        if ($sizePart === '') $sizePart = (string) $index;
+
+        return sprintf('%s-%s-%s', $masterSku, $colorPart, $sizePart);
+    }
+
+    /**
+     * Admin: Create a product with variants and images inside an atomic transaction.
+     */
+    public function create(array $data, array $variants = [], array $images = [], ?array $digital = null): int
+    {
+        return $this->db->transaction(function (Database $db) use ($data, $variants, $images, $digital) {
+            $uuid = $data['uuid'] ?? sprintf(
+                '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+                mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+                mt_rand(0, 0xffff),
+                mt_rand(0, 0x0fff) | 0x4000,
+                mt_rand(0, 0x3fff) | 0x8000,
+                mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+            );
+
+            // Auto-generate SKU if omitted or empty
+            $masterSku = !empty($data['sku']) ? trim((string) $data['sku']) : self::generateSku($data);
+
+            $sql = "INSERT INTO products (uuid, category_id, name, slug, description, product_type, status, base_price, original_price, currency, sku, dress_style, is_featured, is_flash_deal)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+            $productId = (int) $db->insert(
+                $sql,
+                "sisssssddsssii",
+                [
+                    $uuid,
+                    $data['category_id'] ?? null,
+                    $data['name'],
+                    $data['slug'],
+                    $data['description'] ?? null,
+                    $data['product_type'] ?? 'physical',
+                    $data['status'] ?? 'published',
+                    $data['base_price'],
+                    $data['original_price'] ?? null,
+                    $data['currency'] ?? 'NGN',
+                    $masterSku,
+                    $data['dress_style'] ?? 'Casual',
+                    $data['is_featured'] ?? 0,
+                    $data['is_flash_deal'] ?? 0,
+                ]
+            );
+
+            // Insert variants
+            if (!empty($variants)) {
+                foreach ($variants as $idx => $v) {
+                    $variantSku = !empty($v['sku']) 
+                        ? trim((string) $v['sku']) 
+                        : self::generateVariantSku($masterSku, $v['color_name'] ?? 'Default', $v['size'] ?? 'Standard', $idx + 1);
+
+                    $db->execute(
+                        "INSERT INTO product_variants (product_id, sku, size, color_name, color_hex, price_override, stock_quantity, low_stock_threshold)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "issssdii",
+                        [
+                            $productId,
+                            $variantSku,
+                            $v['size'],
+                            $v['color_name'],
+                            $v['color_hex'],
+                            (!empty($v['price_override']) && (float) $v['price_override'] > 0) ? (float) $v['price_override'] : null,
+                            $v['stock_quantity'] ?? 0,
+                            $v['low_stock_threshold'] ?? 5,
+                        ]
+                    );
+                }
+            } else {
+                $db->execute(
+                    "INSERT INTO product_variants (product_id, sku, size, color_name, color_hex, price_override, stock_quantity, low_stock_threshold)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "issssdii",
+                    [
+                        $productId,
+                        $masterSku . '-STD',
+                        'Standard',
+                        'Default',
+                        '#000000',
+                        null,
+                        $data['stock_quantity'] ?? 10,
+                        $data['low_stock_threshold'] ?? 5,
+                    ]
+                );
+            }
+
+            // Insert images
+            if (!empty($images)) {
+                foreach ($images as $idx => $img) {
+                    $db->execute(
+                        "INSERT INTO product_images (product_id, image_url, alt_text, is_primary, display_order)
+                         VALUES (?, ?, ?, ?, ?)",
+                        "issii",
+                        [
+                            $productId,
+                            $img['image_url'],
+                            $img['alt_text'] ?? $data['name'],
+                            $img['is_primary'] ?? ($idx === 0 ? 1 : 0),
+                            $img['display_order'] ?? $idx,
+                        ]
+                    );
+                }
+            }
+
+            $auditRepo = new AuditLogRepository();
+            $auditRepo->record(
+                null,
+                'product_created',
+                'product',
+                (string) $productId,
+                null,
+                ['name' => $data['name'], 'sku' => $masterSku, 'status' => $data['status'] ?? 'published']
+            );
+
+            return $productId;
+        });
+    }
+
+    /**
+     * Admin: Update product details with variants, images and digital deliverable.
+     */
+    public function update(int $id, array $data, ?array $variants = null, ?array $images = null, ?array $digital = null): bool
+    {
+        return $this->db->transaction(function (Database $db) use ($id, $data, $variants, $images, $digital) {
+            $existing = $this->findDetail((string) $id, true);
+            if (!$existing) {
+                return false;
+            }
+
+            $sql = "UPDATE products
+                    SET category_id = ?, name = ?, slug = ?, description = ?, status = ?,
+                        product_type = ?, base_price = ?, original_price = ?, dress_style = ?,
+                        is_featured = ?, is_flash_deal = ?
+                    WHERE id = ?";
+
+            $db->execute(
+                $sql,
+                "isssssddsiii",
+                [
+                    $data['category_id'] ?? $existing['category_id'],
+                    $data['name'] ?? $existing['name'],
+                    $data['slug'] ?? $existing['slug'],
+                    $data['description'] ?? $existing['description'],
+                    $data['status'] ?? $existing['status'],
+                    $data['product_type'] ?? $existing['product_type'],
+                    $data['base_price'] ?? $existing['base_price'],
+                    $data['original_price'] ?? $existing['original_price'],
+                    $data['dress_style'] ?? $existing['dress_style'],
+                    isset($data['is_featured']) ? (int) $data['is_featured'] : (int) $existing['is_featured'],
+                    isset($data['is_flash_deal']) ? (int) $data['is_flash_deal'] : (int) $existing['is_flash_deal'],
+                    $id,
+                ]
+            );
+
+            // Sync variants if provided
+            if ($variants !== null && is_array($variants)) {
+                $db->execute("DELETE FROM product_variants WHERE product_id = ?", "i", [$id]);
+                foreach ($variants as $v) {
+                    $db->execute(
+                        "INSERT INTO product_variants (product_id, sku, size, color_name, color_hex, price_override, stock_quantity, low_stock_threshold)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "issssdii",
+                        [
+                            $id,
+                            $v['sku'],
+                            $v['size'],
+                            $v['color_name'],
+                            $v['color_hex'],
+                            (!empty($v['price_override']) && (float) $v['price_override'] > 0) ? (float) $v['price_override'] : null,
+                            $v['stock_quantity'] ?? 0,
+                            $v['low_stock_threshold'] ?? 5,
+                        ]
+                    );
+                }
+            }
+
+            // Sync images if provided
+            if ($images !== null && is_array($images) && !empty($images)) {
+                $db->execute("DELETE FROM product_images WHERE product_id = ?", "i", [$id]);
+                foreach ($images as $idx => $img) {
+                    $db->execute(
+                        "INSERT INTO product_images (product_id, image_url, alt_text, is_primary, display_order)
+                         VALUES (?, ?, ?, ?, ?)",
+                        "issii",
+                        [
+                            $id,
+                            $img['image_url'],
+                            $img['alt_text'] ?? ($data['name'] ?? $existing['name']),
+                            $img['is_primary'] ?? ($idx === 0 ? 1 : 0),
+                            $img['display_order'] ?? $idx,
+                        ]
+                    );
+                }
+            }
+
+            $auditRepo = new AuditLogRepository();
+            $auditRepo->record(
+                null,
+                'product_updated',
+                'product',
+                (string) $id,
+                ['name' => $existing['name'], 'status' => $existing['status'], 'base_price' => $existing['base_price']],
+                ['name' => $data['name'] ?? $existing['name'], 'status' => $data['status'] ?? $existing['status']]
+            );
+
+            return true;
+        });
+    }
+
+    /**
+     * Admin: Soft-delete / archive a product.
+     */
+    public function delete(int $id): bool
+    {
+        $existing = $this->db->fetchOne("SELECT id, name, status FROM products WHERE id = ?", "i", [$id]);
+        $this->db->execute("UPDATE products SET status = 'archived' WHERE id = ?", "i", [$id]);
+
+        $auditRepo = new AuditLogRepository();
+        $auditRepo->record(
+            null,
+            'product_archived',
+            'product',
+            (string) $id,
+            ['status' => $existing['status'] ?? 'unknown'],
+            ['status' => 'archived']
+        );
+
+        return true;
+    }
+}
+

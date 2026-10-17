@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { FilterState } from '@/types';
+import { ApiCategory } from '@/lib/api-client';
 import { FilterContent } from './FilterContent';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Cancel01Icon } from '@hugeicons/core-free-icons';
@@ -12,6 +13,7 @@ interface FilterDrawerProps {
   filters: FilterState;
   onFilterChange: (newFilters: Partial<FilterState>) => void;
   onReset: () => void;
+  categories?: ApiCategory[];
 }
 
 export const FilterDrawer: React.FC<FilterDrawerProps> = ({
@@ -20,6 +22,7 @@ export const FilterDrawer: React.FC<FilterDrawerProps> = ({
   filters,
   onFilterChange,
   onReset,
+  categories,
 }) => {
   if (!isOpen) return null;
 
@@ -64,6 +67,7 @@ export const FilterDrawer: React.FC<FilterDrawerProps> = ({
             onApply={onClose}
             onReset={onReset}
             isMobile={true}
+            categories={categories}
           />
         </div>
       </div>

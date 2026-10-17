@@ -4,6 +4,8 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Product } from '@/types';
 import { PRODUCTS } from '@/data/mockData';
 
+import { useAuth } from '@/context/AuthContext';
+
 interface WishlistContextType {
   wishlist: Product[];
   toggleWishlist: (product: Product) => void;
@@ -18,38 +20,41 @@ interface WishlistContextType {
 
 const WishlistContext = createContext<WishlistContextType | undefined>(undefined);
 
-const WISHLIST_STORAGE_KEY = 'shop_co_wishlist';
-
 export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Initialize with 2 pre-saved sample items from mockData matching original preview
+  const { user } = useAuth();
   const [wishlist, setWishlist] = useState<Product[]>([]);
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
 
+  const wishlistStorageKey = user ? `shopco_wishlist_user_${user.id}` : 'shopco_wishlist_guest';
+
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(WISHLIST_STORAGE_KEY);
+      // Clear legacy mock wishlist key
+      localStorage.removeItem('shop_co_wishlist');
+
+      const stored = localStorage.getItem(wishlistStorageKey);
       if (stored) {
-        setWishlist(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        setWishlist(Array.isArray(parsed) ? parsed : []);
       } else {
-        // Default initial items
-        setWishlist([PRODUCTS[0], PRODUCTS[3]]);
+        setWishlist([]);
       }
     } catch {
-      setWishlist([PRODUCTS[0], PRODUCTS[3]]);
+      setWishlist([]);
     }
     setIsHydrated(true);
-  }, []);
+  }, [wishlistStorageKey, user]);
 
   useEffect(() => {
     if (isHydrated) {
       try {
-        localStorage.setItem(WISHLIST_STORAGE_KEY, JSON.stringify(wishlist));
+        localStorage.setItem(wishlistStorageKey, JSON.stringify(wishlist));
       } catch {
         // ignore storage errors
       }
     }
-  }, [wishlist, isHydrated]);
+  }, [wishlist, isHydrated, wishlistStorageKey]);
 
   const toggleWishlist = (product: Product) => {
     setWishlist((prev) => {

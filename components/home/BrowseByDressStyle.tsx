@@ -10,7 +10,7 @@ export const BrowseByDressStyle: React.FC = () => {
     <section className="py-8 sm:py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="bg-[#F0F0F0] rounded-3xl p-6 sm:p-12 lg:p-16">
-          <h2 className="font-integral text-2xl sm:text-4xl text-center text-black mb-8 sm:mb-14">
+          <h2 className="font-integral text-2xl sm:text-4xl lg:text-5xl text-center text-black mb-8 sm:mb-14 tracking-tight">
             BROWSE BY DRESS STYLE
           </h2>
 
@@ -25,13 +25,13 @@ export const BrowseByDressStyle: React.FC = () => {
                   src={DRESS_STYLES[0].image}
                   alt="Casual dress style"
                   fill
-                  loading="eager"
+                  unoptimized
                   sizes="(max-width: 768px) 100vw, 33vw"
                   className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
               </div>
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-white drop-shadow-md z-10">
+              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-integral text-xl sm:text-3xl lg:text-4xl text-white drop-shadow-lg z-10 tracking-tight">
                 Casual
               </span>
             </Link>
@@ -46,13 +46,13 @@ export const BrowseByDressStyle: React.FC = () => {
                   src={DRESS_STYLES[1].image}
                   alt="Formal dress style"
                   fill
-                  loading="eager"
+                  unoptimized
                   sizes="(max-width: 768px) 100vw, 66vw"
                   className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
               </div>
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-white drop-shadow-md z-10">
+              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-integral text-xl sm:text-3xl lg:text-4xl text-white drop-shadow-lg z-10 tracking-tight">
                 Formal
               </span>
             </Link>
@@ -67,13 +67,13 @@ export const BrowseByDressStyle: React.FC = () => {
                   src={DRESS_STYLES[2].image}
                   alt="Party dress style"
                   fill
-                  loading="eager"
+                  unoptimized
                   sizes="(max-width: 768px) 100vw, 66vw"
                   className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
               </div>
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-white drop-shadow-md z-10">
+              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-integral text-xl sm:text-3xl lg:text-4xl text-white drop-shadow-lg z-10 tracking-tight">
                 Party
               </span>
             </Link>
@@ -88,13 +88,13 @@ export const BrowseByDressStyle: React.FC = () => {
                   src={DRESS_STYLES[3].image}
                   alt="Gym dress style"
                   fill
-                  loading="eager"
+                  unoptimized
                   sizes="(max-width: 768px) 100vw, 33vw"
                   className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
               </div>
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-bold text-xl sm:text-3xl text-white drop-shadow-md z-10">
+              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-integral text-xl sm:text-3xl lg:text-4xl text-white drop-shadow-lg z-10 tracking-tight">
                 Gym
               </span>
             </Link>

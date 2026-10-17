@@ -1,12 +1,15 @@
-'use client';
-
 import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { ApiCategory } from '@/lib/api-client';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ArrowUpRight01Icon } from '@hugeicons/core-free-icons';
 
-const CATEGORY_ITEMS = [
+interface CategoryGridProps {
+  categories?: ApiCategory[];
+}
+
+const DEFAULT_CATEGORY_ITEMS = [
   {
     name: 'T-Shirts',
     slug: 't-shirts',
@@ -45,7 +48,15 @@ const CATEGORY_ITEMS = [
   },
 ];
 
-export const CategoryGrid: React.FC = () => {
+export const CategoryGrid: React.FC<CategoryGridProps> = ({ categories }) => {
+  const items = categories && categories.length > 0
+    ? categories.map((c) => ({
+        name: c.name,
+        slug: c.slug,
+        count: `${c.product_count} ${c.product_count === 1 ? 'Product' : 'Products'}`,
+        image: c.image_url || '/images/categories/tshirts.webp',
+      }))
+    : DEFAULT_CATEGORY_ITEMS;
   return (
     <section className="py-12 sm:py-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -54,7 +65,7 @@ export const CategoryGrid: React.FC = () => {
             <span className="text-xs font-bold uppercase tracking-widest text-neutral-400 block mb-1">
               Curated Collections
             </span>
-            <h2 className="font-integral text-2xl sm:text-4xl text-black">
+            <h2 className="font-integral text-2xl sm:text-4xl lg:text-5xl text-black tracking-tight">
               EXPLORE BY CATEGORY
             </h2>
           </div>
@@ -69,7 +80,7 @@ export const CategoryGrid: React.FC = () => {
 
         {/* 6-Grid Responsive Cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 sm:gap-6">
-          {CATEGORY_ITEMS.map((cat) => (
+          {items.map((cat) => (
             <Link
               key={cat.slug}
               href={`/category?cat=${cat.slug}`}
@@ -81,6 +92,7 @@ export const CategoryGrid: React.FC = () => {
                   src={cat.image}
                   alt={cat.name}
                   fill
+                  unoptimized
                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw"
                   className="object-cover object-center group-hover:scale-110 transition-transform duration-500 opacity-90 group-hover:opacity-100"
                 />

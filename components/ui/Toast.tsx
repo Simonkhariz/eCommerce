@@ -5,53 +5,51 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useCart } from '@/context/CartContext';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { CheckmarkCircle01Icon, ShoppingBag01Icon, Cancel01Icon } from '@hugeicons/core-free-icons';
+import { CheckmarkCircle01Icon, Cancel01Icon } from '@hugeicons/core-free-icons';
 
 export const Toast: React.FC = () => {
-  const { toast, hideToast, totalQuantity } = useCart();
+  const { toast, hideToast } = useCart();
 
   if (!toast) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 max-w-md w-full animate-in fade-in slide-in-from-bottom-5 duration-300">
-      <div className="bg-black text-white p-4 rounded-2xl shadow-2xl flex items-start gap-3 border border-neutral-800">
-        <div className="p-2 bg-neutral-800 rounded-full text-green-400 shrink-0">
-          <HugeiconsIcon icon={CheckmarkCircle01Icon} size={20} className="fill-current" />
-        </div>
-
-        {toast.image && (
-          <div className="relative w-12 h-12 bg-neutral-900 rounded-lg overflow-hidden shrink-0">
+    <div className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-6 sm:bottom-6 z-50 max-w-sm sm:w-auto animate-in fade-in slide-in-from-bottom-2 duration-200">
+      <div className="bg-neutral-900/95 backdrop-blur-md text-white pl-2.5 pr-2 py-2 rounded-2xl shadow-xl flex items-center gap-2.5 border border-white/10">
+        {toast.image ? (
+          <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-neutral-800 shrink-0 border border-neutral-700">
             <Image
               src={toast.image}
               alt={toast.title}
               fill
               className="object-cover"
-              sizes="48px"
+              sizes="32px"
             />
+          </div>
+        ) : (
+          <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+            <HugeiconsIcon icon={CheckmarkCircle01Icon} size={16} />
           </div>
         )}
 
-        <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-bold text-white">{toast.title}</h4>
-          <p className="text-xs text-neutral-300 line-clamp-2 mt-0.5">{toast.message}</p>
-          <div className="mt-2 flex items-center gap-3">
-            <Link
-              href="/cart"
-              onClick={hideToast}
-              className="text-xs font-semibold underline hover:text-neutral-200 flex items-center gap-1"
-            >
-              <HugeiconsIcon icon={ShoppingBag01Icon} size={14} />
-              <span>View Cart ({totalQuantity})</span>
-            </Link>
-          </div>
+        <div className="flex-1 min-w-0 pr-1">
+          <p className="text-xs font-bold text-white truncate">{toast.title}</p>
+          <p className="text-[11px] text-neutral-400 truncate">{toast.message}</p>
         </div>
+
+        <Link
+          href="/cart"
+          onClick={hideToast}
+          className="bg-white text-black hover:bg-neutral-200 text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0 transition-colors"
+        >
+          Cart
+        </Link>
 
         <button
           onClick={hideToast}
-          className="text-neutral-400 hover:text-white p-1 rounded-lg transition-colors"
+          className="text-neutral-400 hover:text-white p-1 rounded-md transition-colors shrink-0"
           aria-label="Close notification"
         >
-          <HugeiconsIcon icon={Cancel01Icon} size={16} />
+          <HugeiconsIcon icon={Cancel01Icon} size={14} />
         </button>
       </div>
     </div>

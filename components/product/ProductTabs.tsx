@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Product, Review } from '@/types';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
@@ -21,6 +21,10 @@ export const ProductTabs: React.FC<ProductTabsProps> = ({ product }) => {
   const [reviews, setReviews] = useState<Review[]>(product.reviews);
   const [sortBy, setSortBy] = useState<'latest' | 'highest'>('latest');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+
+  useEffect(() => {
+    setReviews(product.reviews);
+  }, [product.id, product.reviews]);
 
   // New review form state
   const [authorName, setAuthorName] = useState('');
@@ -105,7 +109,7 @@ export const ProductTabs: React.FC<ProductTabsProps> = ({ product }) => {
           <div>
             <h4 className="font-bold text-lg text-black mb-2">Category &amp; Style</h4>
             <p className="text-sm text-neutral-600 capitalize">
-              {product.category} • {product.dressStyle} styling • {product.gender}
+              {product.category} • {Array.isArray(product.dressStyle) ? product.dressStyle.join(', ') : product.dressStyle} styling • {product.gender}
             </p>
           </div>
         </div>

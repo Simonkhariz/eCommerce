@@ -1,0 +1,19 @@
+{
+  "name": "shopco/backend",
+  "description": "Shop.co E-Commerce PHP 8+ REST API Backend",
+  "type": "project",
+  "require": {
+    "php": ">=8.2",
+    "ext-mysqli": "*",
+    "ext-json": "*",
+    "ext-curl": "*",
+    "ext-mbstring": "*",
+    "ext-openssl": "*",
+    "ext-fileinfo": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "App\\": "src/"
+    }
+  }
+}

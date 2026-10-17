@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Search01Icon, Cancel01Icon } from '@hugeicons/core-free-icons';
@@ -15,6 +15,10 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, productName 
   const [isZoomModalOpen, setIsZoomModalOpen] = useState(false);
   const [zoomPos, setZoomPos] = useState({ x: 50, y: 50 });
   const [isHovered, setIsHovered] = useState(false);
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [images]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const { left, top, width, height } = e.currentTarget.getBoundingClientRect();

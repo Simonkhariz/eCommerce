@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useCart } from '@/context/CartContext';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Delete02Icon, MinusSignIcon, PlusSignIcon } from '@hugeicons/core-free-icons';
+import { formatPrice } from '@/lib/currency';
 
 export const CartItemList: React.FC = () => {
   const { items, updateQuantity, removeFromCart } = useCart();
@@ -79,7 +80,7 @@ export const CartItemList: React.FC = () => {
             {/* Price & Quantity Stepper Row */}
             <div className="flex items-center justify-between mt-auto">
               <span className="font-bold text-lg sm:text-xl text-black">
-                ${item.price}
+                {formatPrice(item.price)}
               </span>
 
               <div className="flex items-center bg-[#F0F0F0] rounded-full px-3 sm:px-4 py-1.5 sm:py-2 gap-3 sm:gap-4">

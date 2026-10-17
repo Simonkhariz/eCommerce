@@ -77,7 +77,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.5,
     reviewCount: 451,
     category: 't-shirts',
-    dressStyle: 'casual',
+    dressStyle: ['casual', 'party'],
     gender: 'men',
     images: [
       '/images/categories/tshirts.webp',
@@ -125,7 +125,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.5,
     reviewCount: 120,
     category: 't-shirts',
-    dressStyle: 'casual',
+    dressStyle: ['casual', 'party'],
     gender: 'men',
     images: [
       '/images/categories/tshirts.webp',
@@ -157,7 +157,7 @@ export const PRODUCTS: Product[] = [
     rating: 3.5,
     reviewCount: 88,
     category: 'jeans',
-    dressStyle: 'casual',
+    dressStyle: ['casual', 'party'],
     gender: 'men',
     images: [
       '/images/categories/jeans.webp',
@@ -189,7 +189,7 @@ export const PRODUCTS: Product[] = [
     rating: 5.0,
     reviewCount: 340,
     category: 'shirts',
-    dressStyle: 'casual',
+    dressStyle: ['casual', 'party', 'formal'],
     gender: 'men',
     images: [
       '/images/categories/shirts.webp',
@@ -218,7 +218,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.0,
     reviewCount: 95,
     category: 't-shirts',
-    dressStyle: 'casual',
+    dressStyle: ['casual', 'party'],
     gender: 'men',
     images: [
       '/images/categories/tshirts.webp',
@@ -248,7 +248,7 @@ export const PRODUCTS: Product[] = [
     rating: 3.5,
     reviewCount: 65,
     category: 't-shirts',
-    dressStyle: 'casual',
+    dressStyle: ['casual', 'party', 'gym'],
     gender: 'unisex',
     images: [
       '/images/categories/tshirts.webp',
@@ -278,7 +278,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.8,
     reviewCount: 215,
     category: 'footwear',
-    dressStyle: 'casual',
+    dressStyle: ['casual', 'formal', 'party'],
     gender: 'unisex',
     images: [
       '/images/categories/footwear.webp',
@@ -310,7 +310,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.7,
     reviewCount: 178,
     category: 'footwear',
-    dressStyle: 'gym',
+    dressStyle: ['gym', 'casual'],
     gender: 'unisex',
     images: [
       '/images/categories/footwear.webp',
@@ -340,7 +340,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.9,
     reviewCount: 520,
     category: 'electronics',
-    dressStyle: 'casual',
+    dressStyle: ['casual', 'gym', 'formal', 'party'],
     gender: 'unisex',
     images: [
       '/images/categories/accessories.webp',
@@ -378,7 +378,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.8,
     reviewCount: 310,
     category: 'electronics',
-    dressStyle: 'formal',
+    dressStyle: ['formal', 'casual', 'gym', 'party'],
     gender: 'unisex',
     images: [
       '/images/categories/accessories.webp',
@@ -407,7 +407,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.6,
     reviewCount: 142,
     category: 'accessories',
-    dressStyle: 'casual',
+    dressStyle: ['casual', 'formal', 'party'],
     gender: 'unisex',
     images: [
       '/images/categories/accessories.webp',
@@ -436,7 +436,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.9,
     reviewCount: 189,
     category: 'accessories',
-    dressStyle: 'formal',
+    dressStyle: ['formal', 'casual', 'party'],
     gender: 'unisex',
     images: [
       '/images/categories/accessories.webp',
@@ -464,7 +464,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.5,
     reviewCount: 230,
     category: 'shirts',
-    dressStyle: 'casual',
+    dressStyle: ['casual', 'party'],
     gender: 'men',
     images: [
       '/images/categories/shirts.webp',
@@ -493,7 +493,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.0,
     reviewCount: 97,
     category: 'shirts',
-    dressStyle: 'formal',
+    dressStyle: ['formal', 'casual', 'party'],
     gender: 'men',
     images: [
       '/images/categories/shirts.webp',
@@ -522,7 +522,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.9,
     reviewCount: 312,
     category: 'shirts',
-    dressStyle: 'formal',
+    dressStyle: ['formal', 'party'],
     gender: 'men',
     images: [
       '/images/styles/formal.webp',
@@ -548,7 +548,7 @@ export const PRODUCTS: Product[] = [
     rating: 4.7,
     reviewCount: 289,
     category: 't-shirts',
-    dressStyle: 'gym',
+    dressStyle: ['gym', 'casual'],
     gender: 'men',
     images: [
       '/images/styles/gym.webp',
@@ -561,6 +561,235 @@ export const PRODUCTS: Product[] = [
     ],
     sizes: ['Small', 'Medium', 'Large', 'X-Large'],
     details: ['88% Polyester, 12% Spandex', 'Anti-odor antimicrobial treatment', 'Flatlock anti-chafe seams'],
+    faqs: [],
+    reviews: MOCK_REVIEWS,
+  },
+
+  // 17. APPAREL - Metallic Party Bomber Jacket
+  {
+    id: 'metallic-party-bomber',
+    name: 'Metallic Glamour Party Bomber',
+    slug: 'metallic-party-bomber',
+    description:
+      'Statement party bomber jacket with metallic gold finish, ribbed athletic trims, and luxury satin interior lining. Perfect for nights out and celebration events.',
+    price: 280,
+    rating: 4.9,
+    reviewCount: 142,
+    category: 'hoodie',
+    dressStyle: ['party', 'casual'],
+    gender: 'unisex',
+    images: [
+      '/images/styles/party.webp',
+      '/images/categories/hoodies.webp',
+    ],
+    colors: [
+      { name: 'Yellow', hex: '#FACC15' },
+      { name: 'Purple', hex: '#8B5CF6' },
+      { name: 'Black', hex: '#000000' },
+    ],
+    sizes: ['X-Small', 'Small', 'Medium', 'Large', 'X-Large', 'XX-Large', '3X-Large'],
+    isTopSelling: true,
+    details: ['High-shine metallic coating', 'Custom branded zipper pull', 'Interior welt phone pocket'],
+    faqs: [],
+    reviews: MOCK_REVIEWS,
+  },
+
+  // 18. APPAREL - Luxe Satin Evening Party Shirt
+  {
+    id: 'luxe-satin-party-shirt',
+    name: 'Luxe Satin Evening Party Shirt',
+    slug: 'luxe-satin-party-shirt',
+    description:
+      'Silky smooth satin button-down shirt designed with an elegant fluid drape, camp collar, and iridescent sheen tailored for upscale evening parties.',
+    price: 165,
+    rating: 4.8,
+    reviewCount: 97,
+    category: 'shirts',
+    dressStyle: ['party', 'formal'],
+    gender: 'men',
+    images: [
+      '/images/styles/party.webp',
+      '/images/categories/shirts.webp',
+    ],
+    colors: [
+      { name: 'Pink', hex: '#EC4899' },
+      { name: 'Purple', hex: '#7C3AED' },
+      { name: 'Deep Black', hex: '#000000' },
+    ],
+    sizes: ['XX-Small', 'Small', 'Medium', 'Large', 'X-Large', '4X-Large'],
+    isNewArrival: true,
+    details: ['100% Poly-satin finish', 'Mother-of-pearl tonal buttons', 'Relaxed boxy silhouette'],
+    faqs: [],
+    reviews: MOCK_REVIEWS,
+  },
+
+  // 19. APPAREL - Essential Casual Chino Shorts
+  {
+    id: 'casual-chino-shorts',
+    name: 'Essential Casual Chino Shorts',
+    slug: 'casual-chino-shorts',
+    description:
+      'Tailored 7-inch inseam chino shorts crafted with stretch-twill cotton for all-day comfort. Features slash pockets and clean belt loops.',
+    price: 85,
+    rating: 4.6,
+    reviewCount: 168,
+    category: 'shorts',
+    dressStyle: ['casual', 'formal', 'party'],
+    gender: 'men',
+    images: [
+      '/images/categories/shorts.webp',
+      '/images/styles/casual.webp',
+    ],
+    colors: [
+      { name: 'Yellow', hex: '#EAB308' },
+      { name: 'Green', hex: '#15803D' },
+      { name: 'Black', hex: '#1F2937' },
+    ],
+    sizes: ['Small', 'Medium', 'Large', 'X-Large', 'XX-Large'],
+    details: ['98% Cotton, 2% Elastane', '7-inch modern inseam', 'Reinforced pocket stitching'],
+    faqs: [],
+    reviews: MOCK_REVIEWS,
+  },
+
+  // 20. APPAREL - Pro-Fit Training Athletic Shorts
+  {
+    id: 'pro-fit-training-shorts',
+    name: 'Pro-Fit Training Athletic Shorts',
+    slug: 'pro-fit-training-shorts',
+    description:
+      'Ultra-lightweight gym workout shorts with 4-way stretch, built-in compression liner, and secure zipper pockets for keys and phone.',
+    price: 75,
+    rating: 4.8,
+    reviewCount: 312,
+    category: 'shorts',
+    dressStyle: ['gym', 'casual'],
+    gender: 'men',
+    images: [
+      '/images/categories/shorts.webp',
+      '/images/styles/gym.webp',
+    ],
+    colors: [
+      { name: 'Black', hex: '#09090B' },
+      { name: 'Blue', hex: '#2563EB' },
+      { name: 'Orange', hex: '#F97316' },
+    ],
+    sizes: ['X-Small', 'Small', 'Medium', 'Large', 'X-Large', 'XX-Large'],
+    isTopSelling: true,
+    details: ['Moisture-wicking breathable weave', 'Internal phone liner pocket', 'Reflective night safety logo'],
+    faqs: [],
+    reviews: MOCK_REVIEWS,
+  },
+
+  // 21. APPAREL - Urban Heavyweight Graphic Hoodie
+  {
+    id: 'urban-heavyweight-hoodie',
+    name: 'Urban Streetwear Heavyweight Hoodie',
+    slug: 'urban-heavyweight-hoodie',
+    description:
+      '450 GSM French terry cotton heavyweight hoodie with dropped shoulders, oversized kangaroo pocket, and tonal embroidered emblem.',
+    price: 195,
+    rating: 4.9,
+    reviewCount: 425,
+    category: 'hoodie',
+    dressStyle: ['casual', 'party'],
+    gender: 'unisex',
+    images: [
+      '/images/categories/hoodies.webp',
+      '/images/styles/casual.webp',
+    ],
+    colors: [
+      { name: 'Purple', hex: '#6D28D9' },
+      { name: 'Pink', hex: '#F472B6' },
+      { name: 'Black', hex: '#111827' },
+    ],
+    sizes: ['XX-Small', 'Small', 'Medium', 'Large', 'X-Large', 'XX-Large', '3X-Large'],
+    isNewArrival: true,
+    details: ['450 GSM 100% Combed Cotton', 'Double-layered hood with no drawstrings', 'Ribbed cuffs and hem'],
+    faqs: [],
+    reviews: MOCK_REVIEWS,
+  },
+
+  // 22. APPAREL - Minimalist Acid-Wash Fleece Hoodie
+  {
+    id: 'minimalist-fleece-hoodie',
+    name: 'Minimalist Acid-Wash Fleece Hoodie',
+    slug: 'minimalist-fleece-hoodie',
+    description:
+      'Cozy brushed-fleece pullover hoodie with custom vintage acid wash treatment. Relaxed aesthetic for effortless layering.',
+    price: 175,
+    rating: 4.7,
+    reviewCount: 198,
+    category: 'hoodie',
+    dressStyle: ['casual', 'gym', 'party'],
+    gender: 'unisex',
+    images: [
+      '/images/categories/hoodies.webp',
+      '/images/styles/casual.webp',
+    ],
+    colors: [
+      { name: 'Yellow', hex: '#EAB308' },
+      { name: 'White', hex: '#F3F4F6' },
+      { name: 'Cyan', hex: '#06B6D4' },
+    ],
+    sizes: ['X-Small', 'Small', 'Medium', 'Large', 'X-Large'],
+    details: ['80% Cotton, 20% Polyester fleece', 'Custom vintage wash', 'Kangaroo pocket with bar-tack reinforcement'],
+    faqs: [],
+    reviews: MOCK_REVIEWS,
+  },
+
+  // 23. APPAREL - Merino Silk Tailored T-Shirt
+  {
+    id: 'merino-silk-tailored-tee',
+    name: 'Merino Silk Tailored T-Shirt',
+    slug: 'merino-silk-tailored-tee',
+    description:
+      'Ultra-fine gauge knit t-shirt woven from Australian Merino wool and mulberry silk. Designed with a tailored neckband to layer seamlessly beneath formal suits and blazers.',
+    price: 150,
+    rating: 4.8,
+    reviewCount: 114,
+    category: 't-shirts',
+    dressStyle: ['formal', 'casual', 'party'],
+    gender: 'men',
+    images: [
+      '/images/categories/tshirt_white.webp',
+      '/images/styles/formal.webp',
+    ],
+    colors: [
+      { name: 'Black', hex: '#09090B' },
+      { name: 'White', hex: '#FFFFFF' },
+      { name: 'Deep Navy', hex: '#1E3A8A' },
+    ],
+    sizes: ['Small', 'Medium', 'Large', 'X-Large', 'XX-Large'],
+    isNewArrival: true,
+    details: ['70% Merino Wool, 30% Mulberry Silk', 'Fully fashioned knitted construction', 'Dry clean or gentle hand wash'],
+    faqs: [],
+    reviews: MOCK_REVIEWS,
+  },
+
+  // 24. APPAREL - Tailored Dark Indigo Raw Denim
+  {
+    id: 'tailored-dark-indigo-denim',
+    name: 'Tailored Dark Indigo Raw Denim',
+    slug: 'tailored-dark-indigo-denim',
+    description:
+      'Structured 14oz Japanese raw selvedge denim in a rich dark indigo dye. Clean unwashed finish with minimal contrast stitching for elevated formal and evening styling.',
+    price: 265,
+    rating: 4.9,
+    reviewCount: 203,
+    category: 'jeans',
+    dressStyle: ['formal', 'casual', 'party'],
+    gender: 'men',
+    images: [
+      '/images/categories/jeans.webp',
+      '/images/styles/formal.webp',
+    ],
+    colors: [
+      { name: 'Indigo Blue', hex: '#1E3A8A' },
+      { name: 'Deep Black', hex: '#000000' },
+    ],
+    sizes: ['Small', 'Medium', 'Large', 'X-Large', 'XX-Large'],
+    isTopSelling: true,
+    details: ['14oz Japanese Selvedge Cotton', 'Custom debossed metal hardware', 'Tailored tapered cut'],
     faqs: [],
     reviews: MOCK_REVIEWS,
   },
@@ -623,6 +852,10 @@ export const FILTER_SIZES = [
   'XX-Large',
   '3X-Large',
   '4X-Large',
+  '30',
+  '32',
+  '34',
+  '36',
   'One Size',
   'US 8',
   'US 9',
