@@ -6,7 +6,9 @@ namespace App\Controllers;
 
 use App\Database\Database;
 use App\Middleware\JsonBodyMiddleware;
+use App\Services\AuditService;
 use App\Services\FulfillmentService;
+use App\Services\PaymentFinalizer;
 use App\Support\RequestContext;
 use App\Support\Response;
 use InvalidArgumentException;
@@ -42,7 +44,16 @@ class AdminOrderController
         $params = [];
         $types = '';
 
-        if ($status !== '' && $status !== 'all') {
+        // Release stock from abandoned orders so the list (and stock levels) are current.
+        try {
+            $this->fulfillmentService->expireOverdueOrders(50);
+        } catch (\Throwable $e) {
+            error_log('[Order Expiry Sweep] ' . $e->getMessage());
+        }
+
+        if ($status === 'attention') {
+            $where[] = "o.requires_attention = 1";
+        } elseif ($status !== '' && $status !== 'all') {
             $where[] = "o.order_status = ?";
             $params[] = $status;
             $types .= 's';
@@ -72,6 +83,7 @@ class AdminOrderController
         $sql = "SELECT o.id, o.order_number, o.user_id, o.guest_email, o.order_status, o.payment_status,
                        o.currency, o.subtotal, o.shipping_fee, o.discount_amount, o.grand_total,
                        o.shipping_zone_snapshot, o.shipping_address_snapshot, o.created_at, o.updated_at,
+                       o.expires_at, o.requires_attention, o.attention_reason,
                        p.provider as payment_provider, p.provider_reference as payment_reference, p.status as payment_record_status,
                        s.carrier, s.tracking_number, s.tracking_url, s.status as shipment_status, s.shipped_at, s.delivered_at,
                        (SELECT COUNT(*) FROM `order_items` oi WHERE oi.order_id = o.id) as items_count,
@@ -94,6 +106,8 @@ class AdminOrderController
             $ord['grand_total'] = (float) $ord['grand_total'];
             $ord['items_count'] = (int) $ord['items_count'];
             $ord['total_quantity'] = (int) ($ord['total_quantity'] ?? 0);
+            $ord['requires_attention'] = (bool) $ord['requires_attention'];
+            $ord['requires_attention'] = (bool) $ord['requires_attention'];
 
             $ord['shipping_zone_snapshot'] = is_string($ord['shipping_zone_snapshot'])
                 ? json_decode($ord['shipping_zone_snapshot'], true)
@@ -165,7 +179,7 @@ class AdminOrderController
             Response::error($e->getMessage(), 422, 'INVALID_TRANSITION');
         } catch (\Throwable $e) {
             error_log("[Status Transition Failure] " . $e->getMessage());
-            Response::error("Failed to update order status: " . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+            Response::error('Failed to update the order status. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         }
     }
 
@@ -181,25 +195,26 @@ class AdminOrderController
         $body = JsonBodyMiddleware::getBody();
         $reference = trim((string) ($body['reference'] ?? ''));
         $note = trim((string) ($body['note'] ?? $body['comment'] ?? ''));
-        $comment = "Payment confirmed via WhatsApp / manual bank transfer by admin.";
-        if ($note !== '') {
-            $comment .= " Note: {$note}.";
-        }
-        if ($reference !== '') {
-            $comment .= " Reference: {$reference}.";
-        }
 
         $adminUser = RequestContext::getUser();
         $adminId = $adminUser ? (int) $adminUser['id'] : null;
 
         try {
-            $updated = $this->fulfillmentService->updateOrderStatus((int) $order['id'], 'paid', $comment, $adminId);
-            Response::success($updated, 'WhatsApp payment confirmed and order settled as paid successfully.');
+            $result = (new PaymentFinalizer($this->db))->recordManualPayment((int) $order['id'], $reference, $adminId, $note);
+            AuditService::record($adminId, 'payment.manual_confirm', 'order', (string) $order['id'], null, [
+                'reference' => $reference,
+                'note' => $note,
+                'outcome' => $result['outcome'],
+            ]);
+            Response::success(
+                $this->fulfillmentService->loadOrderSnapshot((int) $order['id']),
+                'Payment recorded and order marked as paid.'
+            );
         } catch (InvalidArgumentException $e) {
-            Response::error($e->getMessage(), 422, 'INVALID_TRANSITION');
+            Response::error($e->getMessage(), 422, 'INVALID_PAYMENT_CONFIRMATION');
         } catch (\Throwable $e) {
             error_log("[Payment Confirmation Failure] " . $e->getMessage());
-            Response::error("Failed to confirm payment: " . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+            Response::error('Failed to confirm the payment. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         }
     }
 
@@ -229,7 +244,7 @@ class AdminOrderController
             Response::error($e->getMessage(), 422, 'VALIDATION_ERROR');
         } catch (\Throwable $e) {
             error_log("[Shipment Assignment Failure] " . $e->getMessage());
-            Response::error("Failed to assign shipment: " . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+            Response::error('Failed to save the shipment. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         }
     }
 
@@ -255,7 +270,7 @@ class AdminOrderController
             Response::error($e->getMessage(), 422, 'INVALID_TRANSITION');
         } catch (\Throwable $e) {
             error_log("[Delivery Confirmation Failure] " . $e->getMessage());
-            Response::error("Failed to confirm delivery: " . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+            Response::error('Failed to confirm delivery. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         }
     }
 

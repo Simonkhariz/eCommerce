@@ -184,7 +184,6 @@ $router->get('/api/v1/admin/orders/export', [AdminDashboardController::class, 'e
 
 // --- Admin Operations & Management (18 Domains) ---
 $router->get('/api/v1/admin/inventory', [AdminOperationsController::class, 'getInventory'], $adminGuard);
-$router->post('/api/v1/admin/inventory/adjust', [AdminOperationsController::class, 'adjustStock'], $adminGuard);
 $router->get('/api/v1/admin/inventory/logs', [AdminOperationsController::class, 'getInventoryLogs'], $adminGuard);
 
 $router->get('/api/v1/admin/customers', [AdminOperationsController::class, 'listCustomers'], $adminGuard);
@@ -195,6 +194,7 @@ $router->get('/api/v1/admin/payments', [AdminOperationsController::class, 'listP
 
 $router->get('/api/v1/admin/refunds', [AdminOperationsController::class, 'listRefunds'], $adminGuard);
 $router->post('/api/v1/admin/refunds', [AdminOperationsController::class, 'createRefund'], $adminGuard);
+$router->patch('/api/v1/admin/refunds/{id}', [AdminOperationsController::class, 'resolveRefund'], $adminGuard);
 
 $router->get('/api/v1/admin/promotions', [AdminOperationsController::class, 'listPromotions'], $adminGuard);
 $router->post('/api/v1/admin/promotions', [AdminOperationsController::class, 'createPromotion'], $adminGuard);

@@ -2,6 +2,8 @@
 -- Seed 001: Initial Store Settings, Categories, Products, Variants & Shipping Zones
 -- Currency: NGN (₦) | Origin Hub: Enugu, Nigeria
 -- Note: No default admin credentials seeded. Admin is created via one-time onboarding.
+-- Setup state is never reset here: seeding an onboarded store must not reopen public setup.
+-- Physical products only.
 -- -----------------------------------------------------------------------------
 
 -- 1. Store Settings (Origin & Operational Configuration)
@@ -12,10 +14,7 @@ INSERT INTO `store_settings` (`key_name`, `value`) VALUES
 ('store_origin_state', 'Enugu'),
 ('store_origin_address', '12 Okpara Avenue, Independence Layout, Enugu, Nigeria'),
 ('store_contact_email', 'support@shop.co'),
-('store_contact_phone', '+234 803 000 0000'),
-('digital_download_expiry_days', '7'),
-('digital_download_max_count', '5'),
-('is_setup_completed', '0')
+('store_contact_phone', '+234 803 000 0000')
 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`);
 
 -- 2. Destination Shipping Zones (Origin: Enugu)
@@ -72,10 +71,10 @@ INSERT INTO `categories` (`name`, `slug`, `description`, `image_url`, `display_o
 ('Shirts', 'shirts', 'Smart casual button-downs and formal shirts.', '/images/products/shirts.jpg', 3, 1),
 ('Hoodies', 'hoodies', 'Heavyweight fleece hoodies and outerwear.', '/images/products/hoodies.jpg', 4, 1),
 ('Jeans', 'jeans', 'Slim-fit, relaxed, and classic denim.', '/images/products/jeans.jpg', 5, 1),
-('Digital Assets', 'digital-assets', 'Digital lookbooks, style guides, and fashion assets.', '/images/products/digital.jpg', 6, 1)
+('Accessories', 'accessories', 'Caps, bags, belts and everyday accessories.', '/images/products/accessories.jpg', 6, 1)
 ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
 
--- 5. Products & Product Variants (Physical & Digital)
+-- 5. Products & Product Variants (Physical)
 -- Physical Product 1: Gradient Graphic T-shirt
 INSERT INTO `products` (`uuid`, `category_id`, `name`, `slug`, `description`, `product_type`, `status`, `base_price`, `original_price`, `currency`, `sku`, `rating_avg`, `rating_count`, `is_featured`, `is_flash_deal`, `dress_style`) VALUES
 ('prod-uuid-001', 1, 'Gradient Graphic T-shirt', 'gradient-graphic-tshirt', 'This graphic t-shirt is perfect for any casual occasion. Crafted from 100% breathable heavyweight cotton.', 'physical', 'published', 14500.00, 24200.00, 'NGN', 'SKU-TSHIRT-GRAD', 4.50, 42, 1, 1, 'Casual')
@@ -119,19 +118,4 @@ INSERT INTO `product_images` (`product_id`, `image_url`, `alt_text`, `is_primary
 (3, 'https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?auto=format&fit=crop&w=600&q=80', 'Checkered Shirt Front', 1, 1)
 ON DUPLICATE KEY UPDATE `image_url` = VALUES(`image_url`);
 
--- Digital Product 4: Shop.co Digital Lookbook & Styling Masterclass 2026
-INSERT INTO `products` (`uuid`, `category_id`, `name`, `slug`, `description`, `product_type`, `status`, `base_price`, `original_price`, `currency`, `sku`, `rating_avg`, `rating_count`, `is_featured`, `is_flash_deal`, `dress_style`) VALUES
-('prod-uuid-004', 6, 'Shop.co Digital Lookbook & Styling Guide 2026', 'shopco-digital-lookbook-2026', 'High-resolution digital fashion lookbook and streetwear styling guide (PDF). Delivered instantly upon verified payment.', 'digital', 'published', 5000.00, 10000.00, 'NGN', 'SKU-DIGITAL-LOOKBOOK-2026', 4.90, 85, 1, 0, 'Party')
-ON DUPLICATE KEY UPDATE `base_price` = VALUES(`base_price`);
 
-INSERT INTO `product_variants` (`product_id`, `sku`, `size`, `color_name`, `color_hex`, `price_override`, `stock_quantity`, `low_stock_threshold`) VALUES
-(4, 'SKU-DIGITAL-LOOKBOOK-V1', 'Digital Edition', 'Standard', '#000000', NULL, 9999, 10)
-ON DUPLICATE KEY UPDATE `stock_quantity` = VALUES(`stock_quantity`);
-
-INSERT INTO `product_images` (`product_id`, `image_url`, `alt_text`, `is_primary`, `display_order`) VALUES
-(4, 'https://images.unsplash.com/photo-1512436991641-6745cdb1723f?auto=format&fit=crop&w=600&q=80', 'Digital Lookbook Cover', 1, 1)
-ON DUPLICATE KEY UPDATE `image_url` = VALUES(`image_url`);
-
-INSERT INTO `digital_deliverables` (`product_id`, `file_name`, `storage_path`, `mime_type`, `file_size_bytes`, `version`) VALUES
-(4, 'shopco_style_guide_2026.pdf', 'private-downloads/shopco_style_guide_2026.pdf', 'application/pdf', 14500000, '1.0')
-ON DUPLICATE KEY UPDATE `file_name` = VALUES(`file_name`);

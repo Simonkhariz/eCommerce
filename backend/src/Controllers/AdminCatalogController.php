@@ -8,6 +8,7 @@ use App\Middleware\JsonBodyMiddleware;
 use App\Repositories\CategoryRepository;
 use App\Repositories\ProductRepository;
 use App\Services\AuditService;
+use App\Support\RequestContext;
 use App\Support\Response;
 use App\Validators\CategoryValidator;
 use App\Validators\ProductValidator;
@@ -140,7 +141,16 @@ class AdminCatalogController
         $images = array_key_exists('images', $body) ? $body['images'] : null;
 
         $mergedData = array_merge($existing, $body);
-        $this->productRepo->update($id, $mergedData, $variants, $images);
+        try {
+            $this->productRepo->update($id, $mergedData, $variants, $images);
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422, 'VARIANT_CONFLICT');
+        } catch (\mysqli_sql_exception $e) {
+            if ($e->getCode() === 1062) {
+                Response::error('Two variants share the same SKU or the same size and colour. Make each variant unique.', 422, 'DUPLICATE_VARIANT');
+            }
+            throw $e;
+        }
         $updated = $this->productRepo->findDetail((string) $id, true);
 
         AuditService::record(null, 'PRODUCT_UPDATED', 'product', (string) $id, [
@@ -198,6 +208,11 @@ class AdminCatalogController
     public function adjustInventory(): void
     {
         $body = JsonBodyMiddleware::getBody();
+        // The Inventory screen sends `change_amount`; the product screen sends `adjustment`.
+        if (!isset($body['adjustment']) && isset($body['change_amount'])) {
+            $body['adjustment'] = $body['change_amount'];
+        }
+
         $errors = ProductValidator::validateInventoryAdjustment($body);
         if (!empty($errors)) {
             Response::error('Validation failed for inventory adjustment.', 422, 'VALIDATION_ERROR', $errors);
@@ -207,19 +222,13 @@ class AdminCatalogController
         $adjustment = (int) $body['adjustment'];
         $reason = trim((string) $body['reason']);
         $notes = !empty($body['notes']) ? trim((string) $body['notes']) : null;
+        $admin = RequestContext::getUser();
 
         try {
-            $result = $this->productRepo->adjustVariantStock($variantId, $adjustment, $reason, $notes);
-
-            AuditService::record(null, 'INVENTORY_ADJUSTED', 'product_variant', (string) $variantId, null, [
-                'adjustment' => $adjustment,
-                'reason' => $reason,
-                'notes' => $notes,
-            ]);
-
+            $result = $this->productRepo->adjustVariantStock($variantId, $adjustment, $reason, $notes, $admin ? (int) $admin['id'] : null);
             Response::success($result, 'Inventory adjusted successfully.');
-        } catch (\Throwable $e) {
-            Response::error($e->getMessage(), 400, 'INVENTORY_ADJUSTMENT_FAILED');
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422, 'INVENTORY_ADJUSTMENT_FAILED');
         }
     }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
 import confetti from 'canvas-confetti';
@@ -84,6 +84,15 @@ const NIGERIAN_STATES = [
   'Zamfara',
 ];
 
+function newIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '');
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose }) => {
   const { items, appliedPromo, clearCart } = useCart();
   const { user, addresses } = useAuth();
@@ -109,6 +118,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
     { id: 'whatsapp', name: 'Request from WhatsApp', description: 'Send your invoice directly to our support team on WhatsApp', badge: 'Manual Support', is_default: false },
   ]);
   const [selectedMethod, setSelectedMethod] = useState<'monnify' | 'kora' | 'whatsapp'>('monnify');
+  // One key per checkout attempt: a double click or a retry after a dropped response
+  // returns the same order instead of creating (and reserving stock for) a second one.
+  const idempotencyKeyRef = useRef<string | null>(null);
 
 
   const defaultAddr = addresses.find((a) => a.is_default) || addresses[0];
@@ -223,6 +235,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
 
     setIsSubmitting(true);
 
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = newIdempotencyKey();
+    }
+
     try {
       const checkoutItems = prepareCheckoutItems();
       const orderData = await apiCreateCheckoutOrder({
@@ -239,8 +255,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
         shipping_zone_id: quote.shipping_zone.id,
         coupon_code: appliedPromo?.code,
         notes: formData.notes,
-      });
+      }, idempotencyKeyRef.current);
 
+      idempotencyKeyRef.current = null;
       setSavedOrderItems([...items]);
       setSavedOrderQuote(quote);
       setCreatedOrder(orderData);
@@ -284,27 +301,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
   };
 
 
-  // Dynamically load Monnify checkout Web SDK
-  const loadMonnifySdk = (): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      if (typeof window === 'undefined') return reject(new Error('Window unavailable'));
-      if ((window as any).MonnifySDK) return resolve((window as any).MonnifySDK);
-
-      const existingScript = document.querySelector('script[src*="monnify.js"]');
-      if (existingScript) {
-        existingScript.addEventListener('load', () => resolve((window as any).MonnifySDK));
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = 'https://sdk.monnify.com/plugin/monnify.js';
-      script.async = true;
-      script.onload = () => resolve((window as any).MonnifySDK);
-      script.onerror = () => reject(new Error('Failed to load Monnify checkout script'));
-      document.head.appendChild(script);
-    });
-  };
-
   const handlePayOrder = async () => {
     if (!createdOrder) return;
     setIsInitializingPayment(true);
@@ -315,26 +311,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
         ? `${window.location.origin}/checkout/callback?order=${encodeURIComponent(createdOrder.order_number)}`
         : undefined;
 
-    // 1. If Request from WhatsApp selected
-    if (selectedMethod === 'whatsapp') {
-      const url = buildWhatsAppInvoiceUrl({
-        order_number: createdOrder.order_number,
-        grand_total: createdOrder.grand_total,
-        subtotal: createdOrder.subtotal ?? savedOrderQuote?.subtotal,
-        shipping_fee: createdOrder.shipping_fee ?? savedOrderQuote?.shipping_fee,
-        discount_amount: createdOrder.discount_amount ?? savedOrderQuote?.discount_amount,
-        items: savedOrderItems.length > 0 ? savedOrderItems : (createdOrder as any).items,
-        guest_email: createdOrder.guest_email,
-        payment_status: createdOrder.payment_status,
-        guest_access_token: createdOrder.guest_access_token,
-        shipping_address: createdOrder.shipping_address,
-      });
-      window.open(url, '_blank');
-      setIsInitializingPayment(false);
-      return;
-    }
+    // Open the WhatsApp tab synchronously (inside the click) so pop-up blockers allow it.
+    const whatsappTab = selectedMethod === 'whatsapp' ? window.open('about:blank', '_blank') : null;
 
     try {
+      // Every method starts a server-side payment attempt: for WhatsApp this keeps the
+      // order's stock reserved while the customer arranges the transfer.
       const res = await apiInitializePayment(
         createdOrder.order_number,
         createdOrder.guest_access_token,
@@ -342,74 +324,38 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
         selectedMethod
       );
 
-      // 2. If Monnify selected
-      if (selectedMethod === 'monnify') {
-        // Direct hosted redirect eliminates React Node.removeChild DOM errors and ensures smooth mobile bank transfers
-        if (res.checkout_url) {
-          window.location.href = res.checkout_url;
-          return;
-        }
-
-        const monnifySdk = await loadMonnifySdk();
-        setIsInitializingPayment(false);
-
-        if (!monnifySdk || typeof monnifySdk.initialize !== 'function') {
-          throw new Error('Monnify SDK is not available. Please verify network connection or choose another payment method.');
-        }
-
-        if (!res.api_key || !res.contract_code) {
-          throw new Error('Monnify credentials are not fully configured in backend/.env (MONNIFY_CONTRACT_CODE is required).');
-        }
-
-        monnifySdk.initialize({
-          amount: res.amount,
-          currency: res.currency || 'NGN',
-          reference: res.provider_reference,
-          customerFullName: res.customer_name || formData.fullName || 'Valued Customer',
-          customerEmail: res.customer_email || formData.email || 'customer@shopco.ng',
-          apiKey: res.api_key,
-          contractCode: res.contract_code,
-          paymentDescription: res.payment_description || `Order #${createdOrder.order_number} at SHOP.CO`,
-          isTestMode: res.is_test_mode ?? true,
-          onComplete: function (response: any) {
-            console.log('Monnify onComplete response:', response);
-            setIsInitializingPayment(false);
-            const status = String(
-              response?.status || response?.paymentStatus || response?.transactionStatus || ''
-            ).toUpperCase();
-
-            if (status === 'SUCCESS' || status === 'PAID') {
-              window.location.href = `/checkout/callback?order=${encodeURIComponent(createdOrder.order_number)}&reference=${encodeURIComponent(res.provider_reference)}`;
-            } else {
-              const msg =
-                response?.message ||
-                response?.responseMessage ||
-                (typeof response === 'string' ? response : null) ||
-                'Payment was not completed. Please try again or switch to another payment method.';
-              setPaymentError(msg);
-            }
-          },
-          onClose: function (data: any) {
-            console.log('Monnify checkout closed:', data);
-            setIsInitializingPayment(false);
-          },
+      if (selectedMethod === 'whatsapp') {
+        const url = buildWhatsAppInvoiceUrl({
+          order_number: createdOrder.order_number,
+          grand_total: createdOrder.grand_total,
+          subtotal: createdOrder.subtotal ?? savedOrderQuote?.subtotal,
+          shipping_fee: createdOrder.shipping_fee ?? savedOrderQuote?.shipping_fee,
+          discount_amount: createdOrder.discount_amount ?? savedOrderQuote?.discount_amount,
+          items: savedOrderItems.length > 0 ? savedOrderItems : (createdOrder as any).items,
+          guest_email: createdOrder.guest_email,
+          payment_status: createdOrder.payment_status,
+          guest_access_token: createdOrder.guest_access_token,
+          shipping_address: createdOrder.shipping_address,
         });
-      } else if (selectedMethod === 'kora') {
-        // 3. If Kora selected
-        if (res.checkout_url) {
-          window.location.href = res.checkout_url;
+        if (whatsappTab) {
+          whatsappTab.location.href = url;
         } else {
-          throw new Error('Kora did not return a valid checkout session URL.');
+          window.location.href = url;
         }
+        setIsInitializingPayment(false);
+        return;
       }
+
+      if (!res.checkout_url) {
+        throw new Error('The payment provider did not return a checkout page. Please try again or choose another payment method.');
+      }
+      window.location.href = res.checkout_url;
     } catch (err: any) {
-      setPaymentError(
-        err.message || 'Payment initialization error. Check your sandbox credentials in backend/.env.'
-      );
+      whatsappTab?.close();
+      setPaymentError(err?.message || 'We could not start the payment. Please try again or choose another payment method.');
       setIsInitializingPayment(false);
     }
   };
-
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">

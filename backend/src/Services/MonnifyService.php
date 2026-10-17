@@ -6,15 +6,18 @@ namespace App\Services;
 
 use App\Config\Env;
 use App\Database\Database;
-use App\Services\MailService;
 use InvalidArgumentException;
 use RuntimeException;
 
 /**
- * Isolated payment service integrating Monnify Gateway:
- * - Direct Checkout SDK initialization
- * - Authoritative server-to-server transaction query/verification via API v2
- * - Webhook processing with HMAC-SHA512 cryptographic verification
+ * Monnify hosted-checkout integration.
+ *
+ * - Credentials are read only from backend environment variables and never sent to the browser.
+ * - Each checkout attempt gets its own payment row and reference.
+ * - Webhooks must carry a valid `monnify-signature` (HMAC-SHA512 of the raw body, keyed with
+ *   the client secret); unsigned or mis-signed webhooks are rejected.
+ * - All state changes go through PaymentFinalizer, which locks rows, de-duplicates and checks
+ *   the amount and currency against the order.
  */
 class MonnifyService
 {
@@ -22,383 +25,342 @@ class MonnifyService
     private string $baseUrl;
     private string $apiKey;
     private string $secretKey;
-    private string $walletAccountNumber;
     private string $contractCode;
+    private PaymentFinalizer $finalizer;
+    private PaymentAttempts $attempts;
 
-    public function __construct(?Database $db = null)
+    /**
+     * Optional custom HTTP executor for tests (same contract as KoraService).
+     *
+     * @var (callable(string, string, array, ?string, int): array)|null
+     */
+    private $httpExecutor = null;
+
+    public function __construct(?Database $db = null, ?callable $httpExecutor = null)
     {
         $this->db = $db ?? Database::getInstance();
+        $this->httpExecutor = $httpExecutor;
+        $this->finalizer = new PaymentFinalizer($this->db);
+        $this->attempts = new PaymentAttempts($this->db);
 
         $this->baseUrl = rtrim(Env::get('MONNIFY_API_BASE_URL', 'https://sandbox.monnify.com'), '/');
         $this->apiKey = trim(Env::get('MONNIFY_API_KEY', ''));
         $this->secretKey = trim(Env::get('MONNIFY_SECRET_KEY', ''));
-        $this->walletAccountNumber = trim(Env::get('MONNIFY_WALLET_ACCOUNT_NUMBER', ''));
         $this->contractCode = trim(Env::get('MONNIFY_CONTRACT_CODE', ''));
     }
 
     /**
-     * Get OAuth2 bearer token from Monnify.
+     * Get an OAuth2 bearer token from Monnify.
      */
     public function getAccessToken(): string
     {
-        $url = "{$this->baseUrl}/api/v1/auth/login";
-        $auth = base64_encode("{$this->apiKey}:{$this->secretKey}");
-
-        $headers = [
-            'Authorization: Basic ' . $auth,
-            'Content-Type: application/json',
-            'Accept: application/json',
-        ];
-
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-        $response = curl_exec($ch);
-        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err = curl_error($ch);
-        curl_close($ch);
-
-        if ($err || $status < 200 || $status >= 300) {
-            throw new RuntimeException("Failed to authenticate with Monnify API: {$err} (HTTP {$status})");
+        if ($this->apiKey === '' || $this->secretKey === '') {
+            throw new RuntimeException('Monnify payments are not configured on this store yet.');
         }
 
-        $json = json_decode((string)$response, true);
+        $result = $this->executeHttpRequest(
+            'POST',
+            "{$this->baseUrl}/api/v1/auth/login",
+            [
+                'Authorization: Basic ' . base64_encode("{$this->apiKey}:{$this->secretKey}"),
+                'Content-Type: application/json',
+                'Accept: application/json',
+            ],
+            '',
+            15
+        );
+
+        if ($result['error'] !== null || $result['status_code'] < 200 || $result['status_code'] >= 300) {
+            throw new RuntimeException("Could not authenticate with Monnify (HTTP {$result['status_code']}).");
+        }
+
+        $json = json_decode($result['body'], true);
         $token = $json['responseBody']['accessToken'] ?? null;
         if (!$token) {
-            throw new RuntimeException("Missing access token in Monnify auth response.");
+            throw new RuntimeException("Monnify did not return an access token.");
         }
 
         return $token;
     }
 
     /**
-     * Initialize Monnify checkout for an order.
-     * Records a pending payment record and returns config for Monnify Web SDK popup.
+     * Initialize a Monnify hosted checkout for an order and return its checkout URL.
      */
     public function initializeCheckout(string|int $orderIdOrNumber, ?string $redirectUrl = null): array
     {
-        $order = $this->loadOrder($orderIdOrNumber);
-
-        if ($this->contractCode === '' || $this->contractCode === $this->walletAccountNumber) {
-            throw new InvalidArgumentException(
-                "Monnify Contract Code is not configured. Please copy the 10-digit Contract Code from your Monnify Dashboard (Developers > API Keys & Contracts) and set MONNIFY_CONTRACT_CODE in backend/.env."
+        if ($this->contractCode === '') {
+            throw new RuntimeException(
+                'Monnify is not fully configured: set MONNIFY_CONTRACT_CODE in backend/.env (Monnify Dashboard > Developers > API Keys & Contracts).'
             );
         }
 
-        if ($order['order_status'] !== 'pending_payment' && $order['order_status'] !== 'pending') {
-            throw new InvalidArgumentException("Order '{$order['order_number']}' cannot be initialized for payment. Current status: {$order['order_status']}.");
-        }
+        $order = $this->loadOrder($orderIdOrNumber);
+        $this->attempts->assertPayable($order);
 
-        $orderId = (int) $order['id'];
         $orderNumber = $order['order_number'];
         $amount = (float) $order['grand_total'];
         $currency = strtoupper(trim($order['currency'] ?? 'NGN'));
 
-        // Generate unique provider reference for each checkout attempt to avoid Monnify duplicate reference errors
-        $providerReference = 'MNFY-' . $orderNumber . '-' . substr(bin2hex(random_bytes(4)), 0, 8);
-
-        // Record or update pending payment in database
-        $existing = $this->db->fetchOne(
-            "SELECT `id`, `provider_reference`, `status` FROM `payments` WHERE `order_id` = ? AND `provider` = 'monnify' AND `status` = 'pending' ORDER BY `id` DESC LIMIT 1",
-            'i',
-            [$orderId]
-        );
-
-        if ($existing !== null) {
-            $paymentId = (int) $existing['id'];
-            $this->db->execute(
-                "UPDATE `payments` SET `provider_reference` = ?, `amount` = ?, `currency` = ?, `updated_at` = NOW() WHERE `id` = ?",
-                'sdsi',
-                [$providerReference, $amount, $currency, $paymentId]
-            );
-        } else {
-            $paymentId = $this->db->insert(
-                "INSERT INTO `payments` (`order_id`, `provider`, `provider_reference`, `amount`, `currency`, `status`, `created_at`, `updated_at`)
-                 VALUES (?, 'monnify', ?, ?, ?, 'pending', NOW(), NOW())",
-                'isds',
-                [$orderId, $providerReference, $amount, $currency]
-            );
-        }
-
         $addressSnapshot = is_string($order['shipping_address_snapshot'])
             ? json_decode($order['shipping_address_snapshot'], true)
             : ($order['shipping_address_snapshot'] ?? []);
+        $customerName = trim((string) ($addressSnapshot['full_name'] ?? '')) ?: 'Customer';
+        $customerEmail = trim((string) $order['guest_email']);
+        if ($customerEmail === '' || !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidArgumentException('A valid customer email is required to initialize payment.');
+        }
 
-        $customerName = trim($addressSnapshot['full_name'] ?? 'Shop.co Customer');
-        $customerEmail = trim($order['guest_email'] ?? 'test@shopco.ng');
+        $providerReference = 'MNFY-' . $orderNumber . '-' . strtoupper(bin2hex(random_bytes(4)));
+        $paymentId = $this->attempts->open($order, 'monnify', $providerReference, PaymentAttempts::gatewayWindowMinutes());
 
-        // Authoritative server-to-server transaction initialization with Monnify
-        $checkoutUrl = null;
-        try {
-            $accessToken = $this->getAccessToken();
-            $initUrl = "{$this->baseUrl}/api/v1/merchant/transactions/init-transaction";
-
-            $initPayload = json_encode([
+        $accessToken = $this->getAccessToken();
+        $result = $this->executeHttpRequest(
+            'POST',
+            "{$this->baseUrl}/api/v1/merchant/transactions/init-transaction",
+            [
+                'Authorization: Bearer ' . $accessToken,
+                'Content-Type: application/json',
+                'Accept: application/json',
+            ],
+            json_encode([
                 'amount' => $amount,
                 'customerName' => $customerName,
                 'customerEmail' => $customerEmail,
                 'paymentReference' => $providerReference,
-                'paymentDescription' => "Order #{$orderNumber} at SHOP.CO",
+                'paymentDescription' => "Order #{$orderNumber}",
                 'currencyCode' => $currency,
                 'contractCode' => $this->contractCode,
                 'redirectUrl' => $redirectUrl,
                 'paymentMethods' => ['CARD', 'ACCOUNT_TRANSFER'],
-            ]);
+            ]),
+            20
+        );
 
-            $ch = curl_init($initUrl);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $initPayload);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Authorization: Bearer ' . $accessToken,
-                'Content-Type: application/json',
-                'Accept: application/json',
-            ]);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-            $initResponse = curl_exec($ch);
-            $initStatus = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
+        $json = json_decode($result['body'], true);
+        $checkoutUrl = is_array($json) && !empty($json['requestSuccessful'])
+            ? ($json['responseBody']['checkoutUrl'] ?? null)
+            : null;
 
-            if ($initStatus >= 200 && $initStatus < 300) {
-                $initData = json_decode((string) $initResponse, true);
-                if (!empty($initData['requestSuccessful'])) {
-                    $checkoutUrl = $initData['responseBody']['checkoutUrl'] ?? null;
-                }
-            }
-        } catch (\Throwable $e) {
-            error_log("Monnify init-transaction warning: " . $e->getMessage());
+        if ($result['error'] !== null || $checkoutUrl === null) {
+            $this->attempts->recordMetadata($paymentId, [
+                'error' => 'INIT_FAILED',
+                'http_status' => $result['status_code'],
+                'provider_message' => is_array($json) ? ($json['responseMessage'] ?? null) : null,
+                'timestamp' => date('Y-m-d H:i:s'),
+                'order_recoverable' => true,
+            ]);
+            throw new RuntimeException('Monnify could not start the checkout right now. Your order is saved; please try again shortly or choose another payment method.');
         }
+
+        $this->attempts->recordMetadata($paymentId, [
+            'initialization_status' => 'initialized',
+            'transaction_reference' => $json['responseBody']['transactionReference'] ?? null,
+            'initialized_at' => date('Y-m-d H:i:s'),
+        ]);
 
         return [
             'order_number' => $orderNumber,
             'provider' => 'monnify',
             'provider_reference' => $providerReference,
+            'checkout_url' => $checkoutUrl,
             'amount' => $amount,
             'currency' => $currency,
             'status' => 'pending',
-            'checkout_url' => $checkoutUrl,
-            'api_key' => $this->apiKey,
-            'contract_code' => $this->contractCode,
-            'customer_name' => $customerName,
-            'customer_email' => $customerEmail,
-            'payment_description' => "Order #{$orderNumber} at SHOP.CO",
-            'is_test_mode' => str_contains($this->apiKey, 'MK_TEST'),
-            'redirect_url' => $redirectUrl,
+            'expires_in_minutes' => PaymentAttempts::gatewayWindowMinutes(),
         ];
     }
 
     /**
-     * Authoritative server-to-server query verification via Monnify API v2.
-     * GET /api/v2/merchant/transactions/query?paymentReference={ref}
+     * Server-to-server status query (GET /api/v2/merchant/transactions/query) used when the
+     * customer returns from checkout. Gateway errors leave the payment pending.
      */
     public function verifyTransaction(string $providerReference): array
     {
         $ref = trim($providerReference);
         if ($ref === '') {
-            throw new InvalidArgumentException("Transaction reference is required for Monnify verification.");
+            throw new InvalidArgumentException('Transaction reference is required for Monnify verification.');
         }
 
-        // 1. Check local database record
+        $payment = $this->loadPaymentWithOrder($ref);
+        if ($payment['status'] !== 'pending') {
+            return $this->statusResponse($payment, 'local_database');
+        }
+
+        try {
+            $token = $this->getAccessToken();
+            $result = $this->executeHttpRequest(
+                'GET',
+                "{$this->baseUrl}/api/v2/merchant/transactions/query?paymentReference=" . urlencode($ref),
+                [
+                    'Authorization: Bearer ' . $token,
+                    'Accept: application/json',
+                ],
+                null,
+                15
+            );
+
+            $json = json_decode($result['body'], true);
+            if ($result['error'] === null && $result['status_code'] >= 200 && $result['status_code'] < 300
+                && is_array($json) && is_array($json['responseBody'] ?? null)) {
+                $this->applyStatus($ref, $json['responseBody'], 'query');
+            }
+        } catch (RuntimeException $e) {
+            error_log('[Monnify Query] ' . $e->getMessage());
+        }
+
+        return $this->statusResponse($this->loadPaymentWithOrder($ref), 'monnify_query');
+    }
+
+    /**
+     * Handle a Monnify webhook. The signature is mandatory.
+     */
+    public function handleWebhook(string $rawBody, string $signatureHeader): array
+    {
+        if ($this->secretKey === '') {
+            throw new RuntimeException('Monnify webhook received but MONNIFY_SECRET_KEY is not configured.');
+        }
+
+        $signature = strtolower(trim($signatureHeader));
+        $computed = hash_hmac('sha512', $rawBody, $this->secretKey);
+        if ($signature === '' || !hash_equals($computed, $signature)) {
+            $this->recordWebhookEvent('invalid-signature:' . substr(hash('sha256', $rawBody), 0, 32), 'unknown', 0, 'failed', [
+                'error' => $signature === '' ? 'MISSING_SIGNATURE' : 'SIGNATURE_VERIFICATION_FAILED',
+            ]);
+            throw new InvalidArgumentException('Invalid or missing Monnify webhook signature.');
+        }
+
+        $payload = json_decode($rawBody, true);
+        if (!is_array($payload)) {
+            throw new InvalidArgumentException('Malformed webhook JSON body.');
+        }
+
+        $eventType = (string) ($payload['eventType'] ?? 'unknown');
+        $eventData = is_array($payload['eventData'] ?? null) ? $payload['eventData'] : [];
+        $reference = trim((string) ($eventData['paymentReference'] ?? ''));
+        $status = strtoupper(trim((string) ($eventData['paymentStatus'] ?? '')));
+        $eventReference = mb_substr(
+            ($eventData['transactionReference'] ?? $reference) . ':' . $eventType . ':' . $status,
+            0,
+            100
+        );
+
+        $existing = $this->db->fetchOne(
+            "SELECT `processing_result` FROM `payment_webhook_events` WHERE `provider` = 'monnify' AND `event_reference` = ?",
+            's',
+            [$eventReference]
+        );
+        if ($existing !== null && in_array($existing['processing_result'], ['processed', 'ignored_duplicate'], true)) {
+            return ['status' => 'ignored_duplicate', 'event_reference' => $eventReference];
+        }
+
+        if ($reference === '') {
+            $this->recordWebhookEvent($eventReference, $eventType, 1, 'ignored_duplicate', ['message' => 'No paymentReference (not a collection event)']);
+            return ['status' => 'ignored', 'message' => 'Event has no payment reference.'];
+        }
+
+        $result = $this->applyStatus($reference, $eventData, 'webhook');
+
+        $this->recordWebhookEvent($eventReference, $eventType, 1, KoraService::processingResultFor($result['outcome']), [
+            'reference' => $reference,
+            'payment_status' => $status,
+            'outcome' => $result['outcome'],
+            'order_number' => $result['order_number'] ?? null,
+            'amount_paid' => $eventData['amountPaid'] ?? null,
+        ]);
+
+        return ['status' => $result['outcome']] + $result;
+    }
+
+    /**
+     * Apply a Monnify transaction status (from a signed webhook or a server-side query).
+     *
+     * @param array $body Monnify transaction object (eventData or responseBody)
+     */
+    private function applyStatus(string $reference, array $body, string $source): array
+    {
+        $status = strtoupper(trim((string) ($body['paymentStatus'] ?? '')));
+        // Monnify collections are NGN-only; the field name differs between webhook and query payloads.
+        $currency = (string) ($body['currency'] ?? ($body['currencyCode'] ?? 'NGN'));
+        $safePayload = array_intersect_key($body, array_flip([
+            'transactionReference', 'paymentReference', 'amountPaid', 'totalPayable', 'paymentStatus',
+            'paymentMethod', 'paidOn', 'currency', 'currencyCode',
+        ]));
+
+        return match ($status) {
+            // The finalizer compares amountPaid with the order total: PARTIALLY_PAID becomes a
+            // flagged underpayment (never marked paid), OVERPAID is paid and flagged for refund.
+            'PAID', 'OVERPAID', 'PARTIALLY_PAID' => $this->finalizer->finalizeSuccess($reference, [
+                'amount' => $body['amountPaid'] ?? 0,
+                'currency' => $currency,
+                'method' => strtolower((string) ($body['paymentMethod'] ?? '')),
+                'payload' => $safePayload + ['source' => $source],
+                'label' => 'Monnify',
+            ]),
+            'FAILED', 'EXPIRED', 'ABANDONED', 'CANCELLED', 'REVERSED' => $this->finalizer->finalizeFailure(
+                $reference,
+                "Monnify reported {$status}",
+                $safePayload + ['source' => $source],
+                'Monnify'
+            ),
+            default => ['outcome' => PaymentFinalizer::OUTCOME_IGNORED, 'provider_reference' => $reference, 'message' => "Status {$status} needs no action"],
+        };
+    }
+
+    private function recordWebhookEvent(string $eventReference, string $eventType, int $signatureValid, string $processingResult, array $metadata): void
+    {
+        try {
+            $this->db->execute(
+                "INSERT INTO `payment_webhook_events` (`provider`, `event_reference`, `event_type`, `signature_valid`, `processing_result`, `payload_metadata`)
+                 VALUES ('monnify', ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE `signature_valid` = VALUES(`signature_valid`), `processing_result` = VALUES(`processing_result`),
+                                         `payload_metadata` = VALUES(`payload_metadata`)",
+                'ssiss',
+                [mb_substr($eventReference, 0, 100), mb_substr($eventType, 0, 100), $signatureValid, $processingResult, json_encode($metadata)]
+            );
+        } catch (\Throwable $e) {
+            error_log('[Monnify Webhook Log Failure] ' . $e->getMessage());
+        }
+    }
+
+    private function loadPaymentWithOrder(string $ref): array
+    {
         $payment = $this->db->fetchOne(
-            "SELECT p.*, o.id as order_id, o.order_number, o.order_status, o.payment_status as order_payment_status, o.grand_total, o.currency as order_currency
+            "SELECT p.*, o.order_number, o.order_status, o.grand_total, o.currency AS order_currency
              FROM `payments` p
              JOIN `orders` o ON p.order_id = o.id
-             WHERE p.provider_reference = ?",
+             WHERE p.provider_reference = ? AND p.provider = 'monnify'",
             's',
             [$ref]
         );
 
         if ($payment === null) {
-            throw new InvalidArgumentException("No payment found matching provider reference '{$ref}'.");
+            throw new InvalidArgumentException("No Monnify payment found matching reference '{$ref}'.");
         }
 
-        // If already verified successful in MySQL, return cached state
-        if ($payment['status'] === 'successful' && $payment['order_status'] === 'paid') {
-            $verifiedAmount = (float) (
-                (!empty($payment['amount']) && (float) $payment['amount'] > 0)
-                    ? $payment['amount']
-                    : ($payment['grand_total'] ?? 0.0)
-            );
-            return [
-                'order_number' => $payment['order_number'],
-                'provider_reference' => $ref,
-                'provider' => 'monnify',
-                'status' => 'successful',
-                'order_status' => 'paid',
-                'amount' => $verifiedAmount,
-                'currency' => $payment['currency'] ?: ($payment['order_currency'] ?: 'NGN'),
-                'verified_at' => $payment['verified_at'] ?? date('Y-m-d H:i:s'),
-                'source' => 'local_database_cached',
-            ];
-        }
+        return $payment;
+    }
 
-        // 2. Query Monnify v2 transactions query endpoint
-        try {
-            $token = $this->getAccessToken();
-            $url = "{$this->baseUrl}/api/v2/merchant/transactions/query?paymentReference=" . urlencode($ref);
-
-            $ch = curl_init($url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Authorization: Bearer ' . $token,
-                'Content-Type: application/json',
-                'Accept: application/json',
-            ]);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-            $response = curl_exec($ch);
-            $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curlErr = curl_error($ch);
-            curl_close($ch);
-
-            $fallbackAmount = (float) (
-                (!empty($payment['amount']) && (float) $payment['amount'] > 0)
-                    ? $payment['amount']
-                    : ($payment['grand_total'] ?? 0.0)
-            );
-
-            if ($curlErr || $statusCode < 200 || $statusCode >= 300) {
-                // If Cloudflare blocks or remote unavailable, check if reference was recorded as pending
-                return [
-                    'order_number' => $payment['order_number'],
-                    'provider_reference' => $ref,
-                    'provider' => 'monnify',
-                    'status' => $payment['status'],
-                    'order_status' => $payment['order_status'],
-                    'amount' => $fallbackAmount,
-                    'currency' => $payment['currency'] ?: ($payment['order_currency'] ?: 'NGN'),
-                    'message' => 'Payment status is pending gateway settlement.',
-                    'source' => 'monnify_query',
-                ];
-            }
-
-            $json = json_decode((string)$response, true);
-            $body = $json['responseBody'] ?? [];
-            $paymentStatus = strtoupper(trim((string)($body['paymentStatus'] ?? '')));
-
-            if ($paymentStatus === 'PAID') {
-                $amountPaid = (float) (
-                    (!empty($body['amountPaid']) && (float) $body['amountPaid'] > 0)
-                        ? $body['amountPaid']
-                        : $fallbackAmount
-                );
-                $paymentMethod = (string)($body['paymentMethod'] ?? 'monnify');
-
-                $this->db->transaction(function (Database $db) use ($payment, $ref, $amountPaid, $paymentMethod, $body) {
-                    $orderId = (int)$payment['order_id'];
-
-                    $db->executeUpdate(
-                        "UPDATE `payments` SET `status` = 'successful', `amount` = ?, `payment_method` = ?, `verified_at` = NOW(), `provider_payload_redacted` = ?, `updated_at` = NOW() WHERE `id` = ?",
-                        'dssi',
-                        [$amountPaid, $paymentMethod, json_encode($body), (int)$payment['id']]
-                    );
-
-                    $db->executeUpdate(
-                        "UPDATE `orders` SET `payment_status` = 'successful', `order_status` = 'paid', `updated_at` = NOW() WHERE `id` = ?",
-                        'i',
-                        [$orderId]
-                    );
-
-                    $db->insert(
-                        "INSERT INTO `order_status_history` (`order_id`, `previous_status`, `new_status`, `comment`)
-                         VALUES (?, 'pending_payment', 'paid', ?)",
-                        'is',
-                        [$orderId, "Payment confirmed via Monnify. Reference: {$ref}"]
-                    );
-
-                    // Increment promo used_count if coupon applied
-                    $orderRow = $db->fetchOne("SELECT * FROM `orders` WHERE `id` = ?", 'i', [$orderId]);
-                    if ($orderRow && !empty($orderRow['applied_promo_code'])) {
-                        $db->executeUpdate(
-                            "UPDATE `promotions` SET `used_count` = `used_count` + 1 WHERE `code` = ?",
-                            's',
-                            [$orderRow['applied_promo_code']]
-                        );
-                    }
-
-                    // Dispatch verified payment receipt
-                    try {
-                        if ($orderRow) {
-                            $orderRow['payment_status'] = 'successful';
-                            $orderRow['order_status'] = 'paid';
-                            MailService::getInstance()->sendPaymentVerified($orderRow, [
-                                'reference' => $ref,
-                                'payment_method' => 'Monnify ' . ($paymentMethod ?? 'Card/Transfer'),
-                            ]);
-                        }
-                    } catch (\Throwable $e) {
-                        error_log('[MailService Notice] ' . $e->getMessage());
-                    }
-                });
-
-                return [
-                    'order_number' => $payment['order_number'],
-                    'provider_reference' => $ref,
-                    'provider' => 'monnify',
-                    'status' => 'successful',
-                    'order_status' => 'paid',
-                    'amount' => $amountPaid,
-                    'currency' => $payment['currency'],
-                    'verified_at' => date('Y-m-d H:i:s'),
-                    'source' => 'monnify_api_verified',
-                ];
-            }
-        } catch (\Throwable $e) {
-            error_log('[Monnify Query Exception] ' . $e->getMessage());
-        }
+    private function statusResponse(array $payment, string $source): array
+    {
+        $status = match ($payment['status']) {
+            'successful', 'partially_refunded', 'refunded' => 'successful',
+            'failed', 'cancelled' => 'failed',
+            default => 'pending',
+        };
 
         return [
             'order_number' => $payment['order_number'],
-            'provider_reference' => $ref,
+            'provider_reference' => $payment['provider_reference'],
             'provider' => 'monnify',
-            'status' => 'pending',
-            'order_status' => 'pending_payment',
-            'amount' => (float)$payment['amount'],
-            'currency' => $payment['currency'],
-            'source' => 'monnify_query',
+            'status' => $status,
+            'order_status' => $payment['order_status'],
+            'amount' => (float) $payment['amount'],
+            'currency' => $payment['currency'] ?: ($payment['order_currency'] ?: 'NGN'),
+            'verified_at' => $payment['verified_at'],
+            'source' => $source,
         ];
     }
 
-    /**
-     * Handle incoming Monnify webhook event with HMAC-SHA512 verification.
-     */
-    public function handleWebhook(string $rawBody, string $signatureHeader): array
-    {
-        $computed = hash_hmac('sha512', $rawBody, $this->secretKey);
-
-        // In sandbox or production, verify signature if header provided
-        if (!empty($signatureHeader) && !hash_equals($computed, $signatureHeader)) {
-            throw new InvalidArgumentException("Invalid Monnify webhook HMAC signature.");
-        }
-
-        $payload = json_decode($rawBody, true);
-        if (!is_array($payload)) {
-            throw new InvalidArgumentException("Malformed webhook JSON body.");
-        }
-
-        $eventData = $payload['eventData'] ?? $payload;
-        $paymentReference = trim((string)($eventData['paymentReference'] ?? ''));
-        $paymentStatus = strtoupper(trim((string)($eventData['paymentStatus'] ?? '')));
-
-        if ($paymentReference === '') {
-            throw new InvalidArgumentException("Missing paymentReference in Monnify webhook.");
-        }
-
-        if ($paymentStatus === 'PAID') {
-            return $this->verifyTransaction($paymentReference);
-        }
-
-        return [
-            'status' => 'ignored',
-            'payment_reference' => $paymentReference,
-            'monnify_status' => $paymentStatus,
-        ];
-    }
-
-    /**
-     * Load order by id or order_number.
-     */
     private function loadOrder(string|int $orderIdOrNumber): array
     {
         if (is_numeric($orderIdOrNumber)) {
@@ -412,5 +374,36 @@ class MonnifyService
         }
 
         return $order;
+    }
+
+    /**
+     * @return array{status_code: int, body: string, error: ?string}
+     */
+    private function executeHttpRequest(string $method, string $url, array $headers, ?string $body, int $timeout): array
+    {
+        if ($this->httpExecutor !== null) {
+            return ($this->httpExecutor)($method, $url, $headers, $body, $timeout);
+        }
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        if ($body !== null) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        }
+
+        $response = curl_exec($ch);
+        $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        return [
+            'status_code' => $statusCode,
+            'body' => (string) $response,
+            'error' => $error !== '' ? $error : null,
+        ];
     }
 }

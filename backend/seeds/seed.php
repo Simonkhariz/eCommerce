@@ -82,7 +82,7 @@ $zoneCount = $db->query("SELECT COUNT(*) AS c FROM shipping_zones")->fetch_assoc
 
 echo "\n[SUCCESS] Seeding complete!\n";
 echo "  Categories:     {$catCount}\n";
-echo "  Products:       {$prodCount} (Physical + Digital)\n";
+echo "  Products:       {$prodCount} (physical)\n";
 echo "  Variants:       {$varCount}\n";
 echo "  Shipping Zones: {$zoneCount} (Origin: Enugu, Nigeria)\n";
 

@@ -148,7 +148,9 @@ Accept: application/json
    $rawInput = file_get_contents('php://input');
    $payload = json_decode($rawInput, true);
    
-   $dataJson = json_encode($payload['data'], JSON_UNESCAPED_SLASHES);
+   // Hash the `data` member exactly as received. Re-encoding with json_encode can change
+   // number formatting (14500.00 -> 14500.0) or escape non-ASCII names and break the match.
+   $dataJson = KoraService::extractRawJsonMember($rawInput, 'data');
    $expectedSignature = hash_hmac('sha256', $dataJson, $koraSecretKey);
    
    if (!hash_equals($expectedSignature, $_SERVER['HTTP_X_KORAPAY_SIGNATURE'])) {

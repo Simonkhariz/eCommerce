@@ -10,6 +10,7 @@ use App\Middleware\JsonBodyMiddleware;
 use App\Services\CheckoutService;
 use App\Services\KoraService;
 use App\Services\MonnifyService;
+use App\Services\PaymentAttempts;
 use App\Support\RateLimiter;
 use App\Support\RequestContext;
 use App\Support\Response;
@@ -79,7 +80,8 @@ class CheckoutController
         }
 
         try {
-            $order = $this->checkoutService->createOrder($body, $userId);
+            $idempotencyKey = (string) ($_SERVER['HTTP_IDEMPOTENCY_KEY'] ?? ($body['idempotency_key'] ?? ''));
+            $order = $this->checkoutService->createOrder($body, $userId, $idempotencyKey !== '' ? $idempotencyKey : null);
             Response::success($order, 'Order placed successfully. Inventory has been reserved.', 201);
         } catch (InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'VALIDATION_ERROR');
@@ -208,7 +210,7 @@ class CheckoutController
         );
 
         // Redact internal fields from the customer-facing response
-        unset($order['guest_access_token_hash'], $order['user_id']);
+        unset($order['guest_access_token_hash'], $order['user_id'], $order['idempotency_key'], $order['requires_attention'], $order['attention_reason']);
 
         $order['shipping_zone_snapshot'] = is_string($order['shipping_zone_snapshot']) ? json_decode($order['shipping_zone_snapshot'], true) : $order['shipping_zone_snapshot'];
         $order['shipping_address_snapshot'] = is_string($order['shipping_address_snapshot']) ? json_decode($order['shipping_address_snapshot'], true) : $order['shipping_address_snapshot'];
@@ -314,24 +316,43 @@ class CheckoutController
             $redirectUrl = $frontendUrl . ($parts['path'] ?? '/checkout/callback') . '?' . http_build_query($query);
         }
 
-        $gateway = strtolower(trim((string) ($body['gateway'] ?? 'monnify')));
-        if ($gateway !== 'kora' && $gateway !== 'monnify') {
-            $gateway = 'monnify';
+        $gateway = strtolower(trim((string) ($body['gateway'] ?? '')));
+        if (!in_array($gateway, ['kora', 'monnify', 'whatsapp'], true)) {
+            Response::error('Choose a payment method: kora, monnify or whatsapp.', 422, 'VALIDATION_ERROR');
+        }
+        if (!filter_var(Env::get('PAYMENT_' . strtoupper($gateway) . '_ENABLED', 'true'), FILTER_VALIDATE_BOOLEAN)) {
+            Response::error('That payment method is currently unavailable.', 422, 'PAYMENT_METHOD_DISABLED');
         }
 
         try {
             if ($gateway === 'monnify') {
-                $monnifyService = new MonnifyService($this->db);
-                $result = $monnifyService->initializeCheckout($orderNumber, $redirectUrl);
+                $result = (new MonnifyService($this->db))->initializeCheckout($orderNumber, $redirectUrl);
                 Response::success($result, 'Monnify payment session initialized successfully.');
-            } else {
-                $koraService = new KoraService($this->db);
-                $result = $koraService->initializeCheckout($orderNumber, $redirectUrl);
+            } elseif ($gateway === 'kora') {
+                $result = (new KoraService($this->db))->initializeCheckout($orderNumber, $redirectUrl);
                 Response::success($result, 'Kora payment session initialized successfully.');
+            } else {
+                // Manual transfer arranged over WhatsApp: keep the stock reserved longer while the
+                // customer pays; the admin confirms with the real transfer reference.
+                $attempts = new PaymentAttempts($this->db);
+                $reference = 'WA-' . $orderNumber . '-' . strtoupper(bin2hex(random_bytes(3)));
+                $attempts->open($order, 'whatsapp', $reference, PaymentAttempts::manualWindowMinutes());
+                $fresh = $this->db->fetchOne("SELECT `expires_at` FROM `orders` WHERE `id` = ?", 'i', [(int) $order['id']]);
+                Response::success([
+                    'order_number' => $orderNumber,
+                    'provider' => 'whatsapp',
+                    'provider_reference' => $reference,
+                    'amount' => (float) $order['grand_total'],
+                    'currency' => $order['currency'],
+                    'status' => 'pending',
+                    'expires_at' => $fresh['expires_at'] ?? null,
+                    'support_phone' => Env::get('STORE_WHATSAPP_PHONE', ''),
+                ], 'Order reserved while you complete payment with our team on WhatsApp.');
             }
         } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'VALIDATION_ERROR');
         } catch (\RuntimeException $e) {
+            error_log('[Payment Initialization Gateway Error] ' . $e->getMessage());
             Response::error($e->getMessage(), 502, 'GATEWAY_ERROR');
         } catch (\Throwable $e) {
             error_log('[Payment Initialization Failure] ' . $e->getMessage());
@@ -383,98 +404,83 @@ class CheckoutController
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
-        // Retrieve payment record for this order
+        // Which attempt to check: the exact reference from the gateway redirect, else the
+        // successful payment, else the newest attempt.
         $payment = null;
-
-        // 1. If order is already confirmed paid, prioritize the verified successful payment
-        if ($order['order_status'] === 'paid' || $order['payment_status'] === 'successful') {
+        if ($customRef !== '') {
             $payment = $this->db->fetchOne(
-                "SELECT `id`, `provider`, `provider_reference`, `amount`, `currency`, `status`, `verified_at` FROM `payments` WHERE `order_id` = ? AND `status` = 'successful' ORDER BY `id` DESC LIMIT 1",
-                'i',
-                [(int) $order['id']]
-            );
-        }
-
-        // 2. If reference was explicitly provided by gateway redirect, prioritize matching it
-        if ($payment === null && $customRef !== '') {
-            $payment = $this->db->fetchOne(
-                "SELECT `id`, `provider`, `provider_reference`, `amount`, `currency`, `status`, `verified_at` FROM `payments` WHERE `order_id` = ? AND `provider_reference` = ? LIMIT 1",
+                "SELECT * FROM `payments` WHERE `order_id` = ? AND `provider_reference` = ? LIMIT 1",
                 'is',
                 [(int) $order['id'], $customRef]
             );
         }
-
-        // 3. Fallback: prioritize successful payment first, then newest
         if ($payment === null) {
             $payment = $this->db->fetchOne(
-                "SELECT `id`, `provider`, `provider_reference`, `amount`, `currency`, `status`, `verified_at` FROM `payments` WHERE `order_id` = ? ORDER BY (`status` = 'successful') DESC, `id` DESC LIMIT 1",
+                "SELECT * FROM `payments` WHERE `order_id` = ?
+                 ORDER BY (`status` IN ('successful', 'partially_refunded', 'refunded')) DESC, `id` DESC LIMIT 1",
                 'i',
                 [(int) $order['id']]
             );
         }
 
-        if ($payment === null || empty($payment['provider_reference'])) {
-            Response::error('No payment session found for this order.', 404, 'PAYMENT_NOT_INITIALIZED');
+        if ($payment === null) {
+            Response::success([
+                'order_number' => $order['order_number'],
+                'status' => 'not_started',
+                'order_status' => $order['order_status'],
+                'amount' => (float) $order['grand_total'],
+                'currency' => $order['currency'],
+                'expires_at' => $order['expires_at'],
+                'source' => 'local_database',
+            ], 'No payment has been started for this order yet.');
         }
 
-        // Calculate authoritative verified amount with resilient order grand_total fallback
-        $verifiedAmount = (float) (
-            (!empty($payment['amount']) && (float) $payment['amount'] > 0)
-                ? $payment['amount']
-                : ((float) ($order['grand_total'] ?? 0.0))
-        );
-        $verifiedCurrency = !empty($payment['currency']) ? $payment['currency'] : ($order['currency'] ?? 'NGN');
-
         try {
-            // 1. If payment is already marked successful in MySQL, return verified state immediately
-            if ($payment['status'] === 'successful' && ($order['order_status'] === 'paid' || $order['payment_status'] === 'successful')) {
+            $provider = strtolower((string) $payment['provider']);
+            if ($payment['status'] === 'pending' && $provider === 'monnify') {
+                $result = (new MonnifyService($this->db))->verifyTransaction($payment['provider_reference']);
+            } elseif ($payment['status'] === 'pending' && $provider === 'kora') {
+                $result = (new KoraService($this->db))->verifyTransaction($payment['provider_reference']);
+            } else {
                 $result = [
                     'order_number' => $order['order_number'],
                     'provider_reference' => $payment['provider_reference'],
-                    'provider' => $payment['provider'],
-                    'status' => 'successful',
-                    'order_status' => 'paid',
-                    'amount' => $verifiedAmount,
-                    'currency' => $verifiedCurrency,
-                    'verified_at' => $payment['verified_at'] ?? date('Y-m-d H:i:s'),
-                    'source' => 'local_database_verified',
+                    'provider' => $provider,
+                    'status' => match ($payment['status']) {
+                        'successful', 'partially_refunded', 'refunded' => 'successful',
+                        'failed', 'cancelled' => 'failed',
+                        default => 'pending',
+                    },
+                    'amount' => (float) $payment['amount'],
+                    'currency' => $payment['currency'] ?: $order['currency'],
+                    'verified_at' => $payment['verified_at'],
+                    'source' => 'local_database',
                 ];
-            } else {
-                $provider = strtolower(trim((string)$payment['provider']));
-                if ($provider === 'monnify') {
-                    $monnifyService = new MonnifyService($this->db);
-                    $result = $monnifyService->verifyTransaction($payment['provider_reference']);
-                } elseif ($provider === 'kora') {
-                    $koraService = new KoraService($this->db);
-                    $result = $koraService->verifyTransaction($payment['provider_reference']);
-                } else {
-                    // Manual WhatsApp confirmation
-                    $result = [
-                        'order_number' => $order['order_number'],
-                        'provider_reference' => $payment['provider_reference'],
-                        'provider' => $payment['provider'] ?: 'whatsapp',
-                        'status' => $payment['status'] === 'successful' ? 'successful' : 'pending',
-                        'order_status' => $order['order_status'],
-                        'amount' => $verifiedAmount,
-                        'currency' => $verifiedCurrency,
-                        'verified_at' => $payment['verified_at'] ?? date('Y-m-d H:i:s'),
-                        'source' => 'manual_confirmation',
-                    ];
-                }
-
-                // Ensure returned result from gateway service never has 0 or empty amount
-                if (empty($result['amount']) || (float) $result['amount'] <= 0) {
-                    $result['amount'] = $verifiedAmount;
-                }
-                if (empty($result['currency'])) {
-                    $result['currency'] = $verifiedCurrency;
-                }
             }
-            Response::success($result, 'Payment verified successfully.');
+
+            // Always report the order's real current state from the database.
+            $fresh = $this->db->fetchOne("SELECT `order_status`, `payment_status`, `expires_at` FROM `orders` WHERE `id` = ?", 'i', [(int) $order['id']]);
+            $result['order_status'] = $fresh['order_status'];
+            $result['order_payment_status'] = $fresh['payment_status'];
+            $result['expires_at'] = $fresh['expires_at'];
+
+            Response::success($result, 'Payment status retrieved.');
         } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'VALIDATION_ERROR');
         } catch (\RuntimeException $e) {
-            Response::error($e->getMessage(), 502, 'GATEWAY_ERROR');
+            // Gateway unreachable: report pending rather than failing the customer's status page.
+            error_log('[Payment Verification Gateway Error] ' . $e->getMessage());
+            Response::success([
+                'order_number' => $order['order_number'],
+                'provider_reference' => $payment['provider_reference'],
+                'provider' => $payment['provider'],
+                'status' => 'pending',
+                'order_status' => $order['order_status'],
+                'amount' => (float) $payment['amount'],
+                'currency' => $payment['currency'] ?: $order['currency'],
+                'message' => 'We could not reach the payment provider. Your payment status will update shortly.',
+                'source' => 'gateway_unreachable',
+            ], 'Payment status pending.');
         } catch (\Throwable $e) {
             error_log('[Payment Verification Failure] ' . $e->getMessage());
             Response::error('We could not check the payment status right now. Please try again shortly.', 500, 'INTERNAL_SERVER_ERROR');

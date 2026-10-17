@@ -57,7 +57,7 @@ class AuditService
             $beforeJson = $beforeClean !== null ? json_encode($beforeClean, JSON_UNESCAPED_SLASHES) : null;
             $afterJson = $afterClean !== null ? json_encode($afterClean, JSON_UNESCAPED_SLASHES) : null;
 
-            $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+            $ip = RequestContext::clientIp();
             $ua = substr($_SERVER['HTTP_USER_AGENT'] ?? 'CLI', 0, 500);
 
             $db->execute(

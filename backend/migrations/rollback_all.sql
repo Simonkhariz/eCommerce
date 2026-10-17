@@ -4,6 +4,12 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS `schema_migrations`;
+DROP TABLE IF EXISTS `rate_limits`;
+DROP TABLE IF EXISTS `reviews`;
+DROP TABLE IF EXISTS `newsletter_subscribers`;
+DROP TABLE IF EXISTS `inventory_logs`;
+
 DROP TABLE IF EXISTS `email_outbox`;
 DROP TABLE IF EXISTS `admin_audit_logs`;
 DROP TABLE IF EXISTS `banners`;

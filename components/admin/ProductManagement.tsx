@@ -148,6 +148,7 @@ export const ProductManagement: React.FC = () => {
   const [formVariants, setFormVariants] = useState<
     Array<{
       id?: number;
+      original_stock_quantity?: number;
       sku: string;
       size: string;
       color_name: string;
@@ -378,6 +379,7 @@ export const ProductManagement: React.FC = () => {
       setFormVariants(
         product.variants.map((v) => ({
           id: v.id,
+          original_stock_quantity: v.stock_quantity,
           sku: v.sku,
           size: v.size,
           color_name: v.color_name,
@@ -483,7 +485,8 @@ export const ProductManagement: React.FC = () => {
             display_order: idx,
           })),
         variants: formVariants
-          .map((v, idx) => ({
+          .map((v) => ({
+            ...(v.id ? { id: v.id, original_stock_quantity: v.original_stock_quantity } : {}),
             sku: v.sku.trim() || `${effectiveSku}-${(v.color_name || 'DEF').replace(/[^a-zA-Z0-9]/g, '').substring(0, 3).toUpperCase()}-${(v.size || 'STD').replace(/[^a-zA-Z0-9]/g, '').substring(0, 3).toUpperCase()}`,
             size: v.size.trim() || 'Standard',
             color_name: v.color_name.trim() || 'Default',

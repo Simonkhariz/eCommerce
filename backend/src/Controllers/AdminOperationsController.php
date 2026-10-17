@@ -10,6 +10,7 @@ use App\Support\RateLimiter;
 use App\Support\RequestContext;
 use App\Support\Response;
 use App\Config\Env;
+use App\Services\FulfillmentService;
 use App\Services\MailService;
 use Throwable;
 
@@ -79,61 +80,6 @@ class AdminOperationsController
 
         $variants = $this->db->fetchAll($sql, $types, $params);
         Response::success($variants, 'Inventory stock list retrieved.');
-    }
-
-    /**
-     * POST /api/v1/admin/inventory/adjust
-     * Adjust variant stock, write movement to inventory_logs, and audit log.
-     */
-    public function adjustStock(): void
-    {
-        $body = JsonBodyMiddleware::getBody();
-        $variantId = isset($body['variant_id']) ? (int) $body['variant_id'] : 0;
-        $changeAmount = isset($body['change_amount']) ? (int) $body['change_amount'] : 0;
-        $reason = trim((string) ($body['reason'] ?? 'Manual stock adjustment'));
-
-        if ($variantId <= 0 || $changeAmount === 0) {
-            Response::error('Valid variant_id and non-zero change_amount are required.', 422, 'VALIDATION_ERROR');
-        }
-
-        $variant = $this->db->fetchOne("SELECT * FROM `product_variants` WHERE `id` = ?", 'i', [$variantId]);
-        if (!$variant) {
-            Response::error('Product variant not found.', 404, 'NOT_FOUND');
-        }
-
-        $prevStock = (int) $variant['stock_quantity'];
-        $newStock = max(0, $prevStock + $changeAmount);
-
-        $admin = RequestContext::getUser();
-        $adminId = $admin ? (int) $admin['id'] : null;
-
-        $this->db->executeUpdate("UPDATE `product_variants` SET `stock_quantity` = ? WHERE `id` = ?", 'ii', [$newStock, $variantId]);
-
-        // Insert inventory movement log
-        $this->db->execute(
-            "INSERT INTO `inventory_logs` (`variant_id`, `product_id`, `previous_stock`, `new_stock`, `change_amount`, `reason`, `adjusted_by_user_id`)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            'iiiiisi',
-            [$variantId, (int) $variant['product_id'], $prevStock, $newStock, $changeAmount, $reason, $adminId]
-        );
-
-        // Record audit log
-        $this->recordAudit(
-            $adminId,
-            'INVENTORY_ADJUSTED',
-            'product_variant',
-            (string) $variantId,
-            ['stock_quantity' => $prevStock],
-            ['stock_quantity' => $newStock, 'reason' => $reason]
-        );
-
-        Response::success([
-            'variant_id' => $variantId,
-            'previous_stock' => $prevStock,
-            'new_stock' => $newStock,
-            'change_amount' => $changeAmount,
-            'reason' => $reason
-        ], 'Inventory stock adjusted successfully.');
     }
 
     /**
@@ -382,7 +328,9 @@ class AdminOperationsController
 
     /**
      * POST /api/v1/admin/refunds
-     * Record a manual refund or processed provider refund with full audit log.
+     * Record a refund against the order's successful payment. Capped at what was paid
+     * (minus earlier refunds). status 'completed' = money already returned via the gateway
+     * dashboard or bank; 'pending' = approved, to be completed later.
      */
     public function createRefund(): void
     {
@@ -390,72 +338,53 @@ class AdminOperationsController
         $orderNumber = trim((string) ($body['order_number'] ?? ''));
         $amount = (float) ($body['amount'] ?? 0);
         $reason = trim((string) ($body['reason'] ?? ''));
-        $providerRef = trim((string) ($body['provider_refund_reference'] ?? 'MANUAL-' . strtoupper(substr(uniqid(), 0, 8))));
+        $status = strtolower(trim((string) ($body['status'] ?? 'completed')));
+        $restock = filter_var($body['restock'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $providerRef = isset($body['provider_refund_reference']) ? (string) $body['provider_refund_reference'] : null;
 
         if ($orderNumber === '' || $amount <= 0 || $reason === '') {
             Response::error('Order number, amount, and reason are required.', 422, 'VALIDATION_ERROR');
         }
 
-        $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$orderNumber]);
+        $order = $this->db->fetchOne("SELECT `id` FROM `orders` WHERE `order_number` = ?", 's', [$orderNumber]);
         if (!$order) {
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
-        }
-
-        // Find primary payment
-        $payment = $this->db->fetchOne("SELECT * FROM `payments` WHERE `order_id` = ? AND `status` = 'successful' ORDER BY id DESC LIMIT 1", 'i', [(int) $order['id']]);
-        if (!$payment) {
-            $payment = $this->db->fetchOne("SELECT * FROM `payments` WHERE `order_id` = ? ORDER BY id DESC LIMIT 1", 'i', [(int) $order['id']]);
-        }
-
-        if (!$payment) {
-            Response::error('No payment record found associated with this order.', 422, 'NO_PAYMENT_FOUND');
         }
 
         $admin = RequestContext::getUser();
         $adminId = $admin ? (int) $admin['id'] : null;
 
-        $this->db->execute(
-            "INSERT INTO `refunds` (`payment_id`, `order_id`, `provider_refund_reference`, `amount`, `currency`, `reason`, `status`, `processed_by_user_id`)
-             VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)",
-            'iisdssi',
-            [(int) $payment['id'], (int) $order['id'], $providerRef, $amount, $order['currency'], $reason, $adminId]
-        );
-
-        $refundId = $this->db->lastInsertId();
-
-        // Check if total refunded equals or exceeds order total, update order status to refunded
-        $totalRefundedRow = $this->db->fetchOne("SELECT COALESCE(SUM(amount), 0) AS total FROM `refunds` WHERE `order_id` = ? AND `status` = 'completed'", 'i', [(int) $order['id']]);
-        if ((float) $totalRefundedRow['total'] >= (float) $order['grand_total']) {
-            $this->db->executeUpdate("UPDATE `orders` SET `order_status` = 'refunded' WHERE `id` = ?", 'i', [(int) $order['id']]);
-        }
-
-        $this->recordAudit(
-            $adminId,
-            'REFUND_PROCESSED',
-            'refund',
-            (string) $refundId,
-            null,
-            ['order_number' => $orderNumber, 'amount' => $amount, 'reason' => $reason, 'reference' => $providerRef]
-        );
-
-        // Dispatch refund email notification
         try {
-            MailService::getInstance()->sendCancellationOrRefund($order, 'refund', [
-                'amount' => $amount,
-                'reason' => $reason,
-                'reference' => $providerRef,
-            ]);
-        } catch (\Throwable $e) {
-            error_log('[MailService Notice] ' . $e->getMessage());
+            $refund = (new FulfillmentService($this->db))->recordRefund(
+                (int) $order['id'], $amount, $reason, $status, $restock, $adminId, $providerRef
+            );
+            Response::success($refund, $refund['status'] === 'completed'
+                ? 'Refund recorded as completed.'
+                : 'Refund recorded as pending. Mark it completed once the money has been returned.', 201);
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422, 'INVALID_REFUND');
         }
+    }
 
-        Response::success([
-            'refund_id' => $refundId,
-            'order_number' => $orderNumber,
-            'amount' => $amount,
-            'status' => 'completed',
-            'reference' => $providerRef
-        ], 'Refund processed and audited successfully.');
+    /**
+     * PATCH /api/v1/admin/refunds/{id}
+     * Complete or reject a pending refund.
+     */
+    public function resolveRefund(array $params): void
+    {
+        $body = JsonBodyMiddleware::getBody();
+        $admin = RequestContext::getUser();
+
+        try {
+            $refund = (new FulfillmentService($this->db))->resolveRefund(
+                (int) ($params['id'] ?? 0),
+                strtolower(trim((string) ($body['status'] ?? ''))),
+                $admin ? (int) $admin['id'] : null
+            );
+            Response::success($refund, "Refund marked {$refund['status']}.");
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422, 'INVALID_REFUND');
+        }
     }
 
     // =========================================================================

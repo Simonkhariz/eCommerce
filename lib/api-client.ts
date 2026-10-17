@@ -941,7 +941,7 @@ export interface CheckoutOrderResponse {
   user_id: number | null;
   status: string;
   payment_status: string;
-  payment_reference: string;
+  expires_at?: string | null;
   currency: string;
   subtotal: number;
   discount_amount: number;
@@ -1007,9 +1007,10 @@ export async function apiCreateCheckoutOrder(data: {
   shipping_zone_id?: number;
   coupon_code?: string;
   notes?: string;
-}): Promise<CheckoutOrderResponse> {
+}, idempotencyKey?: string): Promise<CheckoutOrderResponse> {
   return fetchFromApi<CheckoutOrderResponse>('/checkout/orders', {
     method: 'POST',
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: JSON.stringify(data),
   });
 }
@@ -1068,12 +1069,8 @@ export interface PaymentInitializationResponse {
   currency: string;
   status: string;
   expires_in_minutes?: number;
-  api_key?: string;
-  contract_code?: string;
-  customer_name?: string;
-  customer_email?: string;
-  payment_description?: string;
-  is_test_mode?: boolean;
+  expires_at?: string | null;
+  support_phone?: string;
 }
 
 /**
@@ -1108,7 +1105,7 @@ export interface PaymentVerificationResponse {
   order_number: string;
   provider_reference: string;
   provider?: string;
-  status: 'successful' | 'failed' | 'pending';
+  status: 'successful' | 'failed' | 'pending' | 'not_started';
   order_status: string;
   amount: number;
   currency: string;

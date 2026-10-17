@@ -1,6 +1,6 @@
 -- -----------------------------------------------------------------------------
 -- Seed 002: Comprehensive Catalogue Products Across All Categories
--- Populates 3-4 distinct products for T-Shirts, Shorts, Shirts, Hoodies, Jeans, and Digital Assets.
+-- Populates 3-4 distinct products for T-Shirts, Shorts, Shirts, Hoodies and Jeans (physical products only).
 -- All prices in NGN (₦).
 -- -----------------------------------------------------------------------------
 
@@ -262,33 +262,4 @@ SELECT id, 'https://images.unsplash.com/photo-1582552938357-32b906df40cb?auto=fo
 ON DUPLICATE KEY UPDATE `image_url` = VALUES(`image_url`);
 
 
--- =============================================================================
--- 6. DIGITAL ASSETS (category_id = 6)
--- =============================================================================
 
--- Product 18: Streetwear Lightroom Preset Master Pack
-INSERT INTO `products` (`uuid`, `category_id`, `name`, `slug`, `description`, `product_type`, `status`, `base_price`, `original_price`, `currency`, `sku`, `rating_avg`, `rating_count`, `is_featured`, `is_flash_deal`, `dress_style`) VALUES
-('prod-uuid-018', 6, 'Streetwear Lightroom Preset Master Pack', 'streetwear-lightroom-presets', '15 Pro DNG & XMP presets crafted by lead fashion photographers for high-contrast streetwear editorials.', 'digital', 'published', 7500.00, 15000.00, 'NGN', 'SKU-DIGI-LRPACK', 4.90, 112, 1, 1, 'Party')
-ON DUPLICATE KEY UPDATE `base_price` = VALUES(`base_price`);
-
-INSERT INTO `product_variants` (`product_id`, `sku`, `size`, `color_name`, `color_hex`, `stock_quantity`, `low_stock_threshold`)
-SELECT id, 'SKU-DIGI-LRPACK-INSTANT', 'Digital Download', 'Digital', '#000000', 9999, 10 FROM `products` WHERE `slug` = 'streetwear-lightroom-presets'
-ON DUPLICATE KEY UPDATE `stock_quantity` = VALUES(`stock_quantity`);
-
-INSERT INTO `product_images` (`product_id`, `image_url`, `alt_text`, `is_primary`, `display_order`)
-SELECT id, 'https://images.unsplash.com/photo-1512436991641-6745cdb1723f?auto=format&fit=crop&w=600&q=80', 'Lightroom Presets Pack', 1, 1 FROM `products` WHERE `slug` = 'streetwear-lightroom-presets'
-ON DUPLICATE KEY UPDATE `image_url` = VALUES(`image_url`);
-
-
--- Product 19: Fashion Tech Apparel Vector Mockup Kit 4K
-INSERT INTO `products` (`uuid`, `category_id`, `name`, `slug`, `description`, `product_type`, `status`, `base_price`, `original_price`, `currency`, `sku`, `rating_avg`, `rating_count`, `is_featured`, `is_flash_deal`, `dress_style`) VALUES
-('prod-uuid-019', 6, 'Fashion Tech Apparel Mockup Kit 4K', 'fashion-tech-mockup-kit', 'High-resolution Adobe Illustrator and Photoshop smart-object vector mockups for tees, hoodies, and jackets.', 'digital', 'published', 9000.00, 18000.00, 'NGN', 'SKU-DIGI-MCKKIT', 4.80, 67, 0, 0, 'Casual')
-ON DUPLICATE KEY UPDATE `base_price` = VALUES(`base_price`);
-
-INSERT INTO `product_variants` (`product_id`, `sku`, `size`, `color_name`, `color_hex`, `stock_quantity`, `low_stock_threshold`)
-SELECT id, 'SKU-DIGI-MCKKIT-INSTANT', 'Digital Download', 'Digital', '#000000', 9999, 10 FROM `products` WHERE `slug` = 'fashion-tech-mockup-kit'
-ON DUPLICATE KEY UPDATE `stock_quantity` = VALUES(`stock_quantity`);
-
-INSERT INTO `product_images` (`product_id`, `image_url`, `alt_text`, `is_primary`, `display_order`)
-SELECT id, 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=600&q=80', 'Fashion Tech Mockup Kit', 1, 1 FROM `products` WHERE `slug` = 'fashion-tech-mockup-kit'
-ON DUPLICATE KEY UPDATE `image_url` = VALUES(`image_url`);

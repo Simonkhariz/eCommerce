@@ -14,6 +14,9 @@ use InvalidArgumentException;
  */
 class CheckoutService
 {
+    private const MAX_LINES = 30;
+    private const MAX_QUANTITY_PER_LINE = 20;
+
     private Database $db;
 
     public function __construct(?Database $db = null)
@@ -99,12 +102,31 @@ class CheckoutService
      * @param int|null $userId Authenticated user ID (or null for guest)
      * @return array Created order details including public order number and guest token
      */
-    public function createOrder(array $input, ?int $userId = null): array
+    public function createOrder(array $input, ?int $userId = null, ?string $idempotencyKey = null): array
     {
+        // Release stock held by abandoned orders before reserving more (cheap, bounded).
+        try {
+            (new FulfillmentService($this->db))->expireOverdueOrders(20);
+        } catch (\Throwable $e) {
+            error_log('[Order Expiry Sweep] ' . $e->getMessage());
+        }
+
         // 1. Basic validation of contact & customer identity
-        $email = trim($input['email'] ?? '');
+        $email = strtolower(trim((string) ($input['email'] ?? '')));
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             throw new InvalidArgumentException('A valid email address is required for order confirmation and receipts.');
+        }
+
+        // A repeated submission (double click, retry after a dropped response) returns the same order.
+        $idempotencyKey = $idempotencyKey !== null ? trim($idempotencyKey) : null;
+        if ($idempotencyKey !== null && !preg_match('/^[A-Za-z0-9_\-]{16,64}$/', $idempotencyKey)) {
+            $idempotencyKey = null;
+        }
+        if ($idempotencyKey !== null) {
+            $replay = $this->replayIdempotentOrder($idempotencyKey, $email);
+            if ($replay !== null) {
+                return $replay;
+            }
         }
 
         $items = $input['items'] ?? [];
@@ -126,213 +148,268 @@ class CheckoutService
         $shippingFee = (float) $selectedZone['fee'];
 
         // 4. Execute transactional order creation with atomic inventory decrement
-        return $this->db->transaction(function (Database $db) use (
-            $input,
-            $userId,
-            $email,
-            $items,
-            $shippingAddress,
-            $selectedZone,
-            $shippingFee
-        ): array {
-            // A. Re-verify items and load lock-safe current pricing
-            $verifiedItems = $this->verifyAndPriceItems($items);
+        try {
+            $createdOrder = $this->db->transaction(function (Database $db) use (
+                $input,
+                $userId,
+                $email,
+                $items,
+                $shippingAddress,
+                $selectedZone,
+                $shippingFee,
+                $idempotencyKey
+            ): array {
+                // A. Re-verify items and load lock-safe current pricing
+                $verifiedItems = $this->verifyAndPriceItems($items);
 
-            $subtotal = 0.0;
-            foreach ($verifiedItems as $item) {
-                $subtotal += $item['line_total'];
-            }
-            $subtotal = round($subtotal, 2);
-
-            // B. Validate and apply coupon inside transaction
-            $couponCode = isset($input['coupon_code']) ? trim((string) $input['coupon_code']) : '';
-            $promoId = null;
-            $appliedPromoCode = null;
-            $discountAmount = 0.0;
-
-            if ($couponCode !== '') {
-                $promoResult = $this->evaluateCoupon($couponCode, $subtotal);
-                $promoId = (int) $promoResult['coupon']['id'];
-                $appliedPromoCode = $promoResult['coupon']['code'];
-                $discountAmount = $promoResult['discount_amount'];
-
-                // Atomically increment promotion usage
-                $promoUpdated = $db->executeUpdate(
-                    "UPDATE `promotions` SET `used_count` = `used_count` + 1 WHERE `id` = ? AND `used_count` < `max_uses`",
-                    'i',
-                    [$promoId]
-                );
-                if ($promoUpdated === 0) {
-                    throw new RuntimeException("Promotion code '{$appliedPromoCode}' reached its maximum usage limit during checkout.");
+                $subtotal = 0.0;
+                foreach ($verifiedItems as $item) {
+                    $subtotal += $item['line_total'];
                 }
-            }
+                $subtotal = round($subtotal, 2);
 
-            // C. Calculate final grand total
-            $grandTotal = round(max(0.0, $subtotal - $discountAmount + $shippingFee), 2);
+                // B. Validate and apply coupon inside transaction
+                $couponCode = isset($input['coupon_code']) ? trim((string) $input['coupon_code']) : '';
+                $promoId = null;
+                $appliedPromoCode = null;
+                $discountAmount = 0.0;
 
-            // D. ATOMIC INVENTORY RESERVATION POLICY
-            // We decrement variant stock atomically using conditional WHERE stock_quantity >= requested.
-            // Under MySQL InnoDB, this acquires row-level exclusive locks and guarantees
-            // no negative stock and zero concurrent overselling.
-            foreach ($verifiedItems as $item) {
-                $variantId = $item['variant_id'];
-                $qty = $item['quantity'];
+                if ($couponCode !== '') {
+                    $promoResult = $this->evaluateCoupon($couponCode, $subtotal);
+                    $promoId = (int) $promoResult['coupon']['id'];
+                    $appliedPromoCode = $promoResult['coupon']['code'];
+                    $discountAmount = $promoResult['discount_amount'];
 
-                $affectedRows = $db->executeUpdate(
-                    "UPDATE `product_variants` 
-                     SET `stock_quantity` = `stock_quantity` - ? 
-                     WHERE `id` = ? AND `stock_quantity` >= ?",
-                    'iii',
-                    [$qty, $variantId, $qty]
-                );
-
-                if ($affectedRows === 0) {
-                    // Fetch latest actual stock for error message
-                    $latestStock = $db->fetchOne("SELECT `stock_quantity`, `sku` FROM `product_variants` WHERE `id` = ?", 'i', [$variantId]);
-                    $sku = $latestStock['sku'] ?? $item['sku'];
-                    $available = $latestStock['stock_quantity'] ?? 0;
-                    throw new RuntimeException("Insufficient stock for item '{$item['name']}' ({$sku}). Requested: {$qty}, Available: {$available}.");
+                    // Atomically count this order's promotion use (once; released again if the order
+                    // is cancelled or expires). max_uses = 0 means unlimited.
+                    $promoUpdated = $db->executeUpdate(
+                        "UPDATE `promotions` SET `used_count` = `used_count` + 1
+                         WHERE `id` = ? AND (`max_uses` = 0 OR `used_count` < `max_uses`)",
+                        'i',
+                        [$promoId]
+                    );
+                    if ($promoUpdated === 0) {
+                        throw new RuntimeException("Promotion code '{$appliedPromoCode}' reached its maximum usage limit during checkout.");
+                    }
                 }
-            }
 
-            // E. Generate unique public order number (ORD-YYYYMMDD-XXXXXX)
-            $orderNumber = $this->generateUniqueOrderNumber($db);
+                // C. Calculate final grand total
+                $grandTotal = round(max(0.0, $subtotal - $discountAmount + $shippingFee), 2);
 
-            // F. Generate high-entropy guest access token (32 random bytes = 256 bits)
-            $guestAccessToken = bin2hex(random_bytes(32));
-            $guestAccessTokenHash = hash('sha256', $guestAccessToken);
+                // D. ATOMIC INVENTORY RESERVATION POLICY
+                // We decrement variant stock atomically using conditional WHERE stock_quantity >= requested.
+                // Under MySQL InnoDB, this acquires row-level exclusive locks and guarantees
+                // no negative stock and zero concurrent overselling.
+                foreach ($verifiedItems as $item) {
+                    $variantId = $item['variant_id'];
+                    $qty = $item['quantity'];
 
-            // G. Prepare snapshots
-            $origin = $this->getStoreOrigin();
-            $zoneSnapshot = [
-                'id' => (int) $selectedZone['id'],
-                'name' => $selectedZone['name'],
-                'code' => $selectedZone['code'],
-                'fee' => (float) $selectedZone['fee'],
-                'estimated_days' => $selectedZone['estimated_days'],
-                'origin' => $origin,
-            ];
+                    $affectedRows = $db->executeUpdate(
+                        "UPDATE `product_variants` 
+                         SET `stock_quantity` = `stock_quantity` - ? 
+                         WHERE `id` = ? AND `stock_quantity` >= ?",
+                        'iii',
+                        [$qty, $variantId, $qty]
+                    );
 
-            $addressSnapshot = [
-                'full_name' => trim($shippingAddress['full_name'] ?? ''),
-                'phone' => trim($shippingAddress['phone'] ?? ''),
-                'address_line1' => trim($shippingAddress['address_line1'] ?? ''),
-                'address_line2' => trim($shippingAddress['address_line2'] ?? ''),
-                'city' => trim($shippingAddress['city'] ?? ''),
-                'state' => trim($shippingAddress['state'] ?? ''),
-                'postal_code' => trim($shippingAddress['postal_code'] ?? ''),
-                'country' => trim($shippingAddress['country'] ?? 'Nigeria'),
-            ];
+                    if ($affectedRows === 0) {
+                        // Fetch latest actual stock for error message
+                        $latestStock = $db->fetchOne("SELECT `stock_quantity`, `sku` FROM `product_variants` WHERE `id` = ?", 'i', [$variantId]);
+                        $sku = $latestStock['sku'] ?? $item['sku'];
+                        $available = $latestStock['stock_quantity'] ?? 0;
+                        throw new RuntimeException("Insufficient stock for item '{$item['name']}' ({$sku}). Requested: {$qty}, Available: {$available}.");
+                    }
+                }
 
-            $notes = isset($input['notes']) ? trim((string) $input['notes']) : null;
+                // E. Generate unique public order number (ORD-YYYYMMDD-XXXXXX)
+                $orderNumber = $this->generateUniqueOrderNumber($db);
 
-            // H. Insert Order
-            $orderId = (int) $db->insert(
-                "INSERT INTO `orders` (
-                    `order_number`, `user_id`, `guest_email`, `guest_access_token_hash`,
-                    `shipping_zone_id`, `shipping_zone_snapshot`, `shipping_address_snapshot`,
-                    `order_status`, `payment_status`, `currency`, `subtotal`, `discount_amount`,
-                    `shipping_fee`, `grand_total`, `applied_promo_code`, `notes`
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', 'NGN', ?, ?, ?, ?, ?, ?)",
-                'sississddddss',
-                [
-                    $orderNumber,
-                    $userId,
-                    $email,
-                    $guestAccessTokenHash,
-                    (int) $selectedZone['id'],
-                    json_encode($zoneSnapshot),
-                    json_encode($addressSnapshot),
-                    $subtotal,
-                    $discountAmount,
-                    $shippingFee,
-                    $grandTotal,
-                    $appliedPromoCode,
-                    $notes,
-                ]
-            );
+                // F. Generate high-entropy guest access token (32 random bytes = 256 bits)
+                $guestAccessToken = bin2hex(random_bytes(32));
+                $guestAccessTokenHash = hash('sha256', $guestAccessToken);
 
-            // I. Insert Order Items snapshots
-            foreach ($verifiedItems as $item) {
-                $db->insert(
-                    "INSERT INTO `order_items` (
-                        `order_id`, `product_id`, `variant_id`, `product_type`,
-                        `item_name`, `sku`, `variant_options`, `unit_price`, `quantity`, `line_total`
-                     ) VALUES (?, ?, ?, 'physical', ?, ?, ?, ?, ?, ?)",
-                    'iiisssdid',
+                // G. Prepare snapshots
+                $origin = $this->getStoreOrigin();
+                $zoneSnapshot = [
+                    'id' => (int) $selectedZone['id'],
+                    'name' => $selectedZone['name'],
+                    'code' => $selectedZone['code'],
+                    'fee' => (float) $selectedZone['fee'],
+                    'estimated_days' => $selectedZone['estimated_days'],
+                    'origin' => $origin,
+                ];
+
+                $addressSnapshot = [
+                    'full_name' => trim($shippingAddress['full_name'] ?? ''),
+                    'phone' => trim($shippingAddress['phone'] ?? ''),
+                    'address_line1' => trim($shippingAddress['address_line1'] ?? ''),
+                    'address_line2' => trim($shippingAddress['address_line2'] ?? ''),
+                    'city' => trim($shippingAddress['city'] ?? ''),
+                    'state' => trim($shippingAddress['state'] ?? ''),
+                    'postal_code' => trim($shippingAddress['postal_code'] ?? ''),
+                    'country' => trim($shippingAddress['country'] ?? 'Nigeria'),
+                ];
+
+                $notes = isset($input['notes']) ? trim((string) $input['notes']) : null;
+
+                // H. Insert Order (stock stays reserved until expires_at unless the order is paid)
+                $orderId = (int) $db->insert(
+                    "INSERT INTO `orders` (
+                        `order_number`, `user_id`, `guest_email`, `guest_access_token_hash`,
+                        `shipping_zone_id`, `shipping_zone_snapshot`, `shipping_address_snapshot`,
+                        `order_status`, `payment_status`, `currency`, `subtotal`, `discount_amount`,
+                        `shipping_fee`, `grand_total`, `applied_promo_code`, `notes`, `expires_at`, `idempotency_key`
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', 'NGN', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), ?)",
+                    'sississddddssis',
                     [
-                        $orderId,
-                        $item['product_id'],
-                        $item['variant_id'],
-                        $item['name'],
-                        $item['sku'],
-                        json_encode($item['variant_options']),
-                        $item['unit_price'],
-                        $item['quantity'],
-                        $item['line_total'],
+                        $orderNumber,
+                        $userId,
+                        $email,
+                        $guestAccessTokenHash,
+                        (int) $selectedZone['id'],
+                        json_encode($zoneSnapshot),
+                        json_encode($addressSnapshot),
+                        $subtotal,
+                        $discountAmount,
+                        $shippingFee,
+                        $grandTotal,
+                        $appliedPromoCode,
+                        $notes,
+                        PaymentAttempts::gatewayWindowMinutes(),
+                        $idempotencyKey,
                     ]
                 );
+
+                // I. Insert Order Items snapshots
+                foreach ($verifiedItems as $item) {
+                    $db->insert(
+                        "INSERT INTO `order_items` (
+                            `order_id`, `product_id`, `variant_id`, `product_type`,
+                            `item_name`, `sku`, `variant_options`, `unit_price`, `quantity`, `line_total`
+                         ) VALUES (?, ?, ?, 'physical', ?, ?, ?, ?, ?, ?)",
+                        'iiisssdid',
+                        [
+                            $orderId,
+                            $item['product_id'],
+                            $item['variant_id'],
+                            $item['name'],
+                            $item['sku'],
+                            json_encode($item['variant_options']),
+                            $item['unit_price'],
+                            $item['quantity'],
+                            $item['line_total'],
+                        ]
+                    );
+                }
+
+                // J. Insert initial Order Status History record
+                $db->insert(
+                    "INSERT INTO `order_status_history` (`order_id`, `previous_status`, `new_status`, `comment`, `changed_by_user_id`)
+                     VALUES (?, '', 'pending_payment', 'Order created. Inventory reserved. Pending payment verification.', ?)",
+                    'ii',
+                    [$orderId, $userId]
+                );
+
+                // K. No payment row yet: each gateway attempt creates its own when it starts
+                //    (POST /checkout/orders/{n}/initialize-payment).
+                $expiresRow = $db->fetchOne("SELECT `expires_at`, `created_at` FROM `orders` WHERE `id` = ?", 'i', [$orderId]);
+
+                $createdOrder = [
+                    'order_id' => $orderId,
+                    'order_number' => $orderNumber,
+                    'guest_access_token' => $guestAccessToken,
+                    'guest_email' => $email,
+                    'status' => 'pending_payment',
+                    'payment_status' => 'pending',
+                    'currency' => 'NGN',
+                    'subtotal' => $subtotal,
+                    'discount_amount' => $discountAmount,
+                    'shipping_fee' => $shippingFee,
+                    'grand_total' => $grandTotal,
+                    'shipping_zone' => $zoneSnapshot,
+                    'shipping_address' => $addressSnapshot,
+                    'items_count' => count($verifiedItems),
+                    'items' => $verifiedItems,
+                    'expires_at' => $expiresRow['expires_at'] ?? null,
+                    'created_at' => $expiresRow['created_at'] ?? date('Y-m-d H:i:s'),
+                ];
+
+                // Order-received email goes out only once the order is committed.
+                $db->afterCommit(static function () use ($createdOrder): void {
+                    MailService::getInstance()->sendOrderReceived($createdOrder);
+                });
+
+                return $createdOrder;
+            });
+        } catch (\mysqli_sql_exception $e) {
+            // Two concurrent submissions with the same idempotency key: the loser replays the winner.
+            if ($idempotencyKey !== null && $e->getCode() === 1062 && str_contains($e->getMessage(), 'idempotency')) {
+                $replay = $this->replayIdempotentOrder($idempotencyKey, $email);
+                if ($replay !== null) {
+                    return $replay;
+                }
             }
-
-            // J. Insert initial Order Status History record
-            $db->insert(
-                "INSERT INTO `order_status_history` (`order_id`, `previous_status`, `new_status`, `comment`, `changed_by_user_id`)
-                 VALUES (?, '', 'pending_payment', 'Order created. Inventory reserved. Pending payment verification.', ?)",
-                'ii',
-                [$orderId, $userId]
-            );
-
-            // K. Create Pending Payment Record (Kora provider, no direct gateway call in STEP 8)
-            $paymentReference = 'PAY-' . $orderNumber . '-' . strtoupper(bin2hex(random_bytes(3)));
-            $db->insert(
-                "INSERT INTO `payments` (
-                    `order_id`, `provider`, `provider_reference`, `amount`, `currency`, `status`, `provider_payload_redacted`
-                 ) VALUES (?, 'kora', ?, ?, 'NGN', 'pending', ?)",
-                'isds',
-                [
-                    $orderId,
-                    $paymentReference,
-                    $grandTotal,
-                    json_encode([
-                        'channel' => 'kora_checkout',
-                        'customer_email' => $email,
-                        'order_number' => $orderNumber,
-                        'initialized' => false,
-                        'notes' => 'Awaiting payment initialization',
-                    ]),
-                ]
-            );
-
-            return [
-                'order_id' => $orderId,
-                'order_number' => $orderNumber,
-                'guest_access_token' => $guestAccessToken,
-                'guest_email' => $email,
-                'user_id' => $userId,
-                'status' => 'pending_payment',
-                'payment_status' => 'pending',
-                'payment_reference' => $paymentReference,
-                'currency' => 'NGN',
-                'subtotal' => $subtotal,
-                'discount_amount' => $discountAmount,
-                'shipping_fee' => $shippingFee,
-                'grand_total' => $grandTotal,
-                'shipping_zone' => $zoneSnapshot,
-                'shipping_address' => $addressSnapshot,
-                'items_count' => count($verifiedItems),
-                'items' => $verifiedItems,
-                'created_at' => date('Y-m-d H:i:s'),
-            ];
-        });
-
-        // Dispatch order received notification (logs safely to dev mail.log or SMTP)
-        try {
-            MailService::getInstance()->sendOrderReceived($createdOrder);
-        } catch (\Throwable $e) {
-            error_log('[MailService Notice] ' . $e->getMessage());
+            throw $e;
         }
 
         return $createdOrder;
+    }
+
+    /**
+     * Return the order previously created with this idempotency key, issuing a fresh guest
+     * access token (only the hash is stored, so the original token cannot be re-sent).
+     */
+    private function replayIdempotentOrder(string $idempotencyKey, string $email): ?array
+    {
+        $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `idempotency_key` = ?", 's', [$idempotencyKey]);
+        if ($order === null) {
+            return null;
+        }
+        if (strtolower((string) $order['guest_email']) !== $email) {
+            throw new InvalidArgumentException('This checkout session was already used for a different order. Please refresh and try again.');
+        }
+
+        $guestAccessToken = bin2hex(random_bytes(32));
+        $this->db->executeUpdate(
+            "UPDATE `orders` SET `guest_access_token_hash` = ? WHERE `id` = ?",
+            'si',
+            [hash('sha256', $guestAccessToken), (int) $order['id']]
+        );
+
+        $items = $this->db->fetchAll(
+            "SELECT `product_id`, `variant_id`, `item_name` AS `name`, `sku`, `variant_options`, `unit_price`, `quantity`, `line_total`
+             FROM `order_items` WHERE `order_id` = ?",
+            'i',
+            [(int) $order['id']]
+        );
+        foreach ($items as &$item) {
+            $item['variant_options'] = json_decode((string) $item['variant_options'], true);
+            $item['unit_price'] = (float) $item['unit_price'];
+            $item['line_total'] = (float) $item['line_total'];
+            $item['quantity'] = (int) $item['quantity'];
+        }
+        unset($item);
+
+        return [
+            'order_id' => (int) $order['id'],
+            'order_number' => $order['order_number'],
+            'guest_access_token' => $guestAccessToken,
+            'guest_email' => $order['guest_email'],
+            'status' => $order['order_status'],
+            'payment_status' => $order['payment_status'],
+            'currency' => $order['currency'],
+            'subtotal' => (float) $order['subtotal'],
+            'discount_amount' => (float) $order['discount_amount'],
+            'shipping_fee' => (float) $order['shipping_fee'],
+            'grand_total' => (float) $order['grand_total'],
+            'shipping_zone' => json_decode((string) $order['shipping_zone_snapshot'], true),
+            'shipping_address' => json_decode((string) $order['shipping_address_snapshot'], true),
+            'items_count' => count($items),
+            'items' => $items,
+            'expires_at' => $order['expires_at'],
+            'created_at' => $order['created_at'],
+            'replayed' => true,
+        ];
     }
 
     /**
@@ -347,6 +424,10 @@ class CheckoutService
     {
         $verified = [];
 
+        if (count($items) > self::MAX_LINES) {
+            throw new InvalidArgumentException('Too many different items in one order (maximum ' . self::MAX_LINES . ').');
+        }
+
         foreach ($items as $index => $item) {
             $productId = isset($item['product_id']) ? (int) $item['product_id'] : (isset($item['productId']) ? (int) $item['productId'] : 0);
             $variantId = isset($item['variant_id']) ? (int) $item['variant_id'] : (isset($item['variantId']) ? (int) $item['variantId'] : null);
@@ -356,8 +437,8 @@ class CheckoutService
                 throw new InvalidArgumentException("Item at index {$index} must specify a valid product_id.");
             }
 
-            if ($quantity <= 0 || $quantity > 999) {
-                throw new InvalidArgumentException("Invalid quantity '{$quantity}' for product ID {$productId}. Quantity must be between 1 and 999.");
+            if ($quantity <= 0 || $quantity > self::MAX_QUANTITY_PER_LINE) {
+                throw new InvalidArgumentException("Invalid quantity '{$quantity}' for product ID {$productId}. Quantity must be between 1 and " . self::MAX_QUANTITY_PER_LINE . '.');
             }
 
             // 1. Fetch product from database
@@ -376,28 +457,28 @@ class CheckoutService
                 throw new InvalidArgumentException("Product '{$product['name']}' is not available for purchase (status: {$product['status']}).");
             }
 
-            // 2. Fetch or resolve product variant
+            // 2. Resolve the exact variant the customer chose. Never substitute a different one.
+            $variantColumns = "`id`, `product_id`, `sku`, `size`, `color_name`, `color_hex`, `price_override`, `stock_quantity`";
             $variant = null;
             if ($variantId !== null && $variantId > 0) {
                 $variant = $this->db->fetchOne(
-                    "SELECT `id`, `product_id`, `sku`, `size`, `color_name`, `color_hex`, `price_override`, `stock_quantity`
-                     FROM `product_variants` WHERE `id` = ? AND `product_id` = ?",
+                    "SELECT {$variantColumns} FROM `product_variants` WHERE `id` = ? AND `product_id` = ? AND `is_active` = 1",
                     'ii',
                     [$variantId, $productId]
                 );
                 if ($variant === null) {
-                    throw new InvalidArgumentException("Specified variant ID {$variantId} does not belong to product '{$product['name']}'.");
+                    throw new InvalidArgumentException("The selected option for '{$product['name']}' is no longer available. Please choose another size or colour.");
                 }
             } else {
-                // If variant_id was omitted, check if size and color were provided, or pick the first available variant
+                // Legacy carts without a variant_id: accept only an exact size + colour match, or a
+                // product that has a single option.
                 $size = isset($item['size']) ? trim((string) $item['size']) : '';
                 $color = isset($item['color']) ? (is_array($item['color']) ? trim((string) ($item['color']['name'] ?? '')) : trim((string) $item['color'])) : '';
 
                 if ($size !== '' && $color !== '') {
                     $variant = $this->db->fetchOne(
-                        "SELECT `id`, `product_id`, `sku`, `size`, `color_name`, `color_hex`, `price_override`, `stock_quantity`
-                         FROM `product_variants`
-                         WHERE `product_id` = ? AND LOWER(`size`) = LOWER(?) AND LOWER(`color_name`) = LOWER(?)
+                        "SELECT {$variantColumns} FROM `product_variants`
+                         WHERE `product_id` = ? AND `is_active` = 1 AND LOWER(`size`) = LOWER(?) AND LOWER(`color_name`) = LOWER(?)
                          LIMIT 1",
                         'iss',
                         [$productId, $size, $color]
@@ -405,17 +486,22 @@ class CheckoutService
                 }
 
                 if ($variant === null) {
-                    // Fall back to first variant of this product
-                    $variant = $this->db->fetchOne(
-                        "SELECT `id`, `product_id`, `sku`, `size`, `color_name`, `color_hex`, `price_override`, `stock_quantity`
-                         FROM `product_variants` WHERE `product_id` = ? ORDER BY `id` ASC LIMIT 1",
+                    $activeVariants = $this->db->fetchAll(
+                        "SELECT {$variantColumns} FROM `product_variants` WHERE `product_id` = ? AND `is_active` = 1 LIMIT 2",
                         'i',
                         [$productId]
                     );
+                    if (count($activeVariants) === 1) {
+                        $variant = $activeVariants[0];
+                    }
                 }
 
                 if ($variant === null) {
-                    throw new InvalidArgumentException("No purchasable variant found for product '{$product['name']}'.");
+                    $chosen = trim($size . ' / ' . $color, ' /');
+                    throw new InvalidArgumentException(
+                        "Please choose an available size and colour for '{$product['name']}'"
+                        . ($chosen !== '' ? " ('{$chosen}' is not offered)." : '.')
+                    );
                 }
             }
 

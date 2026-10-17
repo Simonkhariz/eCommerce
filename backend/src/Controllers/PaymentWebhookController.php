@@ -53,10 +53,11 @@ class PaymentWebhookController
             Response::success($result, 'Webhook processed successfully.', 200);
         } catch (InvalidArgumentException $e) {
             error_log('[Kora Webhook Validation Failure] ' . $e->getMessage());
-            Response::error($e->getMessage(), 401, 'INVALID_SIGNATURE');
+            Response::error('Invalid webhook signature.', 401, 'INVALID_SIGNATURE');
         } catch (RuntimeException $e) {
+            // Configuration or transient failure: a non-2xx response makes Kora retry later.
             error_log('[Kora Webhook Processing Failure] ' . $e->getMessage());
-            Response::error($e->getMessage(), 422, 'PROCESSING_ERROR');
+            Response::error('Webhook could not be processed right now.', 503, 'PROCESSING_ERROR');
         } catch (Throwable $e) {
             error_log('[Kora Webhook Critical Error] ' . $e->getMessage());
             Response::error('Internal webhook processing error.', 500, 'INTERNAL_SERVER_ERROR');
@@ -84,10 +85,11 @@ class PaymentWebhookController
             Response::success($result, 'Monnify webhook processed successfully.', 200);
         } catch (InvalidArgumentException $e) {
             error_log('[Monnify Webhook Validation Failure] ' . $e->getMessage());
-            Response::error($e->getMessage(), 401, 'INVALID_SIGNATURE');
+            Response::error('Invalid webhook signature.', 401, 'INVALID_SIGNATURE');
         } catch (RuntimeException $e) {
+            // Configuration or transient failure: a non-2xx response makes Monnify retry later.
             error_log('[Monnify Webhook Processing Failure] ' . $e->getMessage());
-            Response::error($e->getMessage(), 422, 'PROCESSING_ERROR');
+            Response::error('Webhook could not be processed right now.', 503, 'PROCESSING_ERROR');
         } catch (Throwable $e) {
             error_log('[Monnify Webhook Critical Error] ' . $e->getMessage());
             Response::error('Internal webhook processing error.', 500, 'INTERNAL_SERVER_ERROR');

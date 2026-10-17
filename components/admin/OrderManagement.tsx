@@ -118,8 +118,9 @@ export function OrderManagement() {
 
   const handleOpenConfirmPayment = (order: any) => {
     setSelectedOrder(order);
-    setPayReference(`TRF-${order.order_number}`);
-    setPayNote(`Manual WhatsApp bank transfer verified by admin.`);
+    // The admin must enter the real transfer/receipt reference from the bank statement.
+    setPayReference('');
+    setPayNote('');
     setConfirmPaymentModal(true);
   };
 
@@ -129,7 +130,7 @@ export function OrderManagement() {
     setIsSubmittingPay(true);
     try {
       await apiAdminConfirmPayment(selectedOrder.order_number, {
-        reference: payReference.trim() || undefined,
+        reference: payReference.trim(),
         note: payNote.trim() || undefined,
       });
       showToast('success', `Payment for ${selectedOrder.order_number} confirmed and marked PAID.`);
@@ -144,9 +145,10 @@ export function OrderManagement() {
 
   const handleOpenShipModal = (order: any) => {
     setSelectedOrder(order);
-    setCarrier(order.carrier || 'GIG Logistics');
-    setTrackingNumber(order.tracking_number || `GIG-TRK-${Math.floor(100000 + Math.random() * 900000)}`);
-    setTrackingUrl(order.tracking_url || `https://giglogistics.com/track?ref=GIG-TRK`);
+    // Real carrier details only: the admin enters what the courier issued.
+    setCarrier(order.carrier || '');
+    setTrackingNumber(order.tracking_number || '');
+    setTrackingUrl(order.tracking_url || '');
     setShipModal(true);
   };
 
@@ -159,7 +161,7 @@ export function OrderManagement() {
         carrier: carrier.trim(),
         tracking_number: trackingNumber.trim() || undefined,
         tracking_url: trackingUrl.trim() || undefined,
-        status: 'shipped',
+        status: 'in_transit',
       });
       showToast('success', `Shipment assigned & ${selectedOrder.order_number} marked as SHIPPED.`);
       setShipModal(false);
@@ -174,7 +176,7 @@ export function OrderManagement() {
   const handleConfirmDelivered = async (order: any) => {
     if (!confirm(`Confirm delivery for parcel ${order.order_number}?`)) return;
     try {
-      await apiAdminConfirmDelivery(order.order_number, 'Delivery confirmed by customer signature.');
+      await apiAdminConfirmDelivery(order.order_number, 'Delivery confirmed by store admin.');
       showToast('success', `Order ${order.order_number} marked as DELIVERED.`);
       loadOrders();
     } catch (err: any) {
@@ -585,7 +587,10 @@ export function OrderManagement() {
                   type="text"
                   value={payReference}
                   onChange={(e) => setPayReference(e.target.value)}
-                  placeholder="e.g. GTB-TRF-294829 or WA-CHAT"
+                  required
+                  minLength={4}
+                  maxLength={80}
+                  placeholder="As shown on your bank statement"
                   className="w-full text-xs px-3 py-2 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-black font-mono"
                 />
               </div>

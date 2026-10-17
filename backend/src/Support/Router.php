@@ -119,7 +119,14 @@ class Router
         $matchedPath = false;
         $allowedMethods = [];
 
-        foreach ($this->routes as $route) {
+        // Exact (parameter-free) routes win over parameterised ones, so e.g.
+        // /admin/orders/export is never swallowed by /admin/orders/{idOrNumber}.
+        $orderedRoutes = array_merge(
+            array_filter($this->routes, static fn (array $r): bool => empty($r['params'])),
+            array_filter($this->routes, static fn (array $r): bool => !empty($r['params']))
+        );
+
+        foreach ($orderedRoutes as $route) {
             if (preg_match($route['regex'], $path, $matches)) {
                 $matchedPath = true;
                 $allowedMethods[] = $route['method'];

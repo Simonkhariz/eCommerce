@@ -164,16 +164,12 @@ function TrackOrderContent() {
     if (!order) return;
     const gateway = gatewayOverride || selectedGateway;
 
-    if (gateway === 'whatsapp') {
-      if (whatsAppInvoiceUrl) {
-        window.open(whatsAppInvoiceUrl, '_blank', 'noopener,noreferrer');
-      }
-      setShowPaymentModal(false);
-      return;
-    }
-
     setIsInitializingPayment(gateway);
     setPaymentError(null);
+
+    // Open the WhatsApp tab inside the click so pop-up blockers allow it; it is pointed at the
+    // invoice once the server has reserved the order for a manual transfer.
+    const whatsappTab = gateway === 'whatsapp' ? window.open('about:blank', '_blank') : null;
 
     try {
       const guestToken =
@@ -187,12 +183,20 @@ function TrackOrderContent() {
           : undefined;
 
       const res = await apiInitializePayment(order.order_number, guestToken, redirectUrl, gateway);
-      if (res.checkout_url) {
+      if (gateway === 'whatsapp') {
+        if (whatsAppInvoiceUrl && whatsappTab) {
+          whatsappTab.location.href = whatsAppInvoiceUrl;
+        } else if (whatsAppInvoiceUrl) {
+          window.location.href = whatsAppInvoiceUrl;
+        }
+        setShowPaymentModal(false);
+      } else if (res.checkout_url) {
         window.location.href = res.checkout_url;
       } else {
         throw new Error(`${gateway === 'kora' ? 'Kora' : 'Monnify'} did not return a valid payment URL.`);
       }
     } catch (err: any) {
+      whatsappTab?.close();
       setPaymentError(err.message || 'Payment initialization failed. Please retry.');
     } finally {
       setIsInitializingPayment(null);

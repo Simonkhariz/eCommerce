@@ -14,7 +14,8 @@ export const AdminPayments: React.FC = () => {
 
   // Settle WhatsApp payment modal state
   const [settleTarget, setSettleTarget] = useState<any | null>(null);
-  const [settleNote, setSettleNote] = useState('Verified bank transfer credit via WhatsApp agent');
+  const [settleNote, setSettleNote] = useState('');
+  const [settleReference, setSettleReference] = useState('');
   const [settling, setSettling] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -46,11 +47,13 @@ export const AdminPayments: React.FC = () => {
     setSettling(true);
     try {
       await apiAdminConfirmPayment(settleTarget.order_number, {
-        reference: `WA-CONFIRM-${Date.now().toString().slice(-6)}`,
-        note: settleNote,
+        reference: settleReference.trim(),
+        note: settleNote.trim(),
       });
       setFeedback(`Payment for order ${settleTarget.order_number} confirmed and marked as successful.`);
       setSettleTarget(null);
+      setSettleReference('');
+      setSettleNote('');
       fetchPayments();
     } catch (err: any) {
       alert(err?.message || 'Failed to settle payment.');
@@ -259,14 +262,34 @@ export const AdminPayments: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#374151]">
-                  Administrative Settlement Note
+                <label htmlFor="settle-reference" className="block text-xs font-semibold text-[#374151]">
+                  Bank transfer / receipt reference
                 </label>
                 <input
+                  id="settle-reference"
+                  type="text"
+                  value={settleReference}
+                  onChange={(e) => setSettleReference(e.target.value)}
+                  required
+                  minLength={4}
+                  maxLength={80}
+                  placeholder="As shown on your bank statement"
+                  className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs outline-none focus:border-black"
+                />
+                <p className="mt-1 text-[11px] text-[#6b7280]">
+                  Only confirm after the money has arrived in your account.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="settle-note" className="block text-xs font-semibold text-[#374151]">
+                  Note (optional)
+                </label>
+                <input
+                  id="settle-note"
                   type="text"
                   value={settleNote}
                   onChange={(e) => setSettleNote(e.target.value)}
-                  required
                   className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs outline-none focus:border-black"
                 />
               </div>

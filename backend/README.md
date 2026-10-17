@@ -126,7 +126,53 @@ Configure an Alias pointing `/shop-api` to the `backend/public` folder. The buil
 
 ---
 
-## 5. Verification & Testing Commands
+## 5. Database Migrations & Scheduled Jobs
+
+### Migrations
+```bash
+php backend/migrations/migrate.php
+```
+Each migration runs exactly once; applied files are recorded in the `schema_migrations` table.
+Re-running the command only applies new files. (On a database created before the ledger existed,
+migrations 001–008 are recorded as already applied the first time.)
+
+### Releasing stock from unpaid orders
+Placing an order reserves its stock until `orders.expires_at` (60 minutes after the order or the
+latest gateway checkout attempt; 24 hours when the customer pays by WhatsApp/manual transfer).
+Overdue orders are cancelled and their stock and promo use released exactly once.
+
+The API does a small sweep whenever an order is placed or the admin order list is opened. Schedule
+the full job so stock is released even when the store is quiet; it asks Kora/Monnify for the final
+status first, so a payment completed at the last minute is applied instead of cancelled:
+```bash
+php backend/scripts/expire_pending_orders.php                 # check gateways, then expire
+php backend/scripts/expire_pending_orders.php --no-gateway-check
+```
+Windows Task Scheduler (every 10 minutes):
+```powershell
+schtasks /Create /SC MINUTE /MO 10 /TN "ShopCo Expire Orders" /TR "C:\xampp\php\php.exe C:\path\to\E-commerce\backend\scripts\expire_pending_orders.php"
+```
+
+Optional `.env` settings: `ORDER_PAYMENT_WINDOW_MINUTES` (default 60) and
+`ORDER_MANUAL_PAYMENT_WINDOW_HOURS` (default 24).
+
+### Payment rules (PaymentFinalizer)
+Every confirmation path (Kora/Monnify webhooks and verification, admin "Confirm payment") goes
+through `src/Services/PaymentFinalizer.php`: amount and currency must match, a payment is never
+applied twice, an order only moves `pending_payment -> paid`, and money that arrives for a
+cancelled/expired order, a second successful payment, an underpayment or an overpayment is recorded
+and flagged on the order (`requires_attention`) for the admin instead of changing it.
+
+---
+
+## 6. Verification & Testing Commands
+
+### Payment, order & stock integrity suite
+Requires the API to be running (`php -S 127.0.0.1:8000 -t backend/public`). Creates its own test
+data and removes it afterwards:
+```bash
+php backend/tests/PaymentIntegrityTest.php
+```
 
 ### PHP Syntax Check
 Run syntax checks across all backend PHP files:
@@ -149,7 +195,7 @@ php backend/tests/test_router_405.php
 
 ---
 
-## 6. Prepared Statement Usage Example
+## 7. Prepared Statement Usage Example
 
 Always execute queries through `App\Database\Database::getInstance()` using prepared statements:
 

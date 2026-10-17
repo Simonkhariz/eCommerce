@@ -111,7 +111,7 @@ class ProductRepository
             }
             if (!empty($colorConditions)) {
                 $colorSql = implode(' OR ', $colorConditions);
-                $conditions[] = "EXISTS (SELECT 1 FROM product_variants pv_c WHERE pv_c.product_id = p.id AND ({$colorSql}))";
+                $conditions[] = "EXISTS (SELECT 1 FROM product_variants pv_c WHERE pv_c.product_id = p.id AND pv_c.is_active = 1 AND ({$colorSql}))";
             }
         }
 
@@ -132,7 +132,7 @@ class ProductRepository
             }
             if (!empty($sizeConditions)) {
                 $sizeSql = implode(' OR ', $sizeConditions);
-                $conditions[] = "EXISTS (SELECT 1 FROM product_variants pv_s WHERE pv_s.product_id = p.id AND ({$sizeSql}))";
+                $conditions[] = "EXISTS (SELECT 1 FROM product_variants pv_s WHERE pv_s.product_id = p.id AND pv_s.is_active = 1 AND ({$sizeSql}))";
             }
         }
 
@@ -194,7 +194,7 @@ class ProductRepository
                             p.created_at,
                             c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
                             (SELECT pi.image_url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.is_primary DESC, pi.display_order ASC LIMIT 1) AS primary_image,
-                            (SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id) AS total_stock
+                            (SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id AND pv.is_active = 1) AS total_stock
                      FROM products p
                      LEFT JOIN categories c ON c.id = p.category_id
                      WHERE {$whereSql}
@@ -216,7 +216,7 @@ class ProductRepository
             $variantRows = $this->db->fetchAll(
                 "SELECT product_id, color_name, color_hex, size
                  FROM product_variants
-                 WHERE product_id IN ({$placeholders})
+                 WHERE is_active = 1 AND product_id IN ({$placeholders})
                  ORDER BY id ASC",
                 $variantTypes,
                 $productIds
@@ -327,7 +327,7 @@ class ProductRepository
         $variants = $this->db->fetchAll(
             "SELECT id, sku, size, color_name, color_hex, price_override, stock_quantity, low_stock_threshold
              FROM product_variants
-             WHERE product_id = ?
+             WHERE product_id = ? AND is_active = 1
              ORDER BY id ASC",
             "i",
             [$productId]
@@ -455,11 +455,11 @@ class ProductRepository
         // Inventory status filter (subquery based)
         if (!empty($filters['inventory']) && $filters['inventory'] !== 'all') {
             if ($filters['inventory'] === 'out_of_stock') {
-                $conditions[] = "(SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id) = 0";
+                $conditions[] = "(SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id AND pv.is_active = 1) = 0";
             } elseif ($filters['inventory'] === 'low_stock') {
-                $conditions[] = "EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity <= pv.low_stock_threshold AND pv.stock_quantity > 0)";
+                $conditions[] = "EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.is_active = 1 AND pv.stock_quantity <= pv.low_stock_threshold AND pv.stock_quantity > 0)";
             } elseif ($filters['inventory'] === 'in_stock') {
-                $conditions[] = "(SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id) > 0";
+                $conditions[] = "(SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id AND pv.is_active = 1) > 0";
             }
         }
 
@@ -493,7 +493,7 @@ class ProductRepository
                             p.created_at, p.updated_at,
                             c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
                             (SELECT pi.image_url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.is_primary DESC, pi.display_order ASC LIMIT 1) AS primary_image,
-                            (SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id) AS total_stock
+                            (SELECT COALESCE(SUM(pv.stock_quantity), 0) FROM product_variants pv WHERE pv.product_id = p.id AND pv.is_active = 1) AS total_stock
                      FROM products p
                      LEFT JOIN categories c ON c.id = p.category_id
                      WHERE {$whereSql}
@@ -520,7 +520,7 @@ class ProductRepository
             $variants = $this->db->fetchAll(
                 "SELECT id, sku, size, color_name, color_hex, price_override, stock_quantity, low_stock_threshold
                  FROM product_variants
-                 WHERE product_id = ?
+                 WHERE product_id = ? AND is_active = 1
                  ORDER BY id ASC",
                 "i",
                 [$row['id']]
@@ -597,6 +597,13 @@ class ProductRepository
             );
 
             $productId = (int) $variant['product_id'];
+
+            $db->execute(
+                "INSERT INTO `inventory_logs` (`variant_id`, `product_id`, `previous_stock`, `new_stock`, `change_amount`, `reason`, `adjusted_by_user_id`)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                'iiiiisi',
+                [$variantId, $productId, $currentStock, $newStock, $adjustment, mb_substr($reason . ($notes ? " ({$notes})" : ''), 0, 255), $adminId]
+            );
 
             // Log immutable audit record
             $auditRepo = new AuditLogRepository();
@@ -878,26 +885,10 @@ class ProductRepository
                 ]
             );
 
-            // Sync variants if provided
+            // Sync variants if provided: upsert by id so variant IDs (referenced by orders, carts
+            // and inventory logs) stay stable.
             if ($variants !== null && is_array($variants)) {
-                $db->execute("DELETE FROM product_variants WHERE product_id = ?", "i", [$id]);
-                foreach ($variants as $v) {
-                    $db->execute(
-                        "INSERT INTO product_variants (product_id, sku, size, color_name, color_hex, price_override, stock_quantity, low_stock_threshold)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        "issssdii",
-                        [
-                            $id,
-                            $v['sku'],
-                            $v['size'],
-                            $v['color_name'],
-                            $v['color_hex'],
-                            (!empty($v['price_override']) && (float) $v['price_override'] > 0) ? (float) $v['price_override'] : null,
-                            $v['stock_quantity'] ?? 0,
-                            $v['low_stock_threshold'] ?? 5,
-                        ]
-                    );
-                }
+                $this->syncVariants($db, $id, (string) ($existing['sku'] ?? ''), $variants);
             }
 
             // Sync images if provided
@@ -931,6 +922,119 @@ class ProductRepository
 
             return true;
         });
+    }
+
+    /**
+     * Upsert a product's variants from the admin form.
+     *
+     * - Existing variants (matched by id, or by size + colour) are updated in place.
+     * - Stock on an existing variant changes only if the form's `original_stock_quantity`
+     *   still matches the database; otherwise orders arrived meanwhile and the edit is refused
+     *   rather than silently overwriting reserved stock. Every stock change is logged.
+     * - Variants removed from the form are archived if anything references them, else deleted.
+     */
+    private function syncVariants(Database $db, int $productId, string $masterSku, array $variants): void
+    {
+        $adminId = \App\Support\RequestContext::getUser()['id'] ?? null;
+
+        $rows = $db->fetchAll(
+            "SELECT id, sku, size, color_name, stock_quantity, is_active FROM product_variants WHERE product_id = ? FOR UPDATE",
+            'i',
+            [$productId]
+        );
+        $byId = [];
+        $byOptions = [];
+        foreach ($rows as $row) {
+            $byId[(int) $row['id']] = $row;
+            $byOptions[strtolower(trim($row['size'])) . '|' . strtolower(trim($row['color_name']))] = $row;
+        }
+
+        $keptIds = [];
+        foreach ($variants as $index => $v) {
+            $size = trim((string) ($v['size'] ?? ''));
+            $colorName = trim((string) ($v['color_name'] ?? ''));
+            if ($size === '' || $colorName === '') {
+                throw new \InvalidArgumentException('Every variant needs a size and a colour.');
+            }
+            $optionsKey = strtolower($size) . '|' . strtolower($colorName);
+            $priceOverride = (!empty($v['price_override']) && (float) $v['price_override'] > 0) ? (float) $v['price_override'] : null;
+            $threshold = max(0, (int) ($v['low_stock_threshold'] ?? 5));
+            $colorHex = trim((string) ($v['color_hex'] ?? '#000000')) ?: '#000000';
+
+            $vid = isset($v['id']) ? (int) $v['id'] : 0;
+            $current = ($vid > 0 && isset($byId[$vid])) ? $byId[$vid] : ($byOptions[$optionsKey] ?? null);
+
+            if ($current !== null) {
+                $vid = (int) $current['id'];
+                if (in_array($vid, $keptIds, true)) {
+                    throw new \InvalidArgumentException("Duplicate variant {$size} / {$colorName} in the form.");
+                }
+                $sku = trim((string) ($v['sku'] ?? '')) ?: $current['sku'];
+
+                $db->execute(
+                    "UPDATE product_variants
+                     SET sku = ?, size = ?, color_name = ?, color_hex = ?, price_override = ?, low_stock_threshold = ?, is_active = 1
+                     WHERE id = ? AND product_id = ?",
+                    'ssssdiii',
+                    [$sku, $size, $colorName, $colorHex, $priceOverride, $threshold, $vid, $productId]
+                );
+
+                if (array_key_exists('stock_quantity', $v) && (int) $v['stock_quantity'] !== (int) $current['stock_quantity']) {
+                    $newStock = (int) $v['stock_quantity'];
+                    $expected = isset($v['original_stock_quantity']) ? (int) $v['original_stock_quantity'] : null;
+                    if ($newStock < 0) {
+                        throw new \InvalidArgumentException("Stock for {$sku} cannot be negative.");
+                    }
+                    if ($expected === null || $expected !== (int) $current['stock_quantity']) {
+                        throw new \InvalidArgumentException(
+                            "Stock for {$sku} changed to {$current['stock_quantity']} since this form was opened (orders or another edit). Reload the product and try again."
+                        );
+                    }
+                    $db->execute("UPDATE product_variants SET stock_quantity = ? WHERE id = ?", 'ii', [$newStock, $vid]);
+                    $db->execute(
+                        "INSERT INTO `inventory_logs` (`variant_id`, `product_id`, `previous_stock`, `new_stock`, `change_amount`, `reason`, `adjusted_by_user_id`)
+                         VALUES (?, ?, ?, ?, ?, 'Product form edit', ?)",
+                        'iiiiii',
+                        [$vid, $productId, (int) $current['stock_quantity'], $newStock, $newStock - (int) $current['stock_quantity'], $adminId]
+                    );
+                }
+            } else {
+                $sku = trim((string) ($v['sku'] ?? '')) ?: self::generateVariantSku($masterSku, $colorName, $size, $index + 1);
+                $initialStock = max(0, (int) ($v['stock_quantity'] ?? 0));
+                $vid = (int) $db->insert(
+                    "INSERT INTO product_variants (product_id, sku, size, color_name, color_hex, price_override, stock_quantity, low_stock_threshold)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    'issssdii',
+                    [$productId, $sku, $size, $colorName, $colorHex, $priceOverride, $initialStock, $threshold]
+                );
+                if ($initialStock > 0) {
+                    $db->execute(
+                        "INSERT INTO `inventory_logs` (`variant_id`, `product_id`, `previous_stock`, `new_stock`, `change_amount`, `reason`, `adjusted_by_user_id`)
+                         VALUES (?, ?, 0, ?, ?, 'Initial stock (new variant)', ?)",
+                        'iiiii',
+                        [$vid, $productId, $initialStock, $initialStock, $adminId]
+                    );
+                }
+            }
+
+            $keptIds[] = $vid;
+        }
+
+        foreach ($byId as $vid => $row) {
+            if (in_array($vid, $keptIds, true) || (int) $row['is_active'] === 0) {
+                continue;
+            }
+            $referenced = $db->fetchOne(
+                "SELECT (SELECT COUNT(*) FROM order_items WHERE variant_id = ?) + (SELECT COUNT(*) FROM inventory_logs WHERE variant_id = ?) AS refs",
+                'ii',
+                [$vid, $vid]
+            );
+            if ((int) ($referenced['refs'] ?? 0) > 0) {
+                $db->execute("UPDATE product_variants SET is_active = 0 WHERE id = ?", 'i', [$vid]);
+            } else {
+                $db->execute("DELETE FROM product_variants WHERE id = ?", 'i', [$vid]);
+            }
+        }
     }
 
     /**

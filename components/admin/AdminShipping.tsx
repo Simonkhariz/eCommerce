@@ -45,9 +45,10 @@ export const AdminShipping: React.FC = () => {
 
   const handleOpenAssign = (ord: any) => {
     setSelectedOrder(ord);
-    setCarrier(ord.carrier || 'GIG Logistics');
-    setTrackingNumber(ord.tracking_number || `TRK-NG-${Date.now().toString().slice(-8)}`);
-    setTrackingUrl(ord.tracking_url || 'https://giglogistics.com/tracking');
+    // Real carrier details only: the admin enters what the courier issued.
+    setCarrier(ord.carrier || '');
+    setTrackingNumber(ord.tracking_number || '');
+    setTrackingUrl(ord.tracking_url || '');
   };
 
   const handleAssignSubmit = async (e: React.FormEvent) => {
@@ -75,7 +76,7 @@ export const AdminShipping: React.FC = () => {
   const handleMarkDelivered = async (ord: any) => {
     if (!confirm(`Confirm physical parcel delivery for order ${ord.order_number}?`)) return;
     try {
-      await apiAdminConfirmDelivery(ord.order_number, 'Customer signed receipt upon physical delivery');
+      await apiAdminConfirmDelivery(ord.order_number, 'Delivery confirmed by store admin.');
       setFeedback(`Order ${ord.order_number} delivery confirmed successfully.`);
       fetchShipments();
     } catch (err: any) {
