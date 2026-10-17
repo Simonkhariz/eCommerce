@@ -26,8 +26,8 @@ class CorsMiddleware
         if ($origin !== null) {
             if (in_array($origin, $allowedOrigins, true)) {
                 $isAllowed = true;
-            } else {
-                // In local development, permit any localhost/127.0.0.1 origin regardless of port
+            } elseif (strtolower((string) Env::get('APP_ENV', 'development')) === 'development') {
+                // Local development only: permit any localhost/127.0.0.1 origin regardless of port
                 $parsed = parse_url($origin);
                 $host = $parsed['host'] ?? '';
                 if (in_array($host, ['localhost', '127.0.0.1', '::1'], true)) {
@@ -40,10 +40,7 @@ class CorsMiddleware
             header("Access-Control-Allow-Origin: {$origin}");
             header('Access-Control-Allow-Credentials: true');
             header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-
-            // Dynamically reflect requested preflight headers and ensure dev admin & CSRF headers are supported
-            $reqHeaders = $_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] ?? 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, X-CSRF-Token, X-Dev-Admin-Token';
-            header("Access-Control-Allow-Headers: {$reqHeaders}");
+            header('Access-Control-Allow-Headers: Content-Type, Accept, X-Requested-With, X-CSRF-Token, X-Guest-Access-Token, X-Order-Email, X-Payment-Reference, Idempotency-Key');
             header('Access-Control-Max-Age: 86400');
             header('Vary: Origin');
         }

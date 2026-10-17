@@ -308,7 +308,8 @@ Protected admin endpoint to create a new physical product with variants and imag
 - **Method**: `POST`
 - **Headers**:
   - `Content-Type: application/json`
-  - `X-Dev-Admin-Token: dev_admin_secret_token_12345` (or `Authorization: Bearer dev_admin_secret_token_12345`)
+  - `X-CSRF-Token: <csrf_token from the admin login or /auth/me?scope=admin response>`
+  - Cookie: `shopco_admin` (HTTP-only admin session cookie set by `POST /auth/login`; never readable by JavaScript)
 - **Request Body**:
 ```json
 {

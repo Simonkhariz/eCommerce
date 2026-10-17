@@ -57,8 +57,7 @@ class KoraService
         $appUrl = rtrim(Env::get('APP_URL', 'http://localhost:8000'), '/');
         $this->notificationUrl = "{$appUrl}/api/v1/webhooks/kora";
 
-        $frontendUrl = 'http://localhost:3000';
-        $this->defaultRedirectUrl = "{$frontendUrl}/checkout/callback";
+        $this->defaultRedirectUrl = Env::frontendUrl() . '/checkout/callback';
     }
 
     /**

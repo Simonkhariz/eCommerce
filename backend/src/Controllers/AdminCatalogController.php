@@ -333,49 +333,42 @@ class AdminCatalogController
             Response::error('File upload failed with error code: ' . $file['error'], 400, 'UPLOAD_ERROR');
         }
 
+        // Raster formats only: SVG can carry script and is served from our own origin.
         $allowedMimes = [
             'image/jpeg' => 'jpg',
             'image/png' => 'png',
             'image/webp' => 'webp',
-            'image/gif' => 'gif',
-            'image/svg+xml' => 'svg',
         ];
 
         $finfo = new \finfo(FILEINFO_MIME_TYPE);
         $mime = $finfo->file($file['tmp_name']);
 
-        if (!isset($allowedMimes[$mime])) {
-            Response::error('Invalid image format. Allowed formats: JPEG, PNG, WebP, GIF, SVG.', 422, 'INVALID_IMAGE_TYPE');
+        if (!isset($allowedMimes[$mime]) || @getimagesize($file['tmp_name']) === false) {
+            Response::error('Invalid image format. Allowed formats: JPEG, PNG, WebP.', 422, 'INVALID_IMAGE_TYPE');
         }
 
-        // Limit file size to 10MB
-        $maxBytes = 10 * 1024 * 1024;
+        // Limit file size to 5MB
+        $maxBytes = 5 * 1024 * 1024;
         if ($file['size'] > $maxBytes) {
-            Response::error('Image exceeds maximum permitted file size of 10MB.', 422, 'FILE_TOO_LARGE');
+            Response::error('Image exceeds maximum permitted file size of 5MB.', 422, 'FILE_TOO_LARGE');
         }
 
         $extension = $allowedMimes[$mime];
         $safeName = 'prod_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
 
-        $nextPublicDir = dirname(BASE_PATH) . '/public/images/products';
-        if (!is_dir($nextPublicDir)) {
-            @mkdir($nextPublicDir, 0777, true);
-        }
-        $destPath = $nextPublicDir . '/' . $safeName;
-
-        $backendPublicDir = BASE_PATH . '/public/uploads';
-        if (!is_dir($backendPublicDir)) {
-            @mkdir($backendPublicDir, 0777, true);
-        }
-        $backupPath = $backendPublicDir . '/' . $safeName;
-
-        if (!move_uploaded_file($file['tmp_name'], $destPath)) {
-            Response::error('Failed to move uploaded file to destination.', 500, 'FILE_SAVE_FAILED');
+        // Uploads live only under the API's public root and are served at /uploads/* (proxied by
+        // Next.js), so new images work in production without rebuilding the frontend.
+        $uploadDir = BASE_PATH . '/public/uploads';
+        if (!is_dir($uploadDir)) {
+            @mkdir($uploadDir, 0755, true);
         }
 
-        @copy($destPath, $backupPath);
+        if (!move_uploaded_file($file['tmp_name'], $uploadDir . '/' . $safeName)) {
+            Response::error('Failed to save the uploaded image.', 500, 'FILE_SAVE_FAILED');
+        }
+        @chmod($uploadDir . '/' . $safeName, 0644);
 
-        $imageUrl = '/images/products/' . $safeName;
+        $imageUrl = '/uploads/' . $safeName;
 
         Response::success([
             'image_url' => $imageUrl,

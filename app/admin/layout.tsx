@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
+import { AdminAuthGate } from '@/components/admin/AdminAuthGate';
 
 export const metadata: Metadata = {
-  title: 'E-Commerce Admin Dashboard',
-  description: 'Enterprise operations, SLA monitoring, customer support tickets, and analytics dashboard.',
+  title: 'Store Admin',
+  description: 'Shop.co store administration: orders, catalogue, inventory, payments and fulfilment.',
+  robots: { index: false, follow: false },
 };
 
 export default function AdminLayout({
@@ -12,7 +14,7 @@ export default function AdminLayout({
 }) {
   return (
     <div className="min-h-screen w-full bg-[#f8f8f8] text-[#1f2937] font-sans antialiased selection:bg-[#1f2937] selection:text-white">
-      {children}
+      <AdminAuthGate>{children}</AdminAuthGate>
     </div>
   );
 }

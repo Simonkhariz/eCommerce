@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Database\Database;
 use App\Middleware\JsonBodyMiddleware;
+use App\Support\RateLimiter;
 use App\Support\RequestContext;
 use App\Support\Response;
 use App\Config\Env;
@@ -909,6 +910,7 @@ class AdminOperationsController
      */
     public function subscribeNewsletter(): void
     {
+        RateLimiter::attempt('newsletter', RequestContext::clientIp(), 10, 3600);
         $body = JsonBodyMiddleware::getBody();
         $email = strtolower(trim((string) ($body['email'] ?? '')));
 

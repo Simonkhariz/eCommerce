@@ -5,26 +5,24 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Middleware\JsonBodyMiddleware;
-use App\Repositories\SessionRepository;
 use App\Repositories\UserRepository;
 use App\Services\AuthService;
-use App\Support\RequestContext;
 use App\Support\Response;
+use App\Support\SessionCookie;
+use App\Support\SessionGuard;
 
 /**
  * Controller handling user registration, authentication, session lifecycle, and magic links.
+ * Admin and customer sessions are separate cookies; endpoints that act on "the current
+ * session" take `?scope=admin` to address the admin one (default: customer).
  */
 class AuthController
 {
     private AuthService $authService;
-    private SessionRepository $sessionRepo;
-    private UserRepository $userRepo;
 
     public function __construct()
     {
         $this->authService = new AuthService();
-        $this->sessionRepo = new SessionRepository();
-        $this->userRepo = new UserRepository();
     }
 
     /**
@@ -32,11 +30,7 @@ class AuthController
      */
     public function register(): void
     {
-        $body = JsonBodyMiddleware::getBody();
-        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
-        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? null;
-
-        $result = $this->authService->registerCustomer($body, $ip, $userAgent);
+        $result = $this->authService->registerCustomer(JsonBodyMiddleware::getBody());
 
         Response::success($result, 'Account created successfully.', 201);
     }
@@ -47,86 +41,58 @@ class AuthController
     public function login(): void
     {
         $body = JsonBodyMiddleware::getBody();
-        $email = $body['email'] ?? '';
-        $password = $body['password'] ?? '';
-        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
-        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? null;
+        $email = (string) ($body['email'] ?? '');
+        $password = (string) ($body['password'] ?? '');
 
-        if (empty($email) || empty($password)) {
+        if ($email === '' || $password === '') {
             Response::error('Email and password are required.', 422, 'VALIDATION_ERROR', [
-                'email' => empty($email) ? 'Email is required.' : null,
-                'password' => empty($password) ? 'Password is required.' : null,
+                'email' => $email === '' ? 'Email is required.' : null,
+                'password' => $password === '' ? 'Password is required.' : null,
             ]);
         }
 
-        $result = $this->authService->login($email, $password, $ip, $userAgent);
+        $result = $this->authService->login($email, $password);
 
         Response::success($result, 'Signed in successfully.');
     }
 
     /**
-     * Terminate active session.
+     * Terminate the active session for the requested scope.
      */
     public function logout(): void
     {
-        $token = $_COOKIE['shopco_session'] ?? null;
-        if (empty($token)) {
-            $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
-            if (str_starts_with($authHeader, 'Bearer ')) {
-                $token = trim(substr($authHeader, 7));
-            }
-        }
-
-        $this->authService->logout($token);
+        $this->authService->logout(SessionCookie::normalizeScope($_GET['scope'] ?? null));
 
         Response::success(null, 'Signed out successfully.');
     }
 
     /**
-     * Retrieve the currently authenticated user profile and session info.
+     * Retrieve the currently authenticated user and the session's CSRF token.
      */
     public function me(): void
     {
-        $token = $_COOKIE['shopco_session'] ?? null;
-        if (empty($token)) {
-            $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
-            if (str_starts_with($authHeader, 'Bearer ')) {
-                $token = trim(substr($authHeader, 7));
-            }
-        }
-
-        if (empty($token)) {
+        $resolved = SessionGuard::resolve(SessionCookie::normalizeScope($_GET['scope'] ?? null));
+        if ($resolved === null) {
             Response::error('Unauthenticated.', 401, 'UNAUTHENTICATED');
         }
 
-        $session = $this->sessionRepo->find($token);
-        if ($session === null) {
-            Response::error('Session expired or invalid.', 401, 'SESSION_EXPIRED');
-        }
-
-        $user = $this->userRepo->findById((int) $session['user_id']);
-        if ($user === null) {
-            Response::error('User not found.', 404, 'USER_NOT_FOUND');
-        }
-
         Response::success([
-            'user' => UserRepository::toSafeUser($user),
-            'csrf_token' => $session['payload']['csrf_token'] ?? null,
-            'expires_at' => $session['expires_at'],
+            'user' => UserRepository::toSafeUser($resolved['user']),
+            'csrf_token' => $resolved['session']['payload']['csrf_token'] ?? null,
+            'expires_at' => $resolved['session']['expires_at'],
         ], 'Current user session retrieved.');
     }
 
     /**
-     * Request a passwordless magic sign-in link.
+     * Request a passwordless magic sign-in link (delivered by email only).
      */
     public function requestMagicLink(): void
     {
         $body = JsonBodyMiddleware::getBody();
-        $email = $body['email'] ?? '';
 
-        $result = $this->authService->requestMagicLink($email);
+        $result = $this->authService->requestMagicLink((string) ($body['email'] ?? ''));
 
-        Response::success($result, 'Magic sign-in link generated.');
+        Response::success($result, 'If that email can receive sign-in links, one is on its way. It expires in 15 minutes.');
     }
 
     /**
@@ -135,18 +101,16 @@ class AuthController
     public function verifyMagicLink(): void
     {
         $body = JsonBodyMiddleware::getBody();
-        $token = $body['token'] ?? '';
-        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
-        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? null;
+        $token = trim((string) ($body['token'] ?? ''));
 
-        if (empty($token)) {
+        if ($token === '') {
             Response::error('Verification token is required.', 422, 'VALIDATION_ERROR', [
                 'token' => 'Token cannot be empty.',
             ]);
         }
 
-        $result = $this->authService->verifyMagicLink($token, $ip, $userAgent);
+        $result = $this->authService->verifyMagicLink($token);
 
-        Response::success($result, 'Magic link verified successfully.');
+        Response::success($result, 'Signed in successfully.');
     }
 }

@@ -8,6 +8,8 @@ use App\Database\Database;
 
 /**
  * Repository for managing active authenticated user sessions in MySQL.
+ * Only a SHA-256 hash of each session token is stored, so a database read
+ * alone cannot be replayed as a live session cookie.
  */
 class SessionRepository
 {
@@ -18,25 +20,30 @@ class SessionRepository
         $this->db = Database::getInstance();
     }
 
+    private static function hashToken(string $token): string
+    {
+        return hash('sha256', trim($token));
+    }
+
     /**
      * Create a new session record.
-     * Generates a 64-character cryptographically random token.
+     * Generates a 64-character cryptographically random token (returned raw, stored hashed).
      *
-     * @return array{token: string, session: array, csrf_token: string}
+     * @return array{token: string, csrf_token: string, expires_at: string, session: array}
      */
     public function create(
         int $userId,
         ?string $ipAddress = null,
         ?string $userAgent = null,
-        array $payload = [],
-        int $ttlDays = 30
+        int $ttlSeconds = 2592000,
+        array $payload = []
     ): array {
         $token = bin2hex(random_bytes(32));
         $csrfToken = bin2hex(random_bytes(24));
         $payload['csrf_token'] = $csrfToken;
 
         $lastActivity = time();
-        $expiresAt = date('Y-m-d H:i:s', time() + ($ttlDays * 86400));
+        $expiresAt = date('Y-m-d H:i:s', time() + $ttlSeconds);
         $payloadJson = json_encode($payload);
 
         $sql = "INSERT INTO `sessions` (`id`, `user_id`, `ip_address`, `user_agent`, `payload`, `last_activity`, `expires_at`)
@@ -45,7 +52,7 @@ class SessionRepository
         $this->db->execute(
             $sql,
             'sisssis',
-            [$token, $userId, $ipAddress, $userAgent, $payloadJson, $lastActivity, $expiresAt]
+            [self::hashToken($token), $userId, $ipAddress, $userAgent ? mb_substr($userAgent, 0, 500) : null, $payloadJson, $lastActivity, $expiresAt]
         );
 
         return [
@@ -53,7 +60,6 @@ class SessionRepository
             'csrf_token' => $csrfToken,
             'expires_at' => $expiresAt,
             'session' => [
-                'id' => $token,
                 'user_id' => $userId,
                 'ip_address' => $ipAddress,
                 'user_agent' => $userAgent,
@@ -65,9 +71,9 @@ class SessionRepository
     }
 
     /**
-     * Look up session by token ID and join the associated user record.
+     * Look up a session by its raw token and join the associated user record.
      */
-    public function find(string $id): ?array
+    public function find(string $token): ?array
     {
         $sql = "SELECT s.id, s.user_id, s.ip_address, s.user_agent, s.payload, s.last_activity, s.expires_at,
                        u.uuid, u.email, u.full_name, u.phone, u.role, u.status, u.email_verified_at
@@ -76,7 +82,7 @@ class SessionRepository
                 WHERE s.id = ? AND s.expires_at > NOW()
                 LIMIT 1";
 
-        $row = $this->db->fetchOne($sql, 's', [trim($id)]);
+        $row = $this->db->fetchOne($sql, 's', [self::hashToken($token)]);
         if ($row === null) {
             return null;
         }
@@ -97,32 +103,34 @@ class SessionRepository
     /**
      * Rotate session ID upon authentication to prevent session fixation.
      *
-     * @return array{token: string, csrf_token: string, expires_at: string}
+     * @return array{token: string, csrf_token: string, expires_at: string, session: array}
      */
-    public function rotate(string $oldId, int $userId, ?string $ipAddress = null, ?string $userAgent = null): array
+    public function rotate(?string $oldToken, int $userId, ?string $ipAddress, ?string $userAgent, int $ttlSeconds): array
     {
-        $this->destroy($oldId);
-        return $this->create($userId, $ipAddress, $userAgent);
+        if (!empty($oldToken)) {
+            $this->destroy($oldToken);
+        }
+        return $this->create($userId, $ipAddress, $userAgent, $ttlSeconds);
     }
 
     /**
      * Touch session last_activity.
      */
-    public function touch(string $id): void
+    public function touch(string $token): void
     {
         $this->db->execute(
             "UPDATE `sessions` SET `last_activity` = ? WHERE `id` = ?",
             'is',
-            [time(), $id]
+            [time(), self::hashToken($token)]
         );
     }
 
     /**
      * Destroy / delete session.
      */
-    public function destroy(string $id): void
+    public function destroy(string $token): void
     {
-        $this->db->execute("DELETE FROM `sessions` WHERE `id` = ?", 's', [$id]);
+        $this->db->execute("DELETE FROM `sessions` WHERE `id` = ?", 's', [self::hashToken($token)]);
     }
 
     /**

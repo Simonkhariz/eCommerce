@@ -30,7 +30,7 @@ interface AuthContextType {
   closeAuthModal: () => void;
   login: (email: string, password: string) => Promise<void>;
   register: (data: { full_name: string; email: string; password: string; phone?: string }) => Promise<void>;
-  requestMagicLink: (email: string) => Promise<{ message: string; magic_token?: string }>;
+  requestMagicLink: (email: string) => Promise<{ message: string }>;
   verifyMagicLink: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -90,8 +90,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     const res = await apiLogin({ email, password });
-    setUser(res.user);
     setIsAuthModalOpen(false);
+
+    // Admin accounts get an admin-scoped session cookie and belong in the admin dashboard,
+    // not the storefront customer session.
+    if (res.user?.role === 'admin' || res.user?.role === 'super_admin') {
+      window.location.href = '/admin';
+      return;
+    }
+
+    setUser(res.user);
     loadAddresses();
 
     // Sync any cart items present in localStorage

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Plus, X } from 'lucide-react';
-import { apiGetCategories } from '@/lib/api-client';
+import { apiGetCategories, apiAdminSaveCategory, apiAdminDeleteCategory } from '@/lib/api-client';
 
 export const AdminCategories: React.FC = () => {
   const [categories, setCategories] = useState<any[]>([]);
@@ -72,24 +72,7 @@ export const AdminCategories: React.FC = () => {
     };
 
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('shopco_admin_session_token') || 'dev_admin_secret_token_12345' : '';
-      const endpoint = editingId ? `http://localhost:8000/api/v1/admin/categories/${editingId}` : 'http://localhost:8000/api/v1/admin/categories';
-      const method = editingId ? 'PUT' : 'POST';
-
-      const res = await fetch(endpoint, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Dev-Admin-Token': 'dev_admin_secret_token_12345',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || 'Failed to save category');
-      }
+      await apiAdminSaveCategory(editingId, payload);
 
       setFeedback(`Category ${name} ${editingId ? 'updated' : 'created'} successfully.`);
       setIsModalOpen(false);
@@ -105,18 +88,7 @@ export const AdminCategories: React.FC = () => {
   const handleDelete = async (id: number, catName: string) => {
     if (!confirm(`Are you sure you want to delete category "${catName}"?`)) return;
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('shopco_admin_session_token') || 'dev_admin_secret_token_12345' : '';
-      const res = await fetch(`http://localhost:8000/api/v1/admin/categories/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'X-Dev-Admin-Token': 'dev_admin_secret_token_12345',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error?.message || 'Failed to delete category');
-      }
+      await apiAdminDeleteCategory(id);
       setFeedback(`Category "${catName}" deleted.`);
       fetchCategories();
     } catch (err: any) {

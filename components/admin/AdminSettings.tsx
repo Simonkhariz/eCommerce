@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
-import { apiAdminGetSettings, apiAdminUpdateSettings } from '@/lib/api-client';
+import { apiAdminGetSettings, apiAdminUpdateSettings, apiGetAdminShippingZones } from '@/lib/api-client';
 
 export const AdminSettings: React.FC = () => {
   const [settings, setSettings] = useState<any>({});
@@ -45,14 +45,8 @@ export const AdminSettings: React.FC = () => {
       setOriginAddress(s.store_origin_address || '12 Okpara Avenue, Independence Layout, Enugu, Nigeria');
 
       // Also fetch zones
-      const zRes = await fetch('http://localhost:8000/api/v1/admin/shipping-zones', {
-        headers: {
-          'X-Dev-Admin-Token': 'dev_admin_secret_token_12345',
-        },
-      });
-      const zJson = await zRes.json();
-      const zList = Array.isArray(zJson.data) ? zJson.data : (zJson as any)?.data ?? [];
-      setZones(zList);
+      const zList = await apiGetAdminShippingZones();
+      setZones(Array.isArray(zList) ? zList : []);
     } catch (err: any) {
       console.error(err);
     } finally {

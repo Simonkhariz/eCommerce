@@ -7,13 +7,14 @@ namespace App\Controllers;
 use App\Config\Env;
 use App\Database\Database;
 use App\Middleware\JsonBodyMiddleware;
-use App\Repositories\SessionRepository;
-use App\Repositories\UserRepository;
 use App\Services\CheckoutService;
 use App\Services\KoraService;
 use App\Services\MonnifyService;
+use App\Support\RateLimiter;
 use App\Support\RequestContext;
 use App\Support\Response;
+use App\Support\SessionCookie;
+use App\Support\SessionGuard;
 use InvalidArgumentException;
 use RuntimeException;
 use Throwable;
@@ -42,6 +43,7 @@ class CheckoutController
      */
     public function quote(): void
     {
+        RateLimiter::attempt('checkout_quote', RequestContext::clientIp(), 150, 600);
         $body = JsonBodyMiddleware::getBody();
 
         try {
@@ -53,7 +55,7 @@ class CheckoutController
             Response::error($e->getMessage(), 400, 'QUOTE_ERROR');
         } catch (Throwable $e) {
             error_log('[Checkout Quote Failure] ' . $e->getMessage());
-            Response::error('Failed to compute checkout quote: ' . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+            Response::error('We could not calculate your total right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         }
     }
 
@@ -63,10 +65,12 @@ class CheckoutController
      */
     public function createOrder(): void
     {
+        // Order creation reserves stock, so it is throttled per client to stop inventory lock-ups.
+        RateLimiter::attempt('checkout_order', RequestContext::clientIp(), 10, 600, 'Too many orders placed from this connection. Please wait a few minutes.');
         $body = JsonBodyMiddleware::getBody();
 
-        // 1. Resolve optional authenticated customer
-        $currentUser = $this->resolveOptionalUser();
+        // 1. Resolve optional authenticated customer (CSRF enforced when a session is used)
+        $currentUser = $this->resolveOptionalUser(true);
         $userId = $currentUser ? (int) $currentUser['id'] : null;
 
         // If email was not explicitly provided in body but user is logged in, use their account email
@@ -79,13 +83,17 @@ class CheckoutController
             Response::success($order, 'Order placed successfully. Inventory has been reserved.', 201);
         } catch (InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'VALIDATION_ERROR');
+        } catch (\mysqli_sql_exception $e) {
+            // Never surface raw SQL errors (mysqli_sql_exception extends RuntimeException).
+            error_log('[Order Creation DB Failure] ' . $e->getMessage());
+            Response::error('We could not place your order right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         } catch (RuntimeException $e) {
-            // Check for inventory or promotion conflict
+            // Inventory or promotion conflict raised deliberately by CheckoutService
             $code = str_contains($e->getMessage(), 'Insufficient stock') ? 'INSUFFICIENT_STOCK' : 'ORDER_CREATION_FAILED';
             Response::error($e->getMessage(), 409, $code);
         } catch (Throwable $e) {
             error_log('[Order Creation Failure] ' . $e->getMessage());
-            Response::error('Failed to place order: ' . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+            Response::error('We could not place your order right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         }
     }
 
@@ -127,91 +135,29 @@ class CheckoutController
             Response::error('Order number or tracking code is required.', 422, 'VALIDATION_ERROR');
         }
 
+        $notFound = 'We could not find an order matching those details. Check the order number and the email used at checkout.';
+
+        // Unauthenticated lookups are throttled (failures only) to stop order-number/email guessing.
+        $ip = RequestContext::clientIp();
+        RateLimiter::guard('order_lookup_fail', $ip, 20, 900, 'Too many unsuccessful lookups. Please wait 15 minutes and try again.');
+
         $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$lookupCode]);
-        $isTrackingLookup = false;
 
         if ($order === null) {
-            // Check if user entered a carrier tracking code (e.g. TRK-..., GIG-..., DHL-...)
+            // A courier tracking number identifies the order, but never authorizes access on its own.
             $shipment = $this->db->fetchOne(
-                "SELECT * FROM `shipments` WHERE `tracking_number` = ? LIMIT 1",
+                "SELECT `order_id` FROM `shipments` WHERE `tracking_number` = ? LIMIT 1",
                 's',
                 [$lookupCode]
             );
             if ($shipment !== null) {
                 $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `id` = ?", 'i', [(int) $shipment['order_id']]);
-                if ($order !== null) {
-                    $isTrackingLookup = true;
-                }
             }
         }
 
-        if ($order === null) {
-            Response::error('Order or carrier tracking reference not found.', 404, 'ORDER_NOT_FOUND');
-        }
-
-        // Authorization check: User, Guest Token, or Carrier Tracking Code possession
-        $currentUser = $this->resolveOptionalUser();
-        $isAuthorized = $isTrackingLookup;
-
-        if ($currentUser !== null && !empty($order['user_id']) && (int) $order['user_id'] === (int) $currentUser['id']) {
-            $isAuthorized = true;
-        }
-
-        if (!$isAuthorized) {
-            $token = $_GET['token'] ?? $_SERVER['HTTP_X_GUEST_ACCESS_TOKEN'] ?? '';
-            $token = trim((string) $token);
-            if ($token !== '') {
-                $tokenHash = hash('sha256', $token);
-                if (hash_equals($order['guest_access_token_hash'], $tokenHash)) {
-                    $isAuthorized = true;
-                }
-            }
-        }
-
-        // Allow guest tracking verification via matching email, phone, or payment reference
-        if (!$isAuthorized) {
-            $lookupEmail = trim((string) ($_GET['email'] ?? ''));
-            $lookupPhone = trim((string) ($_GET['phone'] ?? ''));
-            $lookupRef = trim(urldecode((string) (
-                $_GET['reference'] ??
-                $_GET['paymentReference'] ??
-                $_GET['payment_reference'] ??
-                $_GET['transactionReference'] ??
-                $_GET['trxref'] ??
-                $_SERVER['HTTP_X_PAYMENT_REFERENCE'] ??
-                ''
-            )));
-
-            if ($lookupEmail !== '' && strcasecmp((string)$order['guest_email'], $lookupEmail) === 0) {
-                $isAuthorized = true;
-            } elseif ($lookupPhone !== '') {
-                $rawAddress = is_string($order['shipping_address_snapshot'])
-                    ? json_decode($order['shipping_address_snapshot'], true)
-                    : ($order['shipping_address_snapshot'] ?? []);
-                $savedDigits = preg_replace('/[^0-9]/', '', (string)($rawAddress['phone'] ?? ''));
-                $inputDigits = preg_replace('/[^0-9]/', '', $lookupPhone);
-
-                if (strlen($savedDigits) >= 7 && strlen($inputDigits) >= 7) {
-                    $savedTail = substr($savedDigits, -10);
-                    $inputTail = substr($inputDigits, -10);
-                    if ($savedTail === $inputTail || str_ends_with($savedDigits, $inputDigits) || str_ends_with($inputDigits, $savedDigits)) {
-                        $isAuthorized = true;
-                    }
-                }
-            } elseif ($lookupRef !== '') {
-                $matchingPayment = $this->db->fetchOne(
-                    "SELECT `id` FROM `payments` WHERE `order_id` = ? AND `provider_reference` = ? LIMIT 1",
-                    'is',
-                    [(int) $order['id'], $lookupRef]
-                );
-                if ($matchingPayment !== null) {
-                    $isAuthorized = true;
-                }
-            }
-        }
-
-        if (!$isAuthorized) {
-            Response::error('Unauthorized access. A valid customer session, guest access token, or matching order email/phone is required.', 403, 'FORBIDDEN');
+        if ($order === null || !$this->canViewOrder($order, true)) {
+            RateLimiter::hit('order_lookup_fail', $ip, 900);
+            Response::error($notFound, 404, 'ORDER_NOT_FOUND');
         }
 
         // Fetch Order Items
@@ -230,7 +176,7 @@ class CheckoutController
 
         // Fetch Status History
         $history = $this->db->fetchAll(
-            "SELECT `previous_status`, `new_status`, `comment`, `created_at`
+            "SELECT `previous_status`, `new_status`, `created_at`
              FROM `order_status_history` WHERE `order_id` = ? ORDER BY `id` ASC",
             'i',
             [(int) $order['id']]
@@ -261,8 +207,8 @@ class CheckoutController
             [(int) $order['id']]
         );
 
-        // Redact internal guest token hash from response
-        unset($order['guest_access_token_hash']);
+        // Redact internal fields from the customer-facing response
+        unset($order['guest_access_token_hash'], $order['user_id']);
 
         $order['shipping_zone_snapshot'] = is_string($order['shipping_zone_snapshot']) ? json_decode($order['shipping_zone_snapshot'], true) : $order['shipping_zone_snapshot'];
         $order['shipping_address_snapshot'] = is_string($order['shipping_address_snapshot']) ? json_decode($order['shipping_address_snapshot'], true) : $order['shipping_address_snapshot'];
@@ -328,7 +274,7 @@ class CheckoutController
 
         Response::success([
             'methods' => $methods,
-            'support_phone' => Env::get('STORE_WHATSAPP_PHONE', '+234 906 670 7079'),
+            'support_phone' => Env::get('STORE_WHATSAPP_PHONE', ''),
         ], 'Payment methods retrieved.');
     }
 
@@ -348,45 +294,24 @@ class CheckoutController
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
-        // Verify permission: customer session or guest token
-        $currentUser = $this->resolveOptionalUser();
-        $isAuthorized = false;
-
-        if ($currentUser !== null && !empty($order['user_id']) && (int) $order['user_id'] === (int) $currentUser['id']) {
-            $isAuthorized = true;
-        }
-
+        RateLimiter::attempt('payment_init', RequestContext::clientIp(), 20, 600);
         $body = JsonBodyMiddleware::getBody();
-        $token = $_GET['token'] ?? $_SERVER['HTTP_X_GUEST_ACCESS_TOKEN'] ?? ($body['guest_access_token'] ?? '');
-        $token = trim((string) $token);
 
-        if (!$isAuthorized && $token !== '') {
-            $tokenHash = hash('sha256', $token);
-            if (hash_equals($order['guest_access_token_hash'], $tokenHash)) {
-                $isAuthorized = true;
-            }
+        if (!$this->canViewOrder($order, false, true, (string) ($body['guest_access_token'] ?? ''))) {
+            Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
-        if (!$isAuthorized) {
-            Response::error('Unauthorized access. A valid customer session or guest access token is required to initialize payment.', 403, 'FORBIDDEN');
-        }
-
-        $redirectUrl = isset($body['redirect_url']) ? trim((string) $body['redirect_url']) : null;
-        if (empty($redirectUrl)) {
-            $frontendUrl = $_ENV['FRONTEND_URL'] ?? 'http://localhost:3000';
-            $redirectUrl = rtrim($frontendUrl, '/') . '/checkout/callback?order=' . urlencode($orderNumber);
-            if ($token !== '') {
-                $redirectUrl .= '&token=' . urlencode($token);
-            }
-        } else {
-            if ($token !== '' && !str_contains($redirectUrl, 'token=')) {
-                $separator = str_contains($redirectUrl, '?') ? '&' : '?';
-                $redirectUrl .= $separator . 'token=' . urlencode($token);
-            }
-            if (!str_contains($redirectUrl, 'order=')) {
-                $separator = str_contains($redirectUrl, '?') ? '&' : '?';
-                $redirectUrl .= $separator . 'order=' . urlencode($orderNumber);
-            }
+        // The return URL is always our own callback page; a client-supplied URL is only accepted
+        // when it points back at the storefront (no open redirect). The guest token never goes in it.
+        $frontendUrl = Env::frontendUrl();
+        $redirectUrl = $frontendUrl . '/checkout/callback?order=' . urlencode($orderNumber);
+        $requestedRedirect = trim((string) ($body['redirect_url'] ?? ''));
+        if ($requestedRedirect !== '' && str_starts_with($requestedRedirect, $frontendUrl . '/')) {
+            $parts = parse_url($requestedRedirect);
+            parse_str($parts['query'] ?? '', $query);
+            unset($query['token']);
+            $query['order'] = $orderNumber;
+            $redirectUrl = $frontendUrl . ($parts['path'] ?? '/checkout/callback') . '?' . http_build_query($query);
         }
 
         $gateway = strtolower(trim((string) ($body['gateway'] ?? 'monnify')));
@@ -410,7 +335,7 @@ class CheckoutController
             Response::error($e->getMessage(), 502, 'GATEWAY_ERROR');
         } catch (\Throwable $e) {
             error_log('[Payment Initialization Failure] ' . $e->getMessage());
-            Response::error('Payment initialization failed: ' . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+            Response::error('We could not start the payment right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         }
     }
 
@@ -430,26 +355,9 @@ class CheckoutController
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
-        // Authorization check: User session, Guest Token, or valid gateway Payment Reference
-        $currentUser = $this->resolveOptionalUser();
-        $isAuthorized = false;
+        RateLimiter::attempt('payment_verify', RequestContext::clientIp(), 240, 600);
 
-        if ($currentUser !== null && !empty($order['user_id']) && (int) $order['user_id'] === (int) $currentUser['id']) {
-            $isAuthorized = true;
-        }
-
-        if (!$isAuthorized) {
-            $token = $_GET['token'] ?? $_SERVER['HTTP_X_GUEST_ACCESS_TOKEN'] ?? '';
-            $token = trim((string) $token);
-            if ($token !== '') {
-                $tokenHash = hash('sha256', $token);
-                if (hash_equals($order['guest_access_token_hash'], $tokenHash)) {
-                    $isAuthorized = true;
-                }
-            }
-        }
-
-        // Query param or header override reference if provided by gateway return
+        // Query param or header reference provided by the gateway return redirect
         $customRef = trim(urldecode((string)(
             $_GET['reference'] ??
             $_GET['paymentReference'] ??
@@ -460,20 +368,19 @@ class CheckoutController
             ''
         )));
 
-        // Authorize with matching provider reference from official gateway redirect
+        // Session owner, guest token, or the exact gateway reference returned on redirect.
+        // This endpoint only reveals payment status, never addresses or contact details.
+        $isAuthorized = $this->canViewOrder($order, false);
         if (!$isAuthorized && $customRef !== '') {
-            $matchingPayment = $this->db->fetchOne(
-                "SELECT `id`, `provider_reference` FROM `payments` WHERE `order_id` = ? AND `provider_reference` = ? LIMIT 1",
+            $isAuthorized = $this->db->fetchOne(
+                "SELECT `id` FROM `payments` WHERE `order_id` = ? AND `provider_reference` = ? LIMIT 1",
                 'is',
                 [(int) $order['id'], $customRef]
-            );
-            if ($matchingPayment !== null) {
-                $isAuthorized = true;
-            }
+            ) !== null;
         }
 
         if (!$isAuthorized) {
-            Response::error('Unauthorized access. A valid customer session, guest access token, or payment reference is required.', 403, 'FORBIDDEN');
+            Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
         // Retrieve payment record for this order
@@ -570,7 +477,7 @@ class CheckoutController
             Response::error($e->getMessage(), 502, 'GATEWAY_ERROR');
         } catch (\Throwable $e) {
             error_log('[Payment Verification Failure] ' . $e->getMessage());
-            Response::error('Payment verification failed: ' . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+            Response::error('We could not check the payment status right now. Please try again shortly.', 500, 'INTERNAL_SERVER_ERROR');
         }
     }
 
@@ -582,6 +489,7 @@ class CheckoutController
      */
     public function validatePromo(): void
     {
+        RateLimiter::attempt('promo_validate', RequestContext::clientIp(), 30, 600, 'Too many promo code attempts. Please wait a few minutes.');
         $body = JsonBodyMiddleware::getBody();
         $code = trim((string) ($body['code'] ?? $body['coupon_code'] ?? ''));
         $subtotal = isset($body['subtotal']) ? (float) $body['subtotal'] : 0.0;
@@ -603,42 +511,56 @@ class CheckoutController
             Response::error($e->getMessage(), 422, 'INVALID_PROMOTION');
         } catch (Throwable $e) {
             error_log('[Promo Validation Failure] ' . $e->getMessage());
-            Response::error('Failed to validate promotion: ' . $e->getMessage(), 500, 'INTERNAL_SERVER_ERROR');
+            Response::error('We could not check that code right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         }
     }
 
     /**
-     * Resolve optional logged in user from RequestContext or session cookie/header.
+     * Resolve the optional signed-in customer from the customer session cookie.
+     * When a session is used for a state-changing request, its CSRF token must be echoed.
      */
-    private function resolveOptionalUser(): ?array
+    private function resolveOptionalUser(bool $enforceCsrf = false): ?array
     {
         $user = RequestContext::getUser();
         if ($user !== null) {
             return $user;
         }
 
-        $token = null;
-        if (!empty($_COOKIE['shopco_session'])) {
-            $token = trim($_COOKIE['shopco_session']);
-        } elseif (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
-            $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
-            if (str_starts_with($authHeader, 'Bearer ')) {
-                $token = trim(substr($authHeader, 7));
+        $resolved = SessionGuard::resolve(SessionCookie::SCOPE_CUSTOMER);
+        if ($resolved === null) {
+            return null;
+        }
+        if ($enforceCsrf) {
+            SessionGuard::enforceCsrf($resolved['session']);
+        }
+        return $resolved['user'];
+    }
+
+    /**
+     * Whether the caller may access an order: its signed-in owner, the holder of the
+     * guest access token, or (when allowed) someone who knows the full checkout email.
+     */
+    private function canViewOrder(array $order, bool $allowEmailMatch, bool $enforceCsrf = false, string $bodyToken = ''): bool
+    {
+        $currentUser = $this->resolveOptionalUser($enforceCsrf);
+        if ($currentUser !== null && !empty($order['user_id']) && (int) $order['user_id'] === (int) $currentUser['id']) {
+            return true;
+        }
+
+        $token = trim((string) ($_SERVER['HTTP_X_GUEST_ACCESS_TOKEN'] ?? $_GET['token'] ?? $bodyToken));
+        if ($token !== '' && !empty($order['guest_access_token_hash'])
+            && hash_equals((string) $order['guest_access_token_hash'], hash('sha256', $token))) {
+            return true;
+        }
+
+        if ($allowEmailMatch) {
+            $email = strtolower(trim((string) ($_GET['email'] ?? $_SERVER['HTTP_X_ORDER_EMAIL'] ?? '')));
+            $orderEmail = strtolower(trim((string) ($order['guest_email'] ?? '')));
+            if ($email !== '' && $orderEmail !== '' && hash_equals($orderEmail, $email)) {
+                return true;
             }
         }
 
-        if (!empty($token)) {
-            $sessionRepo = new SessionRepository();
-            $session = $sessionRepo->find($token);
-            if ($session !== null && !empty($session['user_id'])) {
-                $userRepo = new UserRepository();
-                $foundUser = $userRepo->findById((int) $session['user_id']);
-                if ($foundUser !== null && ($foundUser['status'] ?? '') !== 'suspended') {
-                    return $foundUser;
-                }
-            }
-        }
-
-        return null;
+        return false;
     }
 }

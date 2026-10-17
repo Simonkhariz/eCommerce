@@ -253,15 +253,6 @@ export const ProductManagement: React.FC = () => {
     }
   };
 
-  // Quick fallback via local dev admin token
-  const handleDevTokenLogin = () => {
-    localStorage.setItem('shopco_dev_admin_token', 'dev_admin_secret_token_12345');
-    setToast({ type: 'success', message: 'Dev Admin token enabled.' });
-    setIsAuthError(false);
-    setError(null);
-    loadProducts();
-  };
-
   // Quick Status Toggle
   const handleStatusChange = async (product: AdminProduct, newStatus: 'published' | 'draft' | 'archived') => {
     try {
@@ -666,14 +657,6 @@ export const ProductManagement: React.FC = () => {
                 >
                   <LogIn className="h-3.5 w-3.5" />
                   {isLoggingIn ? 'Signing in...' : 'Sign In as Admin'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDevTokenLogin}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                >
-                  <Key className="h-3.5 w-3.5 text-amber-600" />
-                  1-Click Dev Token
                 </button>
               </form>
             </div>

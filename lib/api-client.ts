@@ -5,8 +5,9 @@
 
 import { Product, ProductColor, Review } from '@/types';
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
+// Same-origin by default: next.config.mjs proxies /api/v1/* to the PHP backend so the
+// HTTP-only session cookies work without exposing session tokens to JavaScript.
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '/api/v1';
 
 export interface ApiProductSummary {
   id: number;
@@ -159,7 +160,10 @@ export interface ApiResponse<T> {
   };
 }
 
+// Session tokens live only in HTTP-only cookies. JavaScript holds just the per-session
+// CSRF tokens (in memory), one for the customer session and one for the admin session.
 let memoryCsrfToken: string | null = null;
+let memoryAdminCsrfToken: string | null = null;
 
 export function setMemoryCsrfToken(token: string | null): void {
   memoryCsrfToken = token;
@@ -169,8 +173,42 @@ export function getMemoryCsrfToken(): string | null {
   return memoryCsrfToken;
 }
 
+export function setAdminCsrfToken(token: string | null): void {
+  memoryAdminCsrfToken = token;
+}
+
+function isAdminEndpoint(endpoint: string): boolean {
+  return endpoint.startsWith('/admin') || endpoint.startsWith('/setup') || endpoint.includes('scope=admin');
+}
+
+function rememberCsrf(user: ApiUser | undefined, token: string | undefined): void {
+  if (!token) return;
+  if (user && (user.role === 'admin' || user.role === 'super_admin')) {
+    setAdminCsrfToken(token);
+  } else {
+    setMemoryCsrfToken(token);
+  }
+}
+
+export class ApiError extends Error {
+  statusCode: number;
+  errorCode?: string;
+  details?: Record<string, unknown>;
+
+  constructor(message: string, statusCode: number, errorCode?: string, details?: Record<string, unknown>) {
+    super(message);
+    this.name = 'ApiError';
+    this.statusCode = statusCode;
+    this.errorCode = errorCode;
+    this.details = details;
+  }
+}
+
+// Only public catalogue reads are cached briefly. Orders, payment status, customer and
+// admin data are always fetched fresh so status changes show up immediately.
+const CACHEABLE_PREFIXES = ['/products', '/categories', '/storefront/homepage'];
 const apiCache = new Map<string, { data: ApiResponse<any>; timestamp: number }>();
-const CACHE_TTL_MS = 60000; // 60 seconds
+const CACHE_TTL_MS = 30000;
 
 export function clearApiCache(): void {
   apiCache.clear();
@@ -183,12 +221,10 @@ async function fetchFullFromApi<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<ApiResponse<T>> {
-  const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const url = `${API_BASE_URL}${path}`;
   const method = (options?.method || 'GET').toUpperCase();
-  const isCacheable =
-    method === 'GET' &&
-    !endpoint.startsWith('/auth') &&
-    !endpoint.startsWith('/customer');
+  const isCacheable = method === 'GET' && CACHEABLE_PREFIXES.some((prefix) => path.startsWith(prefix));
 
   if (isCacheable) {
     const cached = apiCache.get(url);
@@ -202,32 +238,13 @@ async function fetchFullFromApi<T>(
 
   const headers: Record<string, string> = {
     'Accept': 'application/json',
-    'Content-Type': 'application/json',
+    ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options?.headers as Record<string, string> || {}),
   };
 
-  if (memoryCsrfToken) {
-    headers['X-CSRF-Token'] = memoryCsrfToken;
-  }
-
-  const adminSessionToken =
-    typeof window !== 'undefined' ? localStorage.getItem('shopco_admin_session_token') : null;
-  const customerSessionToken =
-    typeof window !== 'undefined' ? localStorage.getItem('shopco_customer_session_token') : null;
-
-  if (endpoint.startsWith('/admin') && adminSessionToken && !headers['Authorization']) {
-    headers['Authorization'] = `Bearer ${adminSessionToken}`;
-  } else if (customerSessionToken && !headers['Authorization']) {
-    headers['Authorization'] = `Bearer ${customerSessionToken}`;
-  }
-
-  const devToken =
-    process.env.NEXT_PUBLIC_DEV_ADMIN_TOKEN ||
-    (typeof window !== 'undefined' ? localStorage.getItem('shopco_dev_admin_token') : null) ||
-    'dev_admin_secret_token_12345';
-
-  if (devToken && (endpoint.startsWith('/admin') || endpoint.startsWith('/setup'))) {
-    headers['X-Dev-Admin-Token'] = devToken;
+  const csrf = isAdminEndpoint(path) ? memoryAdminCsrfToken : memoryCsrfToken;
+  if (csrf && method !== 'GET') {
+    headers['X-CSRF-Token'] = csrf;
   }
 
   try {
@@ -236,21 +253,27 @@ async function fetchFullFromApi<T>(
       credentials: 'include',
       signal: controller.signal,
       headers,
-      // Do not cache during active storefront operations
       cache: 'no-store',
     });
 
     clearTimeout(timeoutId);
 
-    const json: ApiResponse<T> = await res.json();
+    let json: ApiResponse<T>;
+    try {
+      json = await res.json();
+    } catch {
+      throw new ApiError(
+        res.status >= 500 || res.status === 0
+          ? 'The store server is not responding. Please try again in a moment.'
+          : `Unexpected response from the server (HTTP ${res.status}).`,
+        res.status
+      );
+    }
 
     if (!res.ok || !json.success) {
       const errMsg =
-        json.error?.message || json.message || `API request failed with status ${res.status}`;
-      const err = new Error(errMsg);
-      (err as any).statusCode = res.status;
-      (err as any).errorCode = json.error?.code;
-      throw err;
+        json.error?.message || json.message || `Request failed with status ${res.status}`;
+      throw new ApiError(errMsg, res.status, json.error?.code, json.error?.details as Record<string, unknown> | undefined);
     }
 
     if (isCacheable) {
@@ -262,8 +285,11 @@ async function fetchFullFromApi<T>(
     return json;
   } catch (err: any) {
     clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
-      throw new Error('API connection timed out. Please check if local backend is running.');
+    if (err?.name === 'AbortError') {
+      throw new ApiError('The request timed out. Please check your connection and try again.', 0, 'TIMEOUT');
+    }
+    if (err instanceof TypeError) {
+      throw new ApiError('Could not reach the store server. Please check your connection and try again.', 0, 'NETWORK_ERROR');
     }
     throw err;
   }
@@ -492,10 +518,8 @@ export interface ApiAddress {
 
 export interface ApiAuthResponse {
   user: ApiUser;
-  session_token: string;
   csrf_token: string;
   expires_at: string;
-  verification_token?: string;
 }
 
 export interface ApiShippingZone {
@@ -522,17 +546,13 @@ export async function apiRegister(payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   });
-  if (res.data?.csrf_token) {
-    setMemoryCsrfToken(res.data.csrf_token);
-  }
-  if (res.data?.session_token && typeof window !== 'undefined') {
-    localStorage.setItem('shopco_customer_session_token', res.data.session_token);
-  }
+  rememberCsrf(res.data?.user, res.data?.csrf_token);
   return res.data!;
 }
 
 /**
- * Sign in using email and password.
+ * Sign in using email and password. The server sets the HTTP-only session cookie
+ * (admin or customer scope, depending on the account role).
  */
 export async function apiLogin(credentials: {
   email: string;
@@ -542,52 +562,55 @@ export async function apiLogin(credentials: {
     method: 'POST',
     body: JSON.stringify(credentials),
   });
-  if (res.data?.csrf_token) {
-    setMemoryCsrfToken(res.data.csrf_token);
-  }
-  if (res.data?.session_token && typeof window !== 'undefined') {
-    if (res.data?.user?.role === 'admin' || res.data?.user?.role === 'super_admin') {
-      localStorage.setItem('shopco_admin_session_token', res.data.session_token);
+  rememberCsrf(res.data?.user, res.data?.csrf_token);
+  return res.data!;
+}
+
+/**
+ * Sign out of the customer session (or the admin session with scope 'admin').
+ * Local state is cleared even if the network call fails.
+ */
+export async function apiLogout(scope: 'customer' | 'admin' = 'customer'): Promise<void> {
+  try {
+    await fetchFullFromApi<null>(`/auth/logout${scope === 'admin' ? '?scope=admin' : ''}`, {
+      method: 'POST',
+    });
+  } finally {
+    if (scope === 'admin') {
+      setAdminCsrfToken(null);
+    } else {
+      setMemoryCsrfToken(null);
     }
-    localStorage.setItem('shopco_customer_session_token', res.data.session_token);
-  }
-  return res.data!;
-}
-
-/**
- * Sign out of active session.
- */
-export async function apiLogout(): Promise<void> {
-  await fetchFullFromApi<null>('/auth/logout', {
-    method: 'POST',
-  });
-  setMemoryCsrfToken(null);
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem('shopco_customer_session_token');
-    localStorage.removeItem('shopco_admin_session_token');
+    clearApiCache();
   }
 }
 
 /**
- * Fetch current authenticated user.
+ * Fetch the current signed-in customer (or admin with scope 'admin').
  */
-export async function apiGetMe(): Promise<{ user: ApiUser; csrf_token: string }> {
-  const res = await fetchFullFromApi<{ user: ApiUser; csrf_token: string }>('/auth/me');
+export async function apiGetMe(scope: 'customer' | 'admin' = 'customer'): Promise<{ user: ApiUser; csrf_token: string }> {
+  const res = await fetchFullFromApi<{ user: ApiUser; csrf_token: string }>(
+    `/auth/me${scope === 'admin' ? '?scope=admin' : ''}`
+  );
   if (res.data?.csrf_token) {
-    setMemoryCsrfToken(res.data.csrf_token);
+    if (scope === 'admin') {
+      setAdminCsrfToken(res.data.csrf_token);
+    } else {
+      setMemoryCsrfToken(res.data.csrf_token);
+    }
   }
   return res.data!;
 }
 
 /**
- * Request passwordless magic sign-in link.
+ * Request a passwordless magic sign-in link. The link is delivered by email only.
  */
-export async function apiRequestMagicLink(email: string): Promise<{ message: string; magic_token?: string }> {
-  const res = await fetchFullFromApi<{ message: string; magic_token?: string }>('/auth/customer/magic-link', {
+export async function apiRequestMagicLink(email: string): Promise<{ message: string }> {
+  const res = await fetchFullFromApi<{ email: string; expires_in_minutes: number }>('/auth/customer/magic-link', {
     method: 'POST',
     body: JSON.stringify({ email }),
   });
-  return res.data!;
+  return { message: res.message || 'Check your inbox for a sign-in link.' };
 }
 
 /**
@@ -598,12 +621,7 @@ export async function apiVerifyMagicLink(token: string): Promise<ApiAuthResponse
     method: 'POST',
     body: JSON.stringify({ token }),
   });
-  if (res.data?.csrf_token) {
-    setMemoryCsrfToken(res.data.csrf_token);
-  }
-  if (res.data?.session_token && typeof window !== 'undefined') {
-    localStorage.setItem('shopco_customer_session_token', res.data.session_token);
-  }
+  rememberCsrf(res.data?.user, res.data?.csrf_token);
   return res.data!;
 }
 
@@ -687,10 +705,28 @@ export async function apiSetupStore(payload: any): Promise<ApiAuthResponse> {
     method: 'POST',
     body: JSON.stringify(payload),
   });
-  if (res.data?.csrf_token) {
-    setMemoryCsrfToken(res.data.csrf_token);
-  }
+  rememberCsrf(res.data?.user, res.data?.csrf_token);
   return res.data!;
+}
+
+/**
+ * Create (id null) or update a category.
+ */
+export async function apiAdminSaveCategory(
+  id: number | null,
+  payload: { name: string; slug: string; description: string; image_url: string }
+): Promise<any> {
+  return fetchFromApi<any>(id ? `/admin/categories/${id}` : '/admin/categories', {
+    method: id ? 'PUT' : 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Deactivate a category.
+ */
+export async function apiAdminDeleteCategory(id: number): Promise<void> {
+  await fetchFromApi<null>(`/admin/categories/${id}`, { method: 'DELETE' });
 }
 
 /**
@@ -821,39 +857,13 @@ export async function apiDeleteAdminProduct(id: number): Promise<any> {
 export async function apiUploadProductImage(
   file: File
 ): Promise<{ image_url: string; file_name: string; size_bytes: number }> {
-  const url = `${API_BASE_URL}/admin/upload-image`;
   const formData = new FormData();
   formData.append('image', file);
 
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-  };
-
-  const devToken =
-    process.env.NEXT_PUBLIC_DEV_ADMIN_TOKEN ||
-    (typeof window !== 'undefined' ? localStorage.getItem('shopco_dev_admin_token') : null);
-
-  if (devToken) {
-    headers['X-Dev-Admin-Token'] = devToken;
-  }
-
-  if (memoryCsrfToken) {
-    headers['X-CSRF-Token'] = memoryCsrfToken;
-  }
-
-  const res = await fetch(url, {
+  return fetchFromApi<{ image_url: string; file_name: string; size_bytes: number }>('/admin/upload-image', {
     method: 'POST',
-    credentials: 'include',
-    headers,
     body: formData,
   });
-
-  const json = await res.json();
-  if (!res.ok || !json.success) {
-    throw new Error(json.error?.message || json.message || 'Image upload failed.');
-  }
-
-  return json.data;
 }
 
 // =============================================================================
@@ -1005,36 +1015,21 @@ export async function apiCreateCheckoutOrder(data: {
 }
 
 /**
- * Retrieve public order details using order number and guest token, email, phone, or auth session.
+ * Retrieve order details. Access requires the signed-in owner's session, the guest access
+ * token (sent as a header, never in the URL), or the full email used at checkout.
  */
 export async function apiGetOrder(
   orderNumber: string,
-  verification?: string | { token?: string; email?: string; phone?: string; reference?: string }
+  verification?: string | { token?: string; email?: string; reference?: string }
 ): Promise<any> {
-  const params = new URLSearchParams();
   const headers: Record<string, string> = {};
+  const token = typeof verification === 'string' ? verification : verification?.token;
+  const email = typeof verification === 'string' ? undefined : verification?.email;
 
-  if (typeof verification === 'string') {
-    if (verification) {
-      params.append('token', verification);
-      headers['X-Guest-Access-Token'] = verification;
-    }
-  } else if (verification) {
-    if (verification.token) {
-      params.append('token', verification.token);
-      headers['X-Guest-Access-Token'] = verification.token;
-    }
-    if (verification.reference) {
-      params.append('reference', verification.reference);
-      params.append('paymentReference', verification.reference);
-      headers['X-Payment-Reference'] = verification.reference;
-    }
-    if (verification.email) params.append('email', verification.email);
-    if (verification.phone) params.append('phone', verification.phone);
-  }
+  if (token) headers['X-Guest-Access-Token'] = token;
+  if (email) headers['X-Order-Email'] = email.trim();
 
-  const query = params.toString() ? `?${params.toString()}` : '';
-  return fetchFromApi<any>(`/checkout/orders/${orderNumber}${query}`, { headers });
+  return fetchFromApi<any>(`/checkout/orders/${encodeURIComponent(orderNumber)}`, { headers });
 }
 
 /**
@@ -1133,10 +1128,8 @@ export async function apiVerifyPayment(
   reference?: string
 ): Promise<PaymentVerificationResponse> {
   const params = new URLSearchParams();
-  if (guestAccessToken) params.append('token', guestAccessToken);
   if (reference) {
     params.append('reference', reference);
-    params.append('paymentReference', reference);
   }
   const query = params.toString() ? `?${params.toString()}` : '';
 
@@ -1287,10 +1280,10 @@ export async function apiAdminDownloadExport(endpoint: string, filename: string)
   const response = await fetch(url, {
     method: 'GET',
     headers: {
-      'X-Dev-Admin-Token': 'dev_admin_secret_token_12345',
       Accept: 'text/csv',
     },
     credentials: 'include',
+    cache: 'no-store',
   });
 
   if (!response.ok) {

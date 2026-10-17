@@ -56,6 +56,9 @@ class Env
                 (str_starts_with($value, "'") && str_ends_with($value, "'"))
             ) {
                 $value = substr($value, 1, -1);
+            } elseif (preg_match('/\s+#/', $value, $m, PREG_OFFSET_CAPTURE)) {
+                // Unquoted values may carry an inline " # comment"
+                $value = rtrim(substr($value, 0, $m[0][1]));
             }
 
             self::$vars[$name] = $value;
@@ -108,6 +111,22 @@ class Env
         }
 
         return (int) $val;
+    }
+
+    /**
+     * Whether the API is running in production mode (APP_ENV=production).
+     */
+    public static function isProduction(): bool
+    {
+        return strtolower((string) self::get('APP_ENV', 'development')) === 'production';
+    }
+
+    /**
+     * Public storefront origin used to build links in emails and payment redirects.
+     */
+    public static function frontendUrl(): string
+    {
+        return rtrim((string) self::get('FRONTEND_URL', 'http://localhost:3000'), '/');
     }
 
     /**

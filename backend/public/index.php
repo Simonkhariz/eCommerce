@@ -40,10 +40,17 @@ use App\Support\Router;
 Env::load(BASE_PATH . '/.env');
 
 // 2. Configure Global Error & Exception Handling
-$isDebug = Env::bool('APP_DEBUG', false);
+// Debug detail is never sent to clients in production, even if APP_DEBUG is left on.
+$isDebug = Env::bool('APP_DEBUG', false) && !Env::isProduction();
+
+// One clock for PHP and MySQL (Database sets the matching session time_zone).
+date_default_timezone_set(Env::get('APP_TIMEZONE', 'Africa/Lagos') ?: 'Africa/Lagos');
 
 error_reporting(E_ALL);
-ini_set('display_errors', $isDebug ? '1' : '0');
+// Warnings must never be echoed into JSON responses; they go to the PHP error log.
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+ob_start();
 
 set_exception_handler(function (Throwable $e) use ($isDebug): void {
     $logDir = BASE_PATH . '/storage/logs';

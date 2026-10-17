@@ -14,7 +14,6 @@ export const AuthModal: React.FC = () => {
     login,
     register,
     requestMagicLink,
-    verifyMagicLink,
   } = useAuth();
 
   // Form states
@@ -22,9 +21,7 @@ export const AuthModal: React.FC = () => {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
-  const [magicToken, setMagicToken] = useState('');
   const [magicSent, setMagicSent] = useState(false);
-  const [devMagicToken, setDevMagicToken] = useState<string | null>(null);
 
   // Status states
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -38,9 +35,7 @@ export const AuthModal: React.FC = () => {
     setPassword('');
     setFullName('');
     setPhone('');
-    setMagicToken('');
     setMagicSent(false);
-    setDevMagicToken(null);
     setErrorMessage(null);
     setSuccessMessage(null);
   };
@@ -83,29 +78,10 @@ export const AuthModal: React.FC = () => {
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
-      const res = await requestMagicLink(email);
+      await requestMagicLink(email);
       setMagicSent(true);
-      if (res.magic_token) {
-        setDevMagicToken(res.magic_token);
-        setMagicToken(res.magic_token);
-      }
-      setSuccessMessage('Magic sign-in link generated!');
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to request magic link.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleMagicVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    try {
-      await verifyMagicLink(magicToken);
-      resetForm();
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Invalid or expired verification token.');
     } finally {
       setIsSubmitting(false);
     }
@@ -350,54 +326,34 @@ export const AuthModal: React.FC = () => {
                 </button>
               </form>
             ) : (
-              <form onSubmit={handleMagicVerify} className="space-y-4">
-                <div className="p-3 bg-neutral-50 rounded-2xl text-xs text-neutral-700 border border-neutral-200">
-                  <p className="font-semibold text-neutral-900 mb-1">Check your inbox!</p>
+              <div className="space-y-4" role="status" aria-live="polite">
+                <div className="p-4 bg-neutral-50 rounded-2xl text-sm text-neutral-700 border border-neutral-200">
+                  <p className="font-semibold text-neutral-900 mb-1">Check your inbox</p>
                   <p>
-                    A magic sign-in link was sent to <strong className="text-black">{email}</strong>.
+                    If <strong className="text-black">{email}</strong> can receive sign-in links, we&apos;ve just sent one.
+                    Open it on this device to sign in. The link works once and expires in 15 minutes.
                   </p>
                 </div>
 
-                {devMagicToken && (
-                  <div className="p-3 bg-blue-50 text-blue-900 rounded-2xl text-xs border border-blue-200">
-                    <span className="font-bold">Dev Preview Token:</span>
-                    <p className="font-mono mt-1 break-all select-all">{devMagicToken}</p>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 mb-1.5">Verification Token</label>
-                  <input
-                    type="text"
-                    required
-                    value={magicToken}
-                    onChange={(e) => setMagicToken(e.target.value)}
-                    placeholder="Paste 32-character token"
-                    className="w-full px-4 py-3 rounded-full bg-neutral-50 border border-neutral-200 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-black"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-3.5 px-6 rounded-full bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50"
-                >
-                  {isSubmitting ? 'Verifying...' : 'Verify & Sign In'}
-                </button>
-
-                <div className="text-center">
+                <div className="flex items-center justify-center gap-4">
                   <button
                     type="button"
-                    onClick={() => {
-                      setMagicSent(false);
-                      setMagicToken('');
-                    }}
-                    className="text-xs text-neutral-500 hover:text-black hover:underline"
+                    onClick={() => setMagicSent(false)}
+                    className="text-xs text-neutral-600 hover:text-black hover:underline"
                   >
-                    Change email address
+                    Use a different email
+                  </button>
+                  <span className="text-neutral-300" aria-hidden="true">|</span>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={(e) => handleMagicRequest(e as unknown as React.FormEvent)}
+                    className="text-xs text-neutral-600 hover:text-black hover:underline disabled:opacity-50"
+                  >
+                    {isSubmitting ? 'Sending...' : 'Send another link'}
                   </button>
                 </div>
-              </form>
+              </div>
             )}
           </div>
         )}

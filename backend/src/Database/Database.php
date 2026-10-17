@@ -55,6 +55,8 @@ class Database
         try {
             $conn = new mysqli($host, $username, $password, $database, $port);
             $conn->set_charset('utf8mb4');
+            // Align NOW() with PHP's date() so token/session expiry comparisons agree.
+            $conn->query("SET time_zone = '" . $conn->real_escape_string(date('P')) . "'");
             $this->connection = $conn;
             return $this->connection;
         } catch (Throwable $e) {

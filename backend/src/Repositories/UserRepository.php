@@ -152,10 +152,16 @@ class UserRepository
      */
     public function markEmailVerified(int $id): bool
     {
-        return $this->update($id, [
-            'email_verified_at' => date('Y-m-d H:i:s'),
-            'status' => 'active',
-        ]);
+        // Only an 'unverified' profile is activated; a suspended account stays suspended.
+        $this->db->execute(
+            "UPDATE `users`
+             SET `email_verified_at` = COALESCE(`email_verified_at`, NOW()),
+                 `status` = IF(`status` = 'unverified', 'active', `status`)
+             WHERE `id` = ?",
+            'i',
+            [$id]
+        );
+        return true;
     }
 
     /**

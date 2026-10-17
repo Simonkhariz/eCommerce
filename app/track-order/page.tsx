@@ -76,7 +76,7 @@ function TrackOrderContent() {
   const performLookup = useCallback(
     async (
       ordNum: string,
-      verificationOpts?: { token?: string; email?: string; phone?: string }
+      verificationOpts?: { token?: string; email?: string }
     ) => {
       const cleanNum = ordNum.trim().toUpperCase();
       if (!cleanNum) {
@@ -100,7 +100,6 @@ function TrackOrderContent() {
       const finalOpts = {
         token,
         email: verificationOpts?.email,
-        phone: verificationOpts?.phone,
       };
 
       try {
@@ -136,7 +135,6 @@ function TrackOrderContent() {
     const cleanVerification = verificationInput.trim();
 
     let email: string | undefined;
-    let phone: string | undefined;
     let token: string | undefined;
 
     if (cleanVerification) {
@@ -145,11 +143,12 @@ function TrackOrderContent() {
       } else if (cleanVerification.length === 64 && /^[0-9a-fA-F]+$/.test(cleanVerification)) {
         token = cleanVerification;
       } else {
-        phone = cleanVerification;
+        setLookupError('Enter the email address you used at checkout, or the access key from your order confirmation.');
+        return;
       }
     }
 
-    performLookup(orderNumber, { token, email, phone });
+    performLookup(orderNumber, { token, email });
   };
 
   const getGatewayDisplayName = (provider?: string) => {
@@ -184,7 +183,7 @@ function TrackOrderContent() {
 
       const redirectUrl =
         typeof window !== 'undefined'
-          ? `${window.location.origin}/checkout/callback?order=${encodeURIComponent(order.order_number)}${guestToken ? `&token=${encodeURIComponent(guestToken)}` : ''}`
+          ? `${window.location.origin}/checkout/callback?order=${encodeURIComponent(order.order_number)}`
           : undefined;
 
       const res = await apiInitializePayment(order.order_number, guestToken, redirectUrl, gateway);
@@ -324,16 +323,18 @@ function TrackOrderContent() {
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-neutral-600">
-                    Phone or Email
+                  <label htmlFor="track-verification" className="text-xs font-bold uppercase tracking-wider text-neutral-600">
+                    Checkout Email
                   </label>
-                  <span className="text-[11px] text-neutral-400">Optional for verification</span>
+                  <span className="text-[11px] text-neutral-500">Not needed on the device you ordered from</span>
                 </div>
                 <input
+                  id="track-verification"
                   type="text"
+                  autoComplete="email"
                   value={verificationInput}
                   onChange={(e) => setVerificationInput(e.target.value)}
-                  placeholder="e.g. 08012345678 or name@example.com"
+                  placeholder="name@example.com (or your access key)"
                   className="w-full text-sm px-4 py-3 bg-neutral-50 border border-neutral-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-black"
                 />
               </div>

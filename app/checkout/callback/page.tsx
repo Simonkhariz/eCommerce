@@ -496,7 +496,7 @@ function CheckoutCallbackContent() {
             <div className="pt-2 space-y-3">
               {/* Primary Action: Track Package */}
               <Link
-                href={`/track-order?order=${encodeURIComponent(effectiveResult.order_number)}&token=${encodeURIComponent(token || '')}`}
+                href={`/track-order?order=${encodeURIComponent(effectiveResult.order_number)}`}
                 className="w-full bg-black text-white hover:bg-neutral-800 font-bold py-3.5 rounded-full text-xs sm:text-sm transition-all shadow-md flex items-center justify-center gap-2"
               >
                 <span>Track Order Progress</span>

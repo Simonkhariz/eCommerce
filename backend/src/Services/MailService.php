@@ -17,17 +17,19 @@ class MailService
     private static ?MailService $instance = null;
     private Database $db;
     private string $logPath;
+    private string $frontendUrl;
 
     public function __construct(?Database $db = null)
     {
         $this->db = $db ?? Database::getInstance();
+        $this->frontendUrl = Env::frontendUrl();
         $this->logPath = defined('BASE_PATH')
             ? BASE_PATH . '/storage/logs/mail.log'
             : dirname(__DIR__, 2) . '/storage/logs/mail.log';
 
         $dir = dirname($this->logPath);
         if (!is_dir($dir)) {
-            @mkdir($dir, 0777, true);
+            @mkdir($dir, 0755, true);
         }
     }
 
@@ -178,12 +180,15 @@ class MailService
         $html = $this->renderAccountVerificationHtml($email, $tokenOrLink, $type);
         $text = $this->renderAccountVerificationText($email, $tokenOrLink, $type);
 
+        // Never persist the raw sign-in token in the outbox (admins can read it); keep a fingerprint only.
+        $fingerprint = substr(hash('sha256', $tokenOrLink), 0, 12);
         $payload = [
             'type' => $type,
-            'token' => $tokenOrLink,
+            'token_fingerprint' => $fingerprint,
         ];
 
-        return $this->send($email, $subject, 'account_verification', $payload, $html, $text, $email . '-' . $type);
+        // Dedup per token, so requesting a fresh link always delivers the fresh link.
+        return $this->send($email, $subject, 'account_verification', $payload, $html, $text, $email . '-' . $type . '-' . $fingerprint);
     }
 
     /**
@@ -537,7 +542,7 @@ LOG;
             </div>
 
             <div style="text-align:center;">
-                <a href="http://localhost:3000/track-order?orderNumber={$num}" style="display:inline-block; background:#000000; color:#ffffff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:600; font-size:14px;">
+                <a href="{$this->frontendUrl}/track-order?orderNumber={$num}" style="display:inline-block; background:#000000; color:#ffffff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:600; font-size:14px;">
                     View Order & Complete Payment
                 </a>
             </div>
@@ -556,7 +561,7 @@ HTML;
         $num = $order['order_number'] ?? '';
         $total = number_format((float) ($order['grand_total'] ?? 0), 2);
         $curr = $order['currency'] ?? 'NGN';
-        return "SHOP.CO - Order Confirmation\nOrder #{$num}\nTotal Due: {$curr} {$total}\nStatus: Pending Payment\nTrack & Pay: http://localhost:3000/track-order?orderNumber={$num}";
+        return "SHOP.CO - Order Confirmation\nOrder #{$num}\nTotal Due: {$curr} {$total}\nStatus: Pending Payment\nTrack & Pay: {$this->frontendUrl}/track-order?orderNumber={$num}";
     }
 
     private function renderPaymentVerifiedHtml(array $order, array $payment): string
@@ -606,7 +611,7 @@ HTML;
             </div>
 
             <div style="text-align:center;">
-                <a href="http://localhost:3000/track-order?orderNumber={$num}" style="display:inline-block; background:#000000; color:#ffffff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:600; font-size:14px;">
+                <a href="{$this->frontendUrl}/track-order?orderNumber={$num}" style="display:inline-block; background:#000000; color:#ffffff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:600; font-size:14px;">
                     Track Order Status
                 </a>
             </div>
@@ -626,7 +631,7 @@ HTML;
         $total = number_format((float) ($order['grand_total'] ?? 0), 2);
         $curr = $order['currency'] ?? 'NGN';
         $ref = $payment['reference'] ?? 'VERIFIED';
-        return "SHOP.CO Payment Receipt\nOrder #{$num}\nAmount Paid: {$curr} {$total}\nRef: {$ref}\nStatus: Paid / Verified\nTrack: http://localhost:3000/track-order?orderNumber={$num}";
+        return "SHOP.CO Payment Receipt\nOrder #{$num}\nAmount Paid: {$curr} {$total}\nRef: {$ref}\nStatus: Paid / Verified\nTrack: {$this->frontendUrl}/track-order?orderNumber={$num}";
     }
 
     private function renderShipmentTrackingHtml(array $order, array $shipment): string
@@ -634,7 +639,7 @@ HTML;
         $num = htmlspecialchars((string) ($order['order_number'] ?? ''));
         $carrier = htmlspecialchars((string) ($shipment['carrier'] ?? 'Logistics Provider'));
         $trackingNumber = htmlspecialchars((string) ($shipment['tracking_number'] ?? 'N/A'));
-        $trackingUrl = htmlspecialchars((string) ($shipment['tracking_url'] ?? 'http://localhost:3000/track-order?orderNumber=' . $num));
+        $trackingUrl = htmlspecialchars((string) ($shipment['tracking_url'] ?? $this->frontendUrl . '/track-order?orderNumber=' . $num));
 
         return <<<HTML
 <!DOCTYPE html>
@@ -666,7 +671,7 @@ HTML;
             </div>
 
             <div style="text-align:center;">
-                <a href="http://localhost:3000/track-order?orderNumber={$num}" style="display:inline-block; background:#000000; color:#ffffff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:600; font-size:14px;">
+                <a href="{$this->frontendUrl}/track-order?orderNumber={$num}" style="display:inline-block; background:#000000; color:#ffffff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:600; font-size:14px;">
                     Track in Shop.co Portal
                 </a>
             </div>
@@ -682,7 +687,7 @@ HTML;
         $num = $order['order_number'] ?? '';
         $carrier = $shipment['carrier'] ?? 'Carrier';
         $trackingNumber = $shipment['tracking_number'] ?? 'N/A';
-        return "SHOP.CO Shipment Notification\nOrder #{$num} has been dispatched via {$carrier}.\nTracking Number: {$trackingNumber}\nTrack: http://localhost:3000/track-order?orderNumber={$num}";
+        return "SHOP.CO Shipment Notification\nOrder #{$num} has been dispatched via {$carrier}.\nTracking Number: {$trackingNumber}\nTrack: {$this->frontendUrl}/track-order?orderNumber={$num}";
     }
 
     private function renderCancellationRefundHtml(array $order, string $type, array $extra): string
@@ -735,7 +740,7 @@ HTML;
         $isMagic = ($type === 'magic_link');
         $actionUrl = str_starts_with($tokenOrLink, 'http')
             ? $tokenOrLink
-            : "http://localhost:3000/auth/verify?token=" . urlencode($tokenOrLink);
+            : Env::frontendUrl() . "/auth/verify?token=" . urlencode($tokenOrLink);
 
         return <<<HTML
 <!DOCTYPE html>

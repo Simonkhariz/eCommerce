@@ -312,7 +312,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
 
     const redirectUrl =
       typeof window !== 'undefined'
-        ? `${window.location.origin}/checkout/callback?order=${encodeURIComponent(createdOrder.order_number)}${createdOrder.guest_access_token ? `&token=${encodeURIComponent(createdOrder.guest_access_token)}` : ''}`
+        ? `${window.location.origin}/checkout/callback?order=${encodeURIComponent(createdOrder.order_number)}`
         : undefined;
 
     // 1. If Request from WhatsApp selected
@@ -379,7 +379,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
             ).toUpperCase();
 
             if (status === 'SUCCESS' || status === 'PAID') {
-              window.location.href = `/checkout/callback?order=${encodeURIComponent(createdOrder.order_number)}&token=${encodeURIComponent(createdOrder.guest_access_token)}&reference=${encodeURIComponent(res.provider_reference)}`;
+              window.location.href = `/checkout/callback?order=${encodeURIComponent(createdOrder.order_number)}&reference=${encodeURIComponent(res.provider_reference)}`;
             } else {
               const msg =
                 response?.message ||

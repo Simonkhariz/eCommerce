@@ -25,6 +25,7 @@ class SetupController
 
     /**
      * Check if first-run setup is completed or open.
+     * Only public storefront details are returned; nothing is invented when unset.
      */
     public function getStatus(): void
     {
@@ -33,13 +34,13 @@ class SetupController
 
         Response::success([
             'is_setup_completed' => $isCompleted,
-            'store_name' => $settings['store_name'] ?? 'SHOP.CO',
+            'store_name' => $settings['store_name'] ?? null,
             'store_origin' => [
-                'city' => $settings['store_origin_city'] ?? 'Enugu',
-                'state' => $settings['store_origin_state'] ?? 'Enugu',
-                'address' => $settings['store_origin_address'] ?? '12 Okpara Avenue, Independence Layout, Enugu, Nigeria',
+                'city' => $settings['store_origin_city'] ?? null,
+                'state' => $settings['store_origin_state'] ?? null,
+                'address' => $settings['store_origin_address'] ?? null,
             ],
-            'contact_email' => $settings['store_contact_email'] ?? 'support@shop.co',
+            'contact_email' => $settings['store_contact_email'] ?? null,
         ], 'Store setup status retrieved.');
     }
 
@@ -48,11 +49,7 @@ class SetupController
      */
     public function setupStore(): void
     {
-        $body = JsonBodyMiddleware::getBody();
-        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
-        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? null;
-
-        $result = $this->authService->setupStore($body, $ip, $userAgent);
+        $result = $this->authService->setupStore(JsonBodyMiddleware::getBody());
 
         Response::success($result, 'Administrator onboarding completed successfully. Setup is now locked.', 201);
     }
