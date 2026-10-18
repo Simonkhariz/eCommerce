@@ -156,7 +156,7 @@ export function OrderManagement() {
                     }}
                   >
                     <td>
-                      <Link href={href} className="font-semibold text-[#2563eb] underline-offset-2 hover:underline">
+                      <Link href={href} className="whitespace-nowrap font-semibold text-[#2563eb] underline-offset-2 hover:underline">
                         {o.order_number}
                       </Link>
                       {o.requires_attention && (

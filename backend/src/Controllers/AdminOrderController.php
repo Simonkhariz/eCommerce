@@ -64,13 +64,10 @@ class AdminOrderController
         }
 
         if ($search !== '') {
-            $where[] = "(o.order_number LIKE ? OR o.guest_email LIKE ? OR o.shipping_address_snapshot LIKE ? OR s.tracking_number LIKE ?)";
+            $where[] = "(o.order_number LIKE ? OR o.guest_email LIKE ? OR cu.email LIKE ? OR o.shipping_address_snapshot LIKE ? OR s.tracking_number LIKE ?)";
             $term = "%{$search}%";
-            $params[] = $term;
-            $params[] = $term;
-            $params[] = $term;
-            $params[] = $term;
-            $types .= 'ssss';
+            array_push($params, $term, $term, $term, $term, $term);
+            $types .= 'sssss';
         }
 
         $whereSql = !empty($where) ? "WHERE " . implode(' AND ', $where) : "";
@@ -78,6 +75,7 @@ class AdminOrderController
         // Total count
         $countSql = "SELECT COUNT(DISTINCT o.id) as total
                      FROM `orders` o
+                     LEFT JOIN `users` cu ON cu.id = o.user_id
                      LEFT JOIN `shipments` s ON s.order_id = o.id
                      {$whereSql}";
         $totalRow = $this->db->fetchOne($countSql, $types, $params);

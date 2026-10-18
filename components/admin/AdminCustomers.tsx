@@ -27,6 +27,7 @@ import {
   Toolbar,
   redirectIfSignedOut,
   useAdminData,
+  useClientPagination,
   useConfirm,
   useDebouncedValue,
   useToast,
@@ -276,44 +277,62 @@ function CustomerDetailModal({ customerId, onClose, onChanged }: { customerId: n
 
             <section>
               <h3 className="mb-2 text-[13px] font-semibold text-[#111827]">Recent orders</h3>
-              {detail.orders.length === 0 ? (
-                <p className="text-[13px] text-[#6b7280]">No orders yet.</p>
-              ) : (
-                <Table minWidth={560}>
-                  <thead>
-                    <tr>
-                      <th scope="col">Order</th>
-                      <th scope="col">Placed</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Payment</th>
-                      <th scope="col" className="text-right">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.orders.map((o) => (
-                      <tr key={o.id}>
-                        <td>
-                          <Link href={`/admin/orders/${encodeURIComponent(o.order_number)}`} className="font-mono text-xs font-semibold text-[#111827] hover:underline">
-                            {o.order_number}
-                          </Link>
-                        </td>
-                        <td className="whitespace-nowrap">{formatDate(o.created_at)}</td>
-                        <td>
-                          <StatusPill {...orderStatus(o.order_status)} />
-                        </td>
-                        <td>
-                          <StatusPill {...paymentStatus(o.payment_status)} />
-                        </td>
-                        <td className="text-right tabular-nums">{formatPrice(num(o.grand_total))}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
+              <CustomerOrders orders={detail.orders} email={detail.customer.email} totalOrders={num(detail.summary.total_orders)} />
             </section>
           </div>
         )}
       </DataState>
     </Modal>
+  );
+}
+
+/** A customer's orders, 10 per page, with a link to all of them in Orders. */
+function CustomerOrders({ orders, email, totalOrders }: { orders: CustomerDetail['orders']; email: string; totalOrders: number }) {
+  const { pageItems, meta, setPage } = useClientPagination(orders, 10);
+
+  if (orders.length === 0) return <p className="text-[13px] text-[#6b7280]">No orders yet.</p>;
+
+  return (
+    <>
+      <Table minWidth={560}>
+        <thead>
+          <tr>
+            <th scope="col">Order</th>
+            <th scope="col">Placed</th>
+            <th scope="col">Status</th>
+            <th scope="col">Payment</th>
+            <th scope="col" className="text-right">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pageItems.map((o) => (
+            <tr key={o.id}>
+              <td>
+                <Link href={`/admin/orders/${encodeURIComponent(o.order_number)}`} className="font-mono text-xs font-semibold text-[#2563eb] hover:underline">
+                  {o.order_number}
+                </Link>
+              </td>
+              <td className="whitespace-nowrap">{formatDate(o.created_at)}</td>
+              <td>
+                <StatusPill {...orderStatus(o.order_status)} />
+              </td>
+              <td>
+                <StatusPill {...paymentStatus(o.payment_status)} />
+              </td>
+              <td className="text-right tabular-nums">{formatPrice(num(o.grand_total))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+      <Pagination meta={meta} onPage={setPage} />
+      {totalOrders > orders.length && (
+        <p className="mt-2 text-xs text-[#6b7280]">
+          Showing the latest {orders.length} of {totalOrders}.{' '}
+          <Link href={`/admin/orders?search=${encodeURIComponent(email)}`} className="font-semibold text-[#111827] underline-offset-2 hover:underline">
+            See all in Orders
+          </Link>
+        </p>
+      )}
+    </>
   );
 }

@@ -20,6 +20,7 @@ import {
   Field,
   Modal,
   PageHeader,
+  Pagination,
   Panel,
   StatusPill,
   Table,
@@ -28,6 +29,7 @@ import {
   useAdminData,
   useConfirm,
   useToast,
+  useUrlFilters,
 } from '@/components/admin/ui';
 
 function toTime(value: string | null): number | null {
@@ -76,11 +78,13 @@ const EMPTY_FORM: FormState = {
 export function AdminPromotions() {
   const toast = useToast();
   const confirm = useConfirm();
-  const { data, loading, error, reload } = useAdminData(() => adminGetPromotions(), []);
+  const [filters, setFilters] = useUrlFilters({ page: '1' });
+  const page = Math.max(1, parseInt(filters.page, 10) || 1);
+  const { data, loading, error, reload } = useAdminData(() => adminGetPromotions({ page, per_page: 20 }), [page]);
   const [editing, setEditing] = useState<Promotion | 'new' | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
-  const promotions = data ?? [];
+  const promotions = data?.items ?? [];
 
   const toInput = (p: Promotion, changes: Partial<PromotionInput> = {}): PromotionInput => ({
     code: p.code,
@@ -205,6 +209,7 @@ export function AdminPromotions() {
               })}
             </tbody>
           </Table>
+          <Pagination meta={data?.pagination} onPage={(p) => setFilters({ page: String(p) })} />
         </DataState>
       </Panel>
 

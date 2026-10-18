@@ -17,6 +17,7 @@ import {
   Button,
   Checkbox,
   DataState,
+  Pagination,
   Field,
   Modal,
   Notice,
@@ -28,6 +29,7 @@ import {
   TextInput,
   redirectIfSignedOut,
   useAdminData,
+  useClientPagination,
   useConfirm,
   useToast,
 } from '@/components/admin/ui';
@@ -59,6 +61,7 @@ export function AdminShippingZones() {
   const [editing, setEditing] = useState<{ id: number | null; zone: ShippingZoneInput } | null>(null);
 
   const zones = data?.zones ?? [];
+  const { pageItems: zonePage, meta: zoneMeta, setPage: setZonePage } = useClientPagination(zones);
   const states = data?.states ?? [];
 
   // States that no active zone covers (when there is no active fallback zone).
@@ -141,7 +144,7 @@ export function AdminShippingZones() {
               </tr>
             </thead>
             <tbody>
-              {zones.map((z) => (
+              {zonePage.map((z) => (
                 <tr key={z.id}>
                   <td>
                     <span className="block font-semibold text-[#111827]">{z.name}</span>
@@ -195,6 +198,7 @@ export function AdminShippingZones() {
               ))}
             </tbody>
           </Table>
+          <Pagination meta={zoneMeta} onPage={setZonePage} />
         </DataState>
       </Panel>
 

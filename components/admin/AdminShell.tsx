@@ -59,11 +59,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
 
-      {/* Desktop sidebar */}
+      {/* Desktop sidebar: fixed to the window; the spacer keeps the page beside it */}
       {!collapsed && (
-        <div className="sticky top-0 hidden h-dvh w-[250px] shrink-0 lg:block">
-          <AdminSidebar pathname={pathname} onClose={() => setCollapsed(true)} closeLabel="Hide sidebar" />
-        </div>
+        <>
+          <div className="hidden w-[250px] shrink-0 lg:block" aria-hidden="true" />
+          <div className="fixed inset-y-0 left-0 z-40 hidden w-[250px] lg:block">
+            <AdminSidebar pathname={pathname} onClose={() => setCollapsed(true)} closeLabel="Hide sidebar" />
+          </div>
+        </>
       )}
 
       {/* Mobile drawer */}
@@ -77,7 +80,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col bg-white shadow-[inset_0_0_0_0.8px_#e5e7eb] lg:min-h-dvh">
-        <header className="sticky top-0 z-30 flex h-[52px] w-full items-center justify-between gap-2 border-b border-[#e5e7eb]/80 bg-white/95 px-3 backdrop-blur sm:px-4">
+        {/* Fixed header: stays at the top while the page scrolls */}
+        <header
+          className={`fixed inset-x-0 top-0 z-30 flex h-[52px] items-center justify-between gap-2 border-b border-[#e5e7eb]/80 bg-white/95 px-3 backdrop-blur sm:px-4 ${
+            collapsed ? '' : 'lg:left-[250px]'
+          }`}
+        >
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <button
               ref={menuButtonRef}
@@ -138,9 +146,11 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </Link>
           </div>
         </header>
+        <div className="h-[52px] shrink-0" aria-hidden="true" />
 
         <main id="admin-main" tabIndex={-1} className="flex w-full min-w-0 flex-1 flex-col px-3 py-4 outline-none sm:px-5 sm:py-5">
-          {children}
+          {/* Pages keep a readable width on large screens; the overview keeps its own full-width layout. */}
+          {pathname === '/admin' ? children : <div className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col">{children}</div>}
         </main>
       </div>
     </div>

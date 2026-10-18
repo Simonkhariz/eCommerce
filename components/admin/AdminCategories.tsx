@@ -8,6 +8,7 @@ import {
   Button,
   Checkbox,
   DataState,
+  Pagination,
   Field,
   Modal,
   PageHeader,
@@ -18,6 +19,7 @@ import {
   TextInput,
   redirectIfSignedOut,
   useAdminData,
+  useClientPagination,
   useConfirm,
   useToast,
 } from '@/components/admin/ui';
@@ -46,6 +48,7 @@ export function AdminCategories() {
   const confirm = useConfirm();
   const { data, loading, error, reload } = useAdminData(() => adminGetCategories(), []);
   const categories = data ?? [];
+  const { pageItems, meta, setPage } = useClientPagination(categories);
 
   const [editing, setEditing] = useState<AdminCategory | null>(null);
   const [open, setOpen] = useState(false);
@@ -204,7 +207,7 @@ export function AdminCategories() {
               </tr>
             </thead>
             <tbody>
-              {categories.map((cat) => (
+              {pageItems.map((cat) => (
                 <tr key={cat.id}>
                   <td>
                     <div className="flex items-center gap-2.5">
@@ -243,6 +246,7 @@ export function AdminCategories() {
               ))}
             </tbody>
           </Table>
+          <Pagination meta={meta} onPage={setPage} />
         </DataState>
       </Panel>
 

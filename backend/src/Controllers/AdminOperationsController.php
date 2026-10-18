@@ -451,7 +451,13 @@ class AdminOperationsController
 
     public function listPromotions(): void
     {
-        $promotions = $this->db->fetchAll("SELECT * FROM `promotions` ORDER BY created_at DESC");
+        [$page, $perPage, $offset] = $this->paging(20);
+        $total = (int) ($this->db->fetchOne("SELECT COUNT(*) AS total FROM `promotions`")['total'] ?? 0);
+        $promotions = $this->db->fetchAll(
+            "SELECT * FROM `promotions` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            'ii',
+            [$perPage, $offset]
+        );
         foreach ($promotions as &$p) {
             $p['is_active'] = (bool) $p['is_active'];
             $p['discount_percent'] = (int) $p['discount_percent'];
@@ -459,7 +465,7 @@ class AdminOperationsController
             $p['used_count'] = (int) $p['used_count'];
         }
         unset($p);
-        Response::success($promotions, 'Promotions list retrieved.');
+        Response::paginated($promotions, $total, $page, $perPage, 'Promotions list retrieved.');
     }
 
     /**

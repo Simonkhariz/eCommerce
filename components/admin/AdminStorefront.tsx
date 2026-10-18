@@ -32,6 +32,7 @@ import {
   Toolbar,
   redirectIfSignedOut,
   useAdminData,
+  useClientPagination,
   useConfirm,
   useToast,
   useUrlFilters,
@@ -107,6 +108,7 @@ function BannersPanel() {
   const [editing, setEditing] = useState<{ id: number | null; form: BannerInput } | null>(null);
 
   const banners = [...(data ?? [])].sort((a, b) => a.display_order - b.display_order || a.id - b.id);
+  const { pageItems: bannerPage, meta: bannerMeta, setPage: setBannerPage } = useClientPagination(banners, 10);
 
   const openNew = () => {
     const nextOrder = banners.length ? Math.max(...banners.map((b) => b.display_order)) + 1 : 1;
@@ -176,7 +178,7 @@ function BannersPanel() {
               </tr>
             </thead>
             <tbody>
-              {banners.map((b) => (
+              {bannerPage.map((b) => (
                 <tr key={b.id}>
                   <td>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -213,6 +215,7 @@ function BannersPanel() {
               ))}
             </tbody>
           </Table>
+          <Pagination meta={bannerMeta} onPage={setBannerPage} />
         </DataState>
       </Panel>
 

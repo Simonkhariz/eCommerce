@@ -535,7 +535,9 @@ export function DataState({
 /** Horizontally scrollable table wrapper with consistent cell styles. */
 export function Table({ children, minWidth = 720 }: { children: React.ReactNode; minWidth?: number }) {
   return (
-    <div className="w-full overflow-x-auto">
+    // `relative` keeps visually-hidden labels inside the scroll area; without it they are
+    // positioned against the page and make phones zoom out to the table's full width.
+    <div className="relative w-full overflow-x-auto">
       <table
         className="w-full border-collapse text-left text-[13px] [&_td]:border-t [&_td]:border-[#f3f4f6] [&_td]:px-4 [&_td]:py-2.5 [&_td]:align-middle [&_th]:whitespace-nowrap [&_th]:bg-[#fafafa] [&_th]:px-4 [&_th]:py-2 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-[#6b7280]"
         style={{ minWidth }}
@@ -549,6 +551,27 @@ export function Table({ children, minWidth = 720 }: { children: React.ReactNode;
 // =============================================================================
 // Pagination
 // =============================================================================
+
+/**
+ * Page through a short list the API returns in full (categories, banners, delivery zones),
+ * so no admin table renders an unlimited number of rows.
+ */
+export function useClientPagination<T>(items: T[], perPage = 20) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(items.length / perPage));
+  const current = Math.min(page, totalPages);
+
+  // Deleting the last row of the last page moves back a page.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  return {
+    pageItems: items.slice((current - 1) * perPage, current * perPage),
+    meta: { page: current, per_page: perPage, total: items.length, total_pages: totalPages } as PaginationMeta,
+    setPage,
+  };
+}
 
 export function Pagination({ meta, onPage }: { meta: PaginationMeta | null | undefined; onPage: (page: number) => void }) {
   if (!meta || meta.total === 0) return null;

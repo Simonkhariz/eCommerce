@@ -484,8 +484,8 @@ export interface PromotionInput {
   expires_at: string | null;
 }
 
-export function adminGetPromotions() {
-  return apiRequest<Promotion[]>('/admin/promotions');
+export function adminGetPromotions(params: { page?: number; per_page?: number } = {}) {
+  return apiRequest<Paginated<Promotion>>(`/admin/promotions${qs(params)}`);
 }
 
 export function adminSavePromotion(id: number | null, data: PromotionInput) {
