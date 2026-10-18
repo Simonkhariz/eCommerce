@@ -32,19 +32,12 @@ import {
   saveGuestToken,
   savePendingOrder,
 } from '@/lib/pending-order';
+import { NIGERIAN_STATES } from '@/lib/nigeria';
 
 interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
-
-/** The 36 states and the FCT, as accepted by the delivery-zone resolver. */
-const NIGERIAN_STATES = [
-  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno', 'Cross River',
-  'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT', 'Gombe', 'Imo', 'Jigawa', 'Kaduna', 'Kano',
-  'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo',
-  'Plateau', 'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara',
-];
 
 type PaymentMethodId = 'monnify' | 'kora' | 'whatsapp';
 

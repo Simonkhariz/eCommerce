@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { AdminAuthGate } from '@/components/admin/AdminAuthGate';
+import { AdminUiProvider } from '@/components/admin/ui';
 
 export const metadata: Metadata = {
   title: 'Store Admin',
@@ -7,14 +7,10 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen w-full bg-[#f8f8f8] text-[#1f2937] font-sans antialiased selection:bg-[#1f2937] selection:text-white">
-      <AdminAuthGate>{children}</AdminAuthGate>
+    <div className="min-h-screen w-full bg-[#f8f8f8] font-sans text-[#1f2937] antialiased selection:bg-[#1f2937] selection:text-white">
+      <AdminUiProvider>{children}</AdminUiProvider>
     </div>
   );
 }

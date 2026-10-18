@@ -455,6 +455,7 @@ Configures destination zones and explicit shipping fees originating from the Enu
 - `GET /api/v1/admin/shipping-zones/{id}`: Zone details.
 - `POST /api/v1/admin/shipping-zones`: Create new shipping zone.
 - `PUT /api/v1/admin/shipping-zones/{id}`: Update zone rates and states.
+- `DELETE /api/v1/admin/shipping-zones/{id}`: Delete a zone (see section 11 for validation rules).
 
 ---
 
@@ -500,3 +501,42 @@ Behaviour changes:
 - Checkout quote/order: `shipping_address.state` must be one of the 36 states or FCT (`Abuja`, `FCT` and `Federal Capital Territory` are equivalent). Unknown states are rejected instead of falling back to the nationwide zone.
 - Checkout orders require the exact `variant_id` (legacy carts may send an exact `size` + `color` pair). `Idempotency-Key` header makes order creation safe to retry.
 - Verified magic-link (or verified-email password) sign-in links earlier guest orders placed with that email to the account.
+
+---
+
+## 11. Admin Endpoints Reworked in the Audit Fixes (Phase 4)
+
+All `/api/v1/admin/*` endpoints need the admin session cookie (`shopco_admin`); mutating calls also need the `X-CSRF-Token` header from `/auth/me?scope=admin` or the login response. Every change is written to `admin_audit_logs` with the admin's id.
+
+**Pagination.** These lists accept `?page=` and `?per_page=` (max 100) and return `{items, pagination: {total, page, per_page, total_pages}}`: orders, inventory, inventory logs, customers, payments, refunds, reviews, email outbox, audit logs, newsletter subscribers. Audit logs also return `filters: {actions, entity_types}`; subscribers also return `counts: {active, unsubscribed}`.
+
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| `GET` | `/admin/dashboard/overview?period=7\|30\|90` | Sales = verified payments in the period (by `verified_at`), net of refunds completed in the period. `deltas` compare with the previous period of the same length (`null` when there is no baseline). Also `trend` (one point per day), `attention_orders`, `recent_orders`, `critical_stock`, `top_products`, `payment_alerts` and current counts (`pending_fulfillment`, `awaiting_payment`, `needs_attention`, stock). |
+| `GET` | `/admin/categories` | All categories including hidden ones, with `product_count` and `published_count`. |
+| `PUT` | `/admin/categories/{id}` | Partial update; `{is_active: true}` restores a hidden category. Slugs must be unique (422). |
+| `DELETE` | `/admin/categories/{id}` | Hides the category (products keep it). |
+| `GET` | `/admin/shipping-zones` | `{zones, states}`; `states` is the 36 states plus FCT. |
+| `POST`/`PUT` | `/admin/shipping-zones[/{id}]` | Validated: name, unique code, `fee >= 0`, delivery estimate, `states_covered` must be real states (normalised, e.g. Abuja → FCT) or `*` (every state not covered elsewhere). |
+| `DELETE` | `/admin/shipping-zones/{id}` | Deletes a zone. Orders keep their own fee and zone snapshot. |
+| `GET` | `/admin/refunds/eligibility?order_number=` | Paid, refunded, pending and refundable amounts, the payment reference and whether items can be restocked. |
+| `POST` | `/admin/refunds` | `{order_number, amount, reason, status: completed\|pending, restock, provider_refund_reference?}`. Records a refund (capped at the refundable amount); it does not move money. |
+| `PATCH` | `/admin/refunds/{id}` | `{status: completed\|rejected}` for a pending refund. |
+| `POST`/`PUT` | `/admin/promotions[/{id}]` | `code` (3-30 of A-Z 0-9 _ -), `discount_percent` 1-90, `max_uses` (0 = unlimited), `starts_at` / `expires_at` as `YYYY-MM-DD` (start of day / end of day). |
+| `DELETE` | `/admin/promotions/{id}` | Deletes an unused code; a code used on orders is deactivated instead (`deleted: false`). |
+| `POST`/`PUT` | `/admin/storefront/banners[/{id}]` | Title and image required; `cta_url` must be a store path (`/…`) or an `https://` URL. |
+| `PATCH` | `/admin/customers/{id}/status` | `{status: active\|suspended}`. Suspending signs the customer out everywhere. |
+| `GET` | `/admin/settings` | `editable` (allowlisted keys with help text) and `readonly` (currency, timezone, gateway modes, mail mode, payment windows). No secrets are returned. |
+| `PUT` | `/admin/settings` | Only `store_name`, `store_contact_email`, `store_contact_phone`, `store_whatsapp_phone`, `store_origin_address`, `store_origin_city`, `store_origin_state`. Unknown keys are refused (422). `store_whatsapp_phone` is the number checkout shows for manual payments. |
+| `GET` | `/admin/system-status` | Database, migrations, uploads folder, gateway configuration, mail mode, outbox pending/failed, orders needing attention, unpaid orders past their window, orders awaiting fulfilment. |
+| `POST` | `/admin/marketing/broadcast` | `{subject, content, confirm_recipients}`. Sent only to active newsletter subscribers, each email with its own unsubscribe link. `confirm_recipients` must equal the current active count (409 `RECIPIENTS_CHANGED` otherwise). |
+| `PUT` | `/admin/account` | Profile and password. Changing the password signs out the admin's other sessions. |
+
+Public:
+
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| `POST` | `/api/v1/newsletter/subscribe` | `{email}`. Re-subscribing clears an earlier unsubscribe. |
+| `POST` | `/api/v1/newsletter/unsubscribe` | `{token}` from the unsubscribe link (`/unsubscribe?token=…` on the storefront). |
+
+`GET /api/v1/checkout/payment-methods` now returns `support_phone` from the `store_whatsapp_phone` setting, falling back to `STORE_WHATSAPP_PHONE` in `backend/.env`.

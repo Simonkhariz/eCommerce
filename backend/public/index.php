@@ -160,6 +160,7 @@ $router->delete('/api/v1/admin/products/{id}', [AdminCatalogController::class, '
 $router->post('/api/v1/admin/inventory/adjust', [AdminCatalogController::class, 'adjustInventory'], $adminGuard);
 $router->post('/api/v1/admin/upload-image', [AdminCatalogController::class, 'uploadImage'], $adminGuard);
 
+$router->get('/api/v1/admin/categories', [AdminCatalogController::class, 'listCategories'], $adminGuard);
 $router->post('/api/v1/admin/categories', [AdminCatalogController::class, 'createCategory'], $adminGuard);
 $router->put('/api/v1/admin/categories/{id}', [AdminCatalogController::class, 'updateCategory'], $adminGuard);
 $router->delete('/api/v1/admin/categories/{id}', [AdminCatalogController::class, 'deleteCategory'], $adminGuard);
@@ -168,9 +169,11 @@ $router->get('/api/v1/admin/shipping-zones', [AdminZoneController::class, 'index
 $router->get('/api/v1/admin/shipping-zones/{id}', [AdminZoneController::class, 'show'], $adminGuard);
 $router->post('/api/v1/admin/shipping-zones', [AdminZoneController::class, 'create'], $adminGuard);
 $router->put('/api/v1/admin/shipping-zones/{id}', [AdminZoneController::class, 'update'], $adminGuard);
+$router->delete('/api/v1/admin/shipping-zones/{id}', [AdminZoneController::class, 'delete'], $adminGuard);
 
 // --- Public Newsletter Subscription ---
 $router->post('/api/v1/newsletter/subscribe', [AdminOperationsController::class, 'subscribeNewsletter']);
+$router->post('/api/v1/newsletter/unsubscribe', [AdminOperationsController::class, 'unsubscribeNewsletter']);
 
 // --- Admin Order & Physical Fulfillment Routes ---
 $router->get('/api/v1/admin/orders', [AdminOrderController::class, 'index'], $adminGuard);
@@ -197,6 +200,7 @@ $router->patch('/api/v1/admin/customers/{id}/status', [AdminOperationsController
 $router->get('/api/v1/admin/payments', [AdminOperationsController::class, 'listPayments'], $adminGuard);
 
 $router->get('/api/v1/admin/refunds', [AdminOperationsController::class, 'listRefunds'], $adminGuard);
+$router->get('/api/v1/admin/refunds/eligibility', [AdminOperationsController::class, 'refundEligibility'], $adminGuard);
 $router->post('/api/v1/admin/refunds', [AdminOperationsController::class, 'createRefund'], $adminGuard);
 $router->patch('/api/v1/admin/refunds/{id}', [AdminOperationsController::class, 'resolveRefund'], $adminGuard);
 

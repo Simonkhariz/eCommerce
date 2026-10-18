@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\FulfillmentService;
 use App\Support\Response;
 
 /**
@@ -21,190 +22,223 @@ class AdminDashboardController
         $this->db = Database::getInstance();
     }
 
+    /** Payment rows that represent money actually received (later refunds are subtracted separately). */
+    private const RECEIVED_PAYMENT_STATUSES = "'successful', 'partially_refunded', 'refunded'";
+
     /**
-     * GET /api/v1/admin/dashboard/overview
-     * Returns consolidated high-level KPIs, trends, low stock warnings, and recent activity.
+     * GET /api/v1/admin/dashboard/overview?period=7|30|90
+     *
+     * Sales are verified payments (by verification time) in the period; net sales subtract refunds
+     * completed in the period. Each KPI is compared with the period of the same length immediately before.
+     * Operational counts (fulfilment queue, attention, stock) are current snapshots.
      */
     public function overview(): void
     {
-        // 1. Gross & Net Sales
-        $salesRow = $this->db->fetchOne("
-            SELECT COALESCE(SUM(grand_total), 0) AS gross_sales,
-                   COUNT(id) AS paid_orders_count
-            FROM `orders`
-            WHERE `payment_status` = 'successful'
-               OR `order_status` IN ('paid', 'processing', 'shipped', 'delivered')
-        ") ?? ['gross_sales' => 0, 'paid_orders_count' => 0];
-
-        $grossSales = (float) $salesRow['gross_sales'];
-        $paidOrdersCount = (int) $salesRow['paid_orders_count'];
-
-        // Completed Refunds
-        $refundRow = $this->db->fetchOne("
-            SELECT COALESCE(SUM(amount), 0) AS total_refunded
-            FROM `refunds`
-            WHERE `status` = 'completed'
-        ") ?? ['total_refunded' => 0];
-        $totalRefunded = (float) $refundRow['total_refunded'];
-        $netSales = max(0, $grossSales - $totalRefunded);
-
-        // AOV (Average Order Value)
-        $aov = $paidOrdersCount > 0 ? round($grossSales / $paidOrdersCount, 2) : 0.0;
-
-        // Total orders count across all states
-        $allOrdersCountRow = $this->db->fetchOne("SELECT COUNT(*) AS total FROM `orders`") ?? ['total' => 0];
-        $totalOrdersCount = (int) $allOrdersCountRow['total'];
-
-        // Pending Fulfillment (orders that are paid/processing and need shipping)
-        $pendingFulfillmentRow = $this->db->fetchOne("
-            SELECT COUNT(*) AS total
-            FROM `orders`
-            WHERE `order_status` IN ('paid', 'processing')
-        ") ?? ['total' => 0];
-        $pendingFulfillment = (int) $pendingFulfillmentRow['total'];
-
-        // Low stock & out of stock
-        $lowStockRow = $this->db->fetchOne("
-            SELECT 
-                COUNT(CASE WHEN stock_quantity <= low_stock_threshold AND stock_quantity > 0 THEN 1 END) AS low_stock,
-                COUNT(CASE WHEN stock_quantity = 0 THEN 1 END) AS out_of_stock
-            FROM `product_variants`
-        ") ?? ['low_stock' => 0, 'out_of_stock' => 0];
-
-        // Total customers count
-        $customersRow = $this->db->fetchOne("SELECT COUNT(*) AS total FROM `users` WHERE `role` = 'customer'") ?? ['total' => 0];
-
-        // 2. Sales & Orders Trend (Last 14 days)
-        $trendRows = $this->db->fetchAll("
-            SELECT 
-                DATE(created_at) AS date,
-                COALESCE(SUM(CASE WHEN payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN grand_total ELSE 0 END), 0) AS sales,
-                COUNT(id) AS total_orders,
-                COUNT(CASE WHEN payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN 1 END) AS paid_orders
-            FROM `orders`
-            WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 13 DAY)
-            GROUP BY DATE(created_at)
-            ORDER BY DATE(created_at) ASC
-        ");
-
-        // Fill missing dates in last 14 days with 0
-        $trendMap = [];
-        foreach ($trendRows as $r) {
-            $trendMap[$r['date']] = [
-                'date' => $r['date'],
-                'sales' => (float) $r['sales'],
-                'total_orders' => (int) $r['total_orders'],
-                'paid_orders' => (int) $r['paid_orders']
-            ];
+        // Release stock from abandoned orders first so the stock and queue numbers are current.
+        try {
+            (new FulfillmentService($this->db))->expireOverdueOrders(50);
+        } catch (\Throwable $e) {
+            error_log('[Order Expiry Sweep] ' . $e->getMessage());
         }
 
-        $fullTrend = [];
-        for ($i = 13; $i >= 0; $i--) {
-            $d = date('Y-m-d', strtotime("-$i days"));
-            $fullTrend[] = $trendMap[$d] ?? [
+        $period = (int) ($_GET['period'] ?? 30);
+        if (!in_array($period, [7, 30, 90], true)) {
+            $period = 30;
+        }
+        $currentStart = date('Y-m-d 00:00:00', strtotime('-' . ($period - 1) . ' days'));
+        $now = date('Y-m-d H:i:s');
+        $previousStart = date('Y-m-d 00:00:00', strtotime('-' . (2 * $period - 1) . ' days'));
+
+        $current = $this->periodTotals($currentStart, $now);
+        $previous = $this->periodTotals($previousStart, $currentStart);
+
+        $delta = static function (float $now, float $before): ?float {
+            if ($before <= 0) {
+                return null; // No baseline: the UI shows no comparison instead of a made-up percentage.
+            }
+            return round((($now - $before) / $before) * 100, 1);
+        };
+
+        $count = fn (string $sql): int => (int) ($this->db->fetchOne($sql)['c'] ?? 0);
+        $stock = $this->db->fetchOne(
+            "SELECT COALESCE(SUM(v.stock_quantity > 0 AND v.stock_quantity <= v.low_stock_threshold), 0) AS low_stock,
+                    COALESCE(SUM(v.stock_quantity = 0), 0) AS out_of_stock
+             FROM `product_variants` v JOIN `products` p ON p.id = v.product_id
+             WHERE v.is_active = 1 AND p.status <> 'archived'"
+        );
+
+        // Daily trend across the selected period.
+        $salesByDay = array_column($this->db->fetchAll(
+            "SELECT DATE(verified_at) AS d, SUM(amount) AS sales, COUNT(DISTINCT order_id) AS paid_orders
+             FROM `payments`
+             WHERE status IN (" . self::RECEIVED_PAYMENT_STATUSES . ") AND verified_at >= ?
+             GROUP BY DATE(verified_at)",
+            's',
+            [$currentStart]
+        ), null, 'd');
+        $ordersByDay = array_column($this->db->fetchAll(
+            "SELECT DATE(created_at) AS d, COUNT(*) AS orders FROM `orders` WHERE created_at >= ? GROUP BY DATE(created_at)",
+            's',
+            [$currentStart]
+        ), 'orders', 'd');
+
+        $trend = [];
+        for ($i = $period - 1; $i >= 0; $i--) {
+            $d = date('Y-m-d', strtotime("-{$i} days"));
+            $trend[] = [
                 'date' => $d,
-                'sales' => 0.0,
-                'total_orders' => 0,
-                'paid_orders' => 0
+                'sales' => (float) ($salesByDay[$d]['sales'] ?? 0),
+                'paid_orders' => (int) ($salesByDay[$d]['paid_orders'] ?? 0),
+                'total_orders' => (int) ($ordersByDay[$d] ?? 0),
             ];
         }
 
-        // 3. Recent Orders (Last 8)
         $recentOrders = $this->db->fetchAll("
-            SELECT 
-                o.id,
-                o.order_number,
-                COALESCE(u.full_name, JSON_UNQUOTE(JSON_EXTRACT(o.shipping_address_snapshot, '$.full_name')), 'Customer') AS customer_name,
-                COALESCE(u.email, o.guest_email) AS customer_email,
-                o.grand_total AS total_amount,
-                o.currency,
-                o.order_status,
-                o.payment_status,
-                p.provider AS payment_method,
-                o.created_at,
-                (SELECT COUNT(*) FROM `order_items` oi WHERE oi.order_id = o.id) AS items_count
+            SELECT o.id, o.order_number,
+                   COALESCE(u.full_name, JSON_UNQUOTE(JSON_EXTRACT(o.shipping_address_snapshot, '$.full_name'))) AS customer_name,
+                   COALESCE(u.email, o.guest_email) AS customer_email,
+                   o.grand_total AS total_amount, o.currency, o.order_status, o.payment_status, o.requires_attention,
+                   p.provider AS payment_method, o.created_at,
+                   (SELECT COALESCE(SUM(oi.quantity), 0) FROM `order_items` oi WHERE oi.order_id = o.id) AS items_count
             FROM `orders` o
             LEFT JOIN `users` u ON u.id = o.user_id
-            LEFT JOIN `payments` p ON p.order_id = o.id AND p.id = (SELECT MAX(p2.id) FROM `payments` p2 WHERE p2.order_id = o.id)
+            LEFT JOIN `payments` p ON p.id = (SELECT MAX(p2.id) FROM `payments` p2 WHERE p2.order_id = o.id)
             ORDER BY o.created_at DESC
             LIMIT 8
         ");
 
-        // 4. Low Stock Variants (Top 6 critical items)
-        $criticalStock = $this->db->fetchAll("
-            SELECT 
-                v.id,
-                v.sku,
-                v.size,
-                v.color_name,
-                v.stock_quantity,
-                v.low_stock_threshold,
-                p.id AS product_id,
-                p.name AS product_name
-            FROM `product_variants` v
-            JOIN `products` p ON p.id = v.product_id
-            WHERE v.stock_quantity <= v.low_stock_threshold
-            ORDER BY v.stock_quantity ASC
-            LIMIT 6
-        ");
-
-        // 5. Top 5 Products by Quantity Sold (Paid orders only)
-        $topProducts = $this->db->fetchAll("
-            SELECT 
-                p.id,
-                p.name,
-                p.slug,
-                p.base_price,
-                COALESCE(SUM(oi.quantity), 0) AS total_units_sold,
-                COALESCE(SUM(oi.line_total), 0) AS total_revenue
-            FROM `order_items` oi
-            JOIN `orders` o ON o.id = oi.order_id
-            JOIN `products` p ON p.id = oi.product_id
-            WHERE o.payment_status = 'successful' 
-               OR o.order_status IN ('paid', 'processing', 'shipped', 'delivered')
-            GROUP BY p.id, p.name, p.slug, p.base_price
-            ORDER BY total_units_sold DESC
+        $attentionOrders = $this->db->fetchAll("
+            SELECT o.order_number, o.order_status, o.payment_status, o.attention_reason, o.grand_total, o.updated_at
+            FROM `orders` o
+            WHERE o.requires_attention = 1
+            ORDER BY o.updated_at DESC
             LIMIT 5
         ");
 
-        // 6. Payment Alerts (failed attempts or pending verification in last 24h)
+        $criticalStock = $this->db->fetchAll("
+            SELECT v.id, v.sku, v.size, v.color_name, v.stock_quantity, v.low_stock_threshold,
+                   p.id AS product_id, p.name AS product_name
+            FROM `product_variants` v
+            JOIN `products` p ON p.id = v.product_id
+            WHERE v.is_active = 1 AND p.status <> 'archived' AND v.stock_quantity <= v.low_stock_threshold
+            ORDER BY v.stock_quantity ASC, p.name ASC
+            LIMIT 6
+        ");
+
+        $topProducts = $this->db->fetchAll(
+            "SELECT p.id, p.name, p.slug,
+                    SUM(oi.quantity) AS total_units_sold,
+                    SUM(oi.line_total) AS total_revenue
+             FROM `order_items` oi
+             JOIN `products` p ON p.id = oi.product_id
+             WHERE oi.order_id IN (
+                 SELECT DISTINCT order_id FROM `payments`
+                 WHERE status IN (" . self::RECEIVED_PAYMENT_STATUSES . ") AND verified_at >= ?
+             )
+             GROUP BY p.id, p.name, p.slug
+             ORDER BY total_units_sold DESC, total_revenue DESC
+             LIMIT 5",
+            's',
+            [$currentStart]
+        );
+
+        // Failed attempts in the last day, and gateway attempts still unconfirmed after 30 minutes
+        // on orders that are still open.
         $paymentAlerts = $this->db->fetchAll("
-            SELECT 
-                p.id,
-                p.provider_reference AS payment_reference,
-                p.order_id,
-                o.order_number,
-                p.provider AS gateway,
-                p.amount,
-                p.status,
-                p.created_at
+            SELECT p.id, p.provider_reference AS payment_reference, o.order_number, p.provider AS gateway,
+                   p.amount, p.status, p.created_at
             FROM `payments` p
-            LEFT JOIN `orders` o ON o.id = p.order_id
-            WHERE p.status = 'failed' OR (p.status = 'pending' AND p.created_at <= DATE_SUB(NOW(), INTERVAL 30 MINUTE))
+            JOIN `orders` o ON o.id = p.order_id
+            WHERE (p.status = 'failed' AND p.updated_at >= DATE_SUB(NOW(), INTERVAL 1 DAY))
+               OR (p.status = 'pending' AND p.provider IN ('kora', 'monnify')
+                   AND p.created_at <= DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+                   AND o.order_status = 'pending_payment')
             ORDER BY p.created_at DESC
             LIMIT 5
         ");
 
         Response::success([
-            'kpis' => [
-                'gross_sales' => $grossSales,
-                'net_sales' => $netSales,
-                'total_refunded' => $totalRefunded,
-                'aov' => $aov,
-                'total_orders' => $totalOrdersCount,
-                'paid_orders' => $paidOrdersCount,
-                'pending_fulfillment' => $pendingFulfillment,
-                'low_stock_count' => (int) $lowStockRow['low_stock'],
-                'out_of_stock_count' => (int) $lowStockRow['out_of_stock'],
-                'total_customers' => (int) $customersRow['total'],
-                'currency' => 'NGN'
+            'period' => [
+                'days' => $period,
+                'start' => $currentStart,
+                'end' => $now,
+                'previous_start' => $previousStart,
             ],
-            'trend' => $fullTrend,
+            'kpis' => [
+                'currency' => 'NGN',
+                'gross_sales' => $current['gross'],
+                'net_sales' => $current['net'],
+                'total_refunded' => $current['refunded'],
+                'paid_orders' => $current['paid_orders'],
+                'aov' => $current['aov'],
+                'total_orders' => $current['orders_placed'],
+                'new_customers' => $current['new_customers'],
+                'pending_fulfillment' => $count("SELECT COUNT(*) AS c FROM `orders` WHERE `order_status` IN ('paid', 'processing')"),
+                'awaiting_payment' => $count("SELECT COUNT(*) AS c FROM `orders` WHERE `order_status` = 'pending_payment' AND (`expires_at` IS NULL OR `expires_at` > NOW())"),
+                'needs_attention' => $count("SELECT COUNT(*) AS c FROM `orders` WHERE `requires_attention` = 1"),
+                'low_stock_count' => (int) $stock['low_stock'],
+                'out_of_stock_count' => (int) $stock['out_of_stock'],
+                'total_customers' => $count("SELECT COUNT(*) AS c FROM `users` WHERE `role` = 'customer'"),
+            ],
+            'deltas' => [
+                'gross_sales' => $delta($current['gross'], $previous['gross']),
+                'net_sales' => $delta($current['net'], $previous['net']),
+                'paid_orders' => $delta($current['paid_orders'], $previous['paid_orders']),
+                'aov' => $delta($current['aov'], $previous['aov']),
+                'total_orders' => $delta($current['orders_placed'], $previous['orders_placed']),
+                'new_customers' => $delta($current['new_customers'], $previous['new_customers']),
+            ],
+            'trend' => $trend,
             'recent_orders' => $recentOrders,
+            'attention_orders' => $attentionOrders,
             'critical_stock' => $criticalStock,
             'top_products' => $topProducts,
-            'payment_alerts' => $paymentAlerts
-        ], 'Admin overview KPIs retrieved successfully.');
+            'payment_alerts' => $paymentAlerts,
+        ], 'Admin overview retrieved.');
+    }
+
+    /**
+     * Money and order totals for [start, end).
+     *
+     * @return array{gross: float, refunded: float, net: float, paid_orders: int, aov: float, orders_placed: int, new_customers: int}
+     */
+    private function periodTotals(string $start, string $end): array
+    {
+        $sales = $this->db->fetchOne(
+            "SELECT COALESCE(SUM(amount), 0) AS gross, COUNT(DISTINCT order_id) AS paid_orders
+             FROM `payments`
+             WHERE status IN (" . self::RECEIVED_PAYMENT_STATUSES . ") AND verified_at >= ? AND verified_at < ?",
+            'ss',
+            [$start, $end]
+        );
+        $refunded = (float) ($this->db->fetchOne(
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM `refunds` WHERE status = 'completed' AND updated_at >= ? AND updated_at < ?",
+            'ss',
+            [$start, $end]
+        )['total'] ?? 0);
+        $ordersPlaced = (int) ($this->db->fetchOne(
+            "SELECT COUNT(*) AS c FROM `orders` WHERE created_at >= ? AND created_at < ?",
+            'ss',
+            [$start, $end]
+        )['c'] ?? 0);
+        $newCustomers = (int) ($this->db->fetchOne(
+            "SELECT COUNT(*) AS c FROM `users` WHERE role = 'customer' AND created_at >= ? AND created_at < ?",
+            'ss',
+            [$start, $end]
+        )['c'] ?? 0);
+
+        $gross = round((float) $sales['gross'], 2);
+        $paidOrders = (int) $sales['paid_orders'];
+
+        return [
+            'gross' => $gross,
+            'refunded' => round($refunded, 2),
+            'net' => round(max(0, $gross - $refunded), 2),
+            'paid_orders' => $paidOrders,
+            'aov' => $paidOrders > 0 ? round($gross / $paidOrders, 2) : 0.0,
+            'orders_placed' => $ordersPlaced,
+            'new_customers' => $newCustomers,
+        ];
     }
 
     /**

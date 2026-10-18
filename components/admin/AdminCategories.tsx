@@ -1,286 +1,319 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Plus, X } from 'lucide-react';
-import { apiGetCategories, apiAdminSaveCategory, apiAdminDeleteCategory } from '@/lib/api-client';
+import React, { useRef, useState } from 'react';
+import { Plus, Upload } from 'lucide-react';
+import { apiUploadProductImage } from '@/lib/api-client';
+import { AdminCategory, adminDeactivateCategory, adminGetCategories, adminSaveCategory, errorMessage, fieldErrors } from '@/lib/admin-api';
+import {
+  Button,
+  Checkbox,
+  DataState,
+  Field,
+  Modal,
+  PageHeader,
+  Panel,
+  StatusPill,
+  Table,
+  TextArea,
+  TextInput,
+  redirectIfSignedOut,
+  useAdminData,
+  useConfirm,
+  useToast,
+} from '@/components/admin/ui';
 
-export const AdminCategories: React.FC = () => {
-  const [categories, setCategories] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+export function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
-  // Form State
-  const [name, setName] = useState('');
-  const [slug, setSlug] = useState('');
-  const [description, setDescription] = useState('');
-  const [imageUrl, setImageUrl] = useState('/images/categories/casual.jpg');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
+interface CategoryForm {
+  name: string;
+  slug: string;
+  description: string;
+  image_url: string;
+  display_order: string;
+  is_active: boolean;
+}
 
-  const fetchCategories = async () => {
-    setLoading(true);
+const EMPTY_FORM: CategoryForm = { name: '', slug: '', description: '', image_url: '', display_order: '0', is_active: true };
+
+export function AdminCategories() {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const { data, loading, error, reload } = useAdminData(() => adminGetCategories(), []);
+  const categories = data ?? [];
+
+  const [editing, setEditing] = useState<AdminCategory | null>(null);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<CategoryForm>(EMPTY_FORM);
+  const [slugTouched, setSlugTouched] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const openCreate = () => {
+    setEditing(null);
+    setForm({ ...EMPTY_FORM, display_order: String(categories.length + 1) });
+    setSlugTouched(false);
+    setErrors({});
+    setOpen(true);
+  };
+
+  const openEdit = (cat: AdminCategory) => {
+    setEditing(cat);
+    setForm({
+      name: cat.name,
+      slug: cat.slug,
+      description: cat.description ?? '',
+      image_url: cat.image_url ?? '',
+      display_order: String(cat.display_order),
+      is_active: cat.is_active,
+    });
+    setSlugTouched(true);
+    setErrors({});
+    setOpen(true);
+  };
+
+  const setName = (name: string) =>
+    setForm((f) => ({ ...f, name, slug: slugTouched ? f.slug : slugify(name) }));
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
     try {
-      const res = await apiGetCategories();
-      setCategories(Array.isArray(res) ? res : (res as any)?.data || []);
-    } catch (err: any) {
-      console.error(err);
+      const res = await apiUploadProductImage(file);
+      setForm((f) => ({ ...f, image_url: res.image_url }));
+    } catch (err) {
+      if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The image could not be uploaded.'));
     } finally {
-      setLoading(false);
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
     }
   };
 
-  useEffect(() => {
-    fetchCategories();
-  }, []);
-
-  const resetForm = () => {
-    setEditingId(null);
-    setName('');
-    setSlug('');
-    setDescription('');
-    setImageUrl('/images/categories/casual.jpg');
-    setError(null);
-  };
-
-  const handleOpenEdit = (c: any) => {
-    setEditingId(c.id);
-    setName(c.name);
-    setSlug(c.slug);
-    setDescription(c.description || '');
-    setImageUrl(c.image_url || '/images/categories/casual.jpg');
-    setIsModalOpen(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
-      setError('Category name is required.');
-      return;
-    }
+    const local: Record<string, string> = {};
+    if (form.name.trim().length < 2) local.name = 'Use at least 2 characters.';
+    if (!/^[a-z0-9-]+$/.test(form.slug.trim())) local.slug = 'Lowercase letters, numbers and dashes only.';
+    setErrors(local);
+    if (Object.keys(local).length) return;
 
-    setSubmitting(true);
-    setError(null);
-
-    const generatedSlug = slug.trim() || name.trim().toLowerCase().replace(/\s+/g, '-');
-    const payload = {
-      name: name.trim(),
-      slug: generatedSlug,
-      description: description.trim(),
-      image_url: imageUrl.trim(),
-    };
-
+    setSaving(true);
     try {
-      await apiAdminSaveCategory(editingId, payload);
-
-      setFeedback(`Category ${name} ${editingId ? 'updated' : 'created'} successfully.`);
-      setIsModalOpen(false);
-      resetForm();
-      fetchCategories();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to save category');
+      await adminSaveCategory(editing?.id ?? null, {
+        name: form.name.trim(),
+        slug: form.slug.trim(),
+        description: form.description.trim(),
+        image_url: form.image_url.trim(),
+        display_order: parseInt(form.display_order, 10) || 0,
+        is_active: form.is_active,
+      });
+      toast.success(editing ? 'Category updated.' : 'Category created.');
+      setOpen(false);
+      reload();
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      const fields = fieldErrors(err);
+      setErrors(fields);
+      if (!Object.keys(fields).length) toast.error(errorMessage(err, 'The category could not be saved.'));
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  const handleDelete = async (id: number, catName: string) => {
-    if (!confirm(`Are you sure you want to delete category "${catName}"?`)) return;
+  const handleHide = async (cat: AdminCategory) => {
+    const ok = await confirm({
+      title: `Hide "${cat.name}"?`,
+      message: (
+        <>
+          The category disappears from the store menu and catalogue filters. Its {cat.product_count} product
+          {cat.product_count === 1 ? '' : 's'} stay as they are and can still be found through search. You can restore it any time.
+        </>
+      ),
+      confirmLabel: 'Hide category',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setBusyId(cat.id);
     try {
-      await apiAdminDeleteCategory(id);
-      setFeedback(`Category "${catName}" deleted.`);
-      fetchCategories();
-    } catch (err: any) {
-      alert(err?.message || 'Failed to delete category');
+      await adminDeactivateCategory(cat.id);
+      toast.success(`"${cat.name}" is hidden from the store.`);
+      reload();
+    } catch (err) {
+      if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The category could not be hidden.'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleRestore = async (cat: AdminCategory) => {
+    setBusyId(cat.id);
+    try {
+      await adminSaveCategory(cat.id, { is_active: true });
+      toast.success(`"${cat.name}" is visible in the store again.`);
+      reload();
+    } catch (err) {
+      if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The category could not be restored.'));
+    } finally {
+      setBusyId(null);
     }
   };
 
   return (
-    <div className="flex w-full flex-col gap-6">
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e5e7eb] pb-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#111827]">
-            Category Management
-          </h1>
-          <p className="text-xs text-[#6b7280]">
-            Organize catalog products into hierarchical browsing categories and storefront sections.
-          </p>
-        </div>
+    <div className="flex w-full flex-col">
+      <PageHeader
+        title="Categories"
+        description="Group products for the store menu and catalogue filters."
+        actions={
+          <Button variant="primary" onClick={openCreate}>
+            <Plus className="size-4" aria-hidden="true" />
+            New category
+          </Button>
+        }
+      />
 
-        <button
-          onClick={() => {
-            resetForm();
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-1.5 rounded-lg bg-black px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800"
+      <Panel>
+        <DataState
+          loading={loading}
+          error={error}
+          onRetry={reload}
+          hasData={!!data}
+          empty={categories.length === 0}
+          emptyTitle="No categories yet"
+          emptyDescription="Create a category so products can be grouped in the store."
         >
-          <Plus className="size-3.5" />
-          <span>Add Category</span>
-        </button>
-      </div>
+          <Table minWidth={680}>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Slug</th>
+                <th>Products</th>
+                <th>Order</th>
+                <th>Status</th>
+                <th className="text-right">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {categories.map((cat) => (
+                <tr key={cat.id}>
+                  <td>
+                    <div className="flex items-center gap-2.5">
+                      {cat.image_url ? (
+                        <img src={cat.image_url} alt="" className="size-8 shrink-0 rounded-md border border-[#e5e7eb] object-cover" />
+                      ) : (
+                        <span className="size-8 shrink-0 rounded-md border border-dashed border-[#d1d5db] bg-[#f9fafb]" aria-hidden="true" />
+                      )}
+                      <span className="font-medium text-[#111827]">{cat.name}</span>
+                    </div>
+                  </td>
+                  <td className="font-mono text-xs text-[#4b5563]">{cat.slug}</td>
+                  <td className="tabular-nums">
+                    {cat.published_count} published
+                    {cat.product_count !== cat.published_count && <span className="text-[#6b7280]"> of {cat.product_count}</span>}
+                  </td>
+                  <td className="tabular-nums">{cat.display_order}</td>
+                  <td>{cat.is_active ? <StatusPill label="Visible" tone="green" /> : <StatusPill label="Hidden" tone="neutral" />}</td>
+                  <td className="text-right">
+                    <div className="inline-flex gap-1.5">
+                      <Button size="sm" onClick={() => openEdit(cat)}>
+                        Edit
+                      </Button>
+                      {cat.is_active ? (
+                        <Button size="sm" variant="ghost" loading={busyId === cat.id} onClick={() => handleHide(cat)}>
+                          Hide
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="ghost" loading={busyId === cat.id} onClick={() => handleRestore(cat)}>
+                          Restore
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </DataState>
+      </Panel>
 
-      {feedback && (
-        <div className="flex items-center justify-between rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800">
-          <span>{feedback}</span>
-          <button onClick={() => setFeedback(null)} className="p-0.5 hover:opacity-75" aria-label="Dismiss">
-            <X className="size-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Categories Grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {loading ? (
-          <div className="col-span-full py-12 text-center text-xs text-[#6b7280]">
-            Loading categories...
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        busy={saving}
+        title={editing ? `Edit ${editing.name}` : 'New category'}
+        footer={
+          <>
+            <Button onClick={() => setOpen(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" form="category-form" loading={saving}>
+              {editing ? 'Save changes' : 'Create category'}
+            </Button>
+          </>
+        }
+      >
+        <form id="category-form" onSubmit={handleSave} className="grid gap-4 sm:grid-cols-2" noValidate>
+          <Field label="Name" required error={errors.name}>
+            {(p) => <TextInput {...p} data-autofocus value={form.name} onChange={(e) => setName(e.target.value)} />}
+          </Field>
+          <Field label="Slug" required error={errors.slug} hint="Used in the store address, e.g. /category?cat=slug">
+            {(p) => (
+              <TextInput
+                {...p}
+                value={form.slug}
+                onChange={(e) => {
+                  setSlugTouched(true);
+                  setForm((f) => ({ ...f, slug: e.target.value.toLowerCase() }));
+                }}
+              />
+            )}
+          </Field>
+          <Field label="Description" error={errors.description} className="sm:col-span-2">
+            {(p) => <TextArea {...p} rows={3} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />}
+          </Field>
+          <Field label="Image URL" error={errors.image_url} hint="Optional. Upload a JPG, PNG or WebP, or paste an image address." className="sm:col-span-2">
+            {(p) => (
+              <div className="flex flex-wrap items-center gap-2">
+                <TextInput
+                  {...p}
+                  className="min-w-0 flex-1"
+                  value={form.image_url}
+                  onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
+                  placeholder="/uploads/… or https://…"
+                />
+                <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleUpload} aria-hidden="true" tabIndex={-1} />
+                <Button size="sm" onClick={() => fileRef.current?.click()} loading={uploading}>
+                  <Upload className="size-3.5" aria-hidden="true" />
+                  Upload
+                </Button>
+                {form.image_url && <img src={form.image_url} alt="Category preview" className="size-9 rounded-md border border-[#e5e7eb] object-cover" />}
+              </div>
+            )}
+          </Field>
+          <Field label="Display order" error={errors.display_order} hint="Lower numbers appear first.">
+            {(p) => (
+              <TextInput {...p} type="number" min={0} value={form.display_order} onChange={(e) => setForm((f) => ({ ...f, display_order: e.target.value }))} />
+            )}
+          </Field>
+          <div className="flex items-end pb-1">
+            <Checkbox
+              label="Visible in the store"
+              checked={form.is_active}
+              onChange={(v) => setForm((f) => ({ ...f, is_active: v }))}
+            />
           </div>
-        ) : categories.length === 0 ? (
-          <div className="col-span-full py-12 text-center text-xs text-[#9ca3af]">
-            No categories defined. Click &quot;+ Add Category&quot; to create one.
-          </div>
-        ) : (
-          categories.map((c) => (
-            <div
-              key={c.id}
-              className="flex flex-col justify-between overflow-hidden rounded-xl border border-[#e5e7eb] bg-white shadow-sm transition-shadow hover:shadow-md"
-            >
-              <div className="relative h-32 w-full bg-neutral-100">
-                <img
-                  src={c.image_url || '/images/categories/casual.jpg'}
-                  alt={c.name}
-                  className="size-full object-cover"
-                  onError={(e: any) => {
-                    e.target.src = '/images/categories/casual.jpg';
-                  }}
-                />
-                <span className="absolute bottom-2 right-2 rounded-full bg-black/75 px-2 py-0.5 text-[10px] font-semibold text-white">
-                  {c.product_count || 0} products
-                </span>
-              </div>
-
-              <div className="p-4">
-                <h3 className="text-sm font-bold text-[#111827]">{c.name}</h3>
-                <p className="font-mono text-[11px] text-[#6b7280]">/{c.slug}</p>
-                <p className="mt-1 text-xs text-[#6b7280] line-clamp-2">{c.description || 'No description'}</p>
-
-                <div className="mt-4 flex items-center justify-end gap-2 border-t border-[#f3f4f6] pt-3">
-                  <button
-                    onClick={() => handleOpenEdit(c)}
-                    title={`Edit ${c.name} category`}
-                    aria-label="Edit Category"
-                    className="rounded border border-[#e5e7eb] px-2.5 py-1 text-xs font-semibold text-[#374151] hover:bg-[#f9fafb]"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(c.id, c.name)}
-                    title={`Delete ${c.name} category`}
-                    aria-label="Delete Category"
-                    className="rounded px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Category Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl animate-fade">
-            <div className="flex items-center justify-between border-b border-[#e5e7eb] pb-3">
-              <h3 className="text-base font-bold text-[#111827]">
-                {editingId ? 'Edit Category' : 'Create New Category'}
-              </h3>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="rounded-lg p-1 text-[#9ca3af] hover:bg-[#f3f4f6] hover:text-black"
-                aria-label="Close dialog"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-4">
-              {error && (
-                <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-800">{error}</div>
-              )}
-
-              <div>
-                <label className="block text-xs font-semibold text-[#374151]">Category Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Shirts & Polos"
-                  value={name}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                    if (!editingId) {
-                      setSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'));
-                    }
-                  }}
-                  required
-                  className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs font-semibold outline-none focus:border-black"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#374151]">URL Slug</label>
-                <input
-                  type="text"
-                  placeholder="e.g. shirts-polos"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
-                  required
-                  className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 font-mono text-xs outline-none focus:border-black"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#374151]">Description</label>
-                <textarea
-                  rows={2}
-                  placeholder="Category overview copy"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-[#e5e7eb] p-2 text-xs outline-none focus:border-black"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#374151]">Image URL</label>
-                <input
-                  type="text"
-                  value={imageUrl}
-                  onChange={(e) => setImageUrl(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 font-mono text-xs outline-none focus:border-black"
-                />
-              </div>
-
-              <div className="mt-2 flex items-center justify-end gap-2 border-t border-[#e5e7eb] pt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="rounded-lg border border-[#e5e7eb] px-4 py-2 text-xs font-medium text-[#4b5563] hover:bg-[#f9fafb]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-lg bg-black px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800 disabled:opacity-50"
-                >
-                  {submitting ? 'Saving...' : editingId ? 'Update Category' : 'Create Category'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
     </div>
   );
-};
+}

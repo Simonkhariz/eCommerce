@@ -1,381 +1,329 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Download, FileText, ChevronUp, ChevronDown } from 'lucide-react';
-import { apiAdminGetAnalyticsReport, apiAdminDownloadExport } from '@/lib/api-client';
-import { AdminIcon } from './AdminIcon';
+import React, { useEffect, useState } from 'react';
+import { Download, RefreshCw } from 'lucide-react';
+import { adminDownloadExport, adminGetAnalyticsReport, errorMessage } from '@/lib/admin-api';
+import { formatDate, formatPrice, gatewayLabel, humanize, num } from '@/lib/admin-format';
+import {
+  Button,
+  DataState,
+  FilterSelect,
+  Notice,
+  PageHeader,
+  Panel,
+  Table,
+  TextInput,
+  Toolbar,
+  redirectIfSignedOut,
+  useAdminData,
+  useToast,
+  useUrlFilters,
+} from '@/components/admin/ui';
 
-type DateRange = 'today' | 'yesterday' | '7days' | '30days' | '90days' | 'year' | 'all' | 'custom';
+const RANGES = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: '7days', label: 'Last 7 days' },
+  { value: '30days', label: 'Last 30 days' },
+  { value: '90days', label: 'Last 90 days' },
+  { value: 'year', label: 'This year' },
+  { value: 'all', label: 'All time' },
+  { value: 'custom', label: 'Custom dates' },
+];
 
-export const AdminAnalytics: React.FC = () => {
-  const [range, setRange] = useState<DateRange>('30days');
-  const [customStart, setCustomStart] = useState('');
-  const [customEnd, setCustomEnd] = useState('');
-  const [report, setReport] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [exportingType, setExportingType] = useState<string | null>(null);
-  const [showFormulas, setShowFormulas] = useState(false);
+interface AnalyticsSummary {
+  gross_sales: number;
+  net_sales: number;
+  total_refunded: number;
+  refund_count: number;
+  aov: number;
+  total_orders: number;
+  paid_orders: number;
+  conversion_rate: number;
+  repeat_customer_rate: number;
+  total_units_sold: number;
+  pending_fulfillment: number;
+}
 
-  const fetchReport = async () => {
-    setLoading(true);
-    try {
-      const params: any = { range };
-      if (range === 'custom' && customStart && customEnd) {
-        params.start_date = customStart;
-        params.end_date = customEnd;
-      }
-      const res = await apiAdminGetAnalyticsReport(params);
-      setReport(res?.data ?? res);
-    } catch (err: any) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+interface AnalyticsReport {
+  filters: { range: string; start_date: string; end_date: string };
+  summary: AnalyticsSummary;
+  daily_breakdown: Array<{ date: string; orders_count: number | string; paid_count: number | string; sales: number | string }>;
+  category_breakdown: Array<{ category_name: string; order_count: number | string; units_sold: number | string; revenue: number | string }>;
+  gateway_breakdown: Array<{ provider_name: string; total_attempts: number | string; successful_count: number | string; total_volume: number | string }>;
+  formulas: Record<string, string>;
+}
 
+/** Sales report for a date range, with CSV exports of the report and of orders. */
+export function AdminAnalytics() {
+  const toast = useToast();
+  const [filters, setFilters] = useUrlFilters({ range: '30days', start_date: '', end_date: '' });
+  const isCustom = filters.range === 'custom';
+  const customReady = isCustom && !!filters.start_date && !!filters.end_date;
+
+  const params = isCustom
+    ? customReady
+      ? { range: 'custom', start_date: filters.start_date, end_date: filters.end_date }
+      : null
+    : { range: filters.range };
+
+  const { data, loading, error, reload } = useAdminData<AnalyticsReport | null>(
+    async () => (params ? ((await adminGetAnalyticsReport(params)) as AnalyticsReport) : null),
+    [filters.range, filters.start_date, filters.end_date]
+  );
+
+  // Draft custom dates are applied with a button, so half-typed dates don't fire requests.
+  const [draftStart, setDraftStart] = useState(filters.start_date);
+  const [draftEnd, setDraftEnd] = useState(filters.end_date);
   useEffect(() => {
-    if (range !== 'custom') {
-      fetchReport();
-    }
-  }, [range]);
+    setDraftStart(filters.start_date);
+    setDraftEnd(filters.end_date);
+  }, [filters.start_date, filters.end_date]);
 
-  const handleApplyCustomDates = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!customStart || !customEnd) return;
-    setRange('custom');
-    fetchReport();
-  };
+  const [exporting, setExporting] = useState<'analytics' | 'orders' | null>(null);
 
-  const formatCurrency = (amt: number) => {
-    return `₦${Number(amt || 0).toLocaleString('en-NG', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
-  };
-
-  const handleDownloadCsv = async (type: 'analytics' | 'orders') => {
-    setExportingType(type);
+  const exportCsv = async (type: 'analytics' | 'orders') => {
+    if (!params) return;
+    setExporting(type);
     try {
-      const queryParams = new URLSearchParams();
-      queryParams.set('range', range);
-      if (range === 'custom' && customStart && customEnd) {
-        queryParams.set('start_date', customStart);
-        queryParams.set('end_date', customEnd);
-      }
-      const endpoint =
-        type === 'analytics'
-          ? `/admin/analytics/export?${queryParams.toString()}`
-          : `/admin/orders/export?${queryParams.toString()}`;
-      const filename = `shopco-${type}-${range}-${Date.now()}.csv`;
-
-      await apiAdminDownloadExport(endpoint, filename);
-    } catch (err: any) {
-      alert(`Export failed: ${err.message || 'Unauthorized or server error'}`);
+      const q = new URLSearchParams(params as Record<string, string>).toString();
+      const endpoint = type === 'analytics' ? `/admin/analytics/export?${q}` : `/admin/orders/export?${q}`;
+      await adminDownloadExport(endpoint, `shopco-${type}-${params.range}-${new Date().toISOString().slice(0, 10)}.csv`);
+      toast.success(type === 'analytics' ? 'Report downloaded.' : 'Orders downloaded.');
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      toast.error(errorMessage(err, 'The export could not be generated.'));
     } finally {
-      setExportingType(null);
+      setExporting(null);
     }
   };
 
-  const summary = report?.summary || {};
-  const daily = report?.daily_breakdown || [];
-  const categories = report?.category_breakdown || [];
-  const gateways = report?.gateway_breakdown || [];
-  const formulas = report?.formulas || {};
+  const applyCustom = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!draftStart || !draftEnd) {
+      toast.error('Choose both a start and an end date.');
+      return;
+    }
+    if (draftEnd < draftStart) {
+      toast.error('The end date must be on or after the start date.');
+      return;
+    }
+    setFilters({ range: 'custom', start_date: draftStart, end_date: draftEnd });
+  };
 
   return (
-    <div className="flex w-full flex-col gap-6">
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e5e7eb] pb-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#111827]">
-            Analytics & Reports
-          </h1>
-          <p className="text-xs text-[#6b7280]">
-            Audit verified database revenue, operational conversion rates, category trends, and download authorized CSV reports.
-          </p>
-        </div>
+    <div className="flex w-full flex-col gap-4">
+      <PageHeader
+        title="Analytics"
+        description="Sales, conversion, categories and payment gateways for a date range. Exports use the same range."
+        actions={
+          <>
+            <Button onClick={() => exportCsv('analytics')} loading={exporting === 'analytics'} disabled={!params || !!exporting}>
+              <Download className="size-3.5" aria-hidden="true" />
+              Report CSV
+            </Button>
+            <Button onClick={() => exportCsv('orders')} loading={exporting === 'orders'} disabled={!params || !!exporting}>
+              <Download className="size-3.5" aria-hidden="true" />
+              Orders CSV
+            </Button>
+          </>
+        }
+      />
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Time range pills */}
-          <div className="flex items-center rounded-lg border border-[#e5e7eb] bg-white p-1 shadow-sm">
-            {(['today', 'yesterday', '7days', '30days', '90days', 'year', 'all'] as const).map((r) => (
-              <button
-                key={r}
-                onClick={() => setRange(r)}
-                className={`rounded-md px-2.5 py-1 text-xs font-semibold uppercase transition-colors ${
-                  range === r ? 'bg-black text-white' : 'text-[#4b5563] hover:text-[#111827]'
-                }`}
-              >
-                {r === '7days' ? '7D' : r === '30days' ? '30D' : r === '90days' ? '90D' : r}
-              </button>
-            ))}
-          </div>
+      <Toolbar>
+        <FilterSelect
+          label="Date range"
+          value={filters.range}
+          onChange={(v) => setFilters(v === 'custom' ? { range: v } : { range: v, start_date: '', end_date: '' })}
+          options={RANGES}
+        />
+        {isCustom && (
+          <form onSubmit={applyCustom} className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-[#374151]">
+              From
+              <TextInput type="date" value={draftStart} onChange={(e) => setDraftStart(e.target.value)} className="h-9 w-auto py-1" />
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-[#374151]">
+              To
+              <TextInput type="date" value={draftEnd} onChange={(e) => setDraftEnd(e.target.value)} className="h-9 w-auto py-1" />
+            </label>
+            <Button type="submit" variant="primary">
+              Apply
+            </Button>
+          </form>
+        )}
+        <Button variant="ghost" onClick={reload} disabled={!params} aria-label="Refresh report">
+          <RefreshCw className="size-3.5" aria-hidden="true" />
+        </Button>
+      </Toolbar>
 
-          {/* Export Action Buttons */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleDownloadCsv('analytics')}
-              disabled={loading || exportingType !== null}
-              className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-semibold text-[#111827] shadow-sm hover:bg-[#f9fafb] disabled:opacity-50"
-              title="Download authenticated financial and category CSV report"
-            >
-              <Download className="w-3.5 h-3.5 text-[#374151]" />
-              <span>{exportingType === 'analytics' ? 'Exporting...' : 'Analytics CSV'}</span>
-            </button>
-            <button
-              onClick={() => handleDownloadCsv('orders')}
-              disabled={loading || exportingType !== null}
-              className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-semibold text-[#111827] shadow-sm hover:bg-[#f9fafb] disabled:opacity-50"
-              title="Download filtered orders CSV report with full details"
-            >
-              <FileText className="w-3.5 h-3.5 text-[#374151]" />
-              <span>{exportingType === 'orders' ? 'Exporting...' : 'Orders CSV'}</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      <Notice>
+        This report counts orders placed in the range that are paid or beyond. The Overview counts payments by the date they were verified, so the
+        two can differ for orders paid on a later day.
+      </Notice>
 
-      {/* Custom Date Range Filter Form */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e5e7eb] bg-white p-3.5 shadow-sm text-xs">
-        <form onSubmit={handleApplyCustomDates} className="flex flex-wrap items-center gap-3">
-          <span className="font-semibold text-[#374151]">Custom Date Filter:</span>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[#6b7280]">From</span>
-            <input
-              type="date"
-              value={customStart}
-              onChange={(e) => setCustomStart(e.target.value)}
-              className="rounded-lg border border-[#d1d5db] px-2.5 py-1 text-xs text-[#111827] focus:border-black focus:outline-none"
-            />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[#6b7280]">To</span>
-            <input
-              type="date"
-              value={customEnd}
-              onChange={(e) => setCustomEnd(e.target.value)}
-              className="rounded-lg border border-[#d1d5db] px-2.5 py-1 text-xs text-[#111827] focus:border-black focus:outline-none"
-            />
-          </div>
-          <button
-            type="submit"
-            className="rounded-lg bg-black px-3 py-1 font-semibold text-white hover:bg-neutral-800 transition-colors"
-          >
-            Apply Dates
-          </button>
-        </form>
-
-        <button
-          onClick={() => setShowFormulas(!showFormulas)}
-          className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-800"
-        >
-          <span>{showFormulas ? 'Hide Formulas' : 'View Documented Formulas'}</span>
-          {showFormulas ? (
-            <ChevronUp className="w-3.5 h-3.5" />
-          ) : (
-            <ChevronDown className="w-3.5 h-3.5" />
-          )}
-        </button>
-      </div>
-
-      {/* Documented Formulas Dropdown Card */}
-      {showFormulas && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 text-xs space-y-2">
-          <h3 className="font-bold text-blue-900 text-sm">
-            Documented Financial Formulas & Reconciliation Rules
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-blue-950 pt-1">
-            <div className="space-y-1 bg-white/70 p-3 rounded-lg border border-blue-100">
-              <p><strong>Gross Sales:</strong> {formulas.gross_sales || 'SUM(grand_total) for verified paid orders.'}</p>
-              <p><strong>Net Sales:</strong> {formulas.net_sales || 'Gross Sales minus completed refunds.'}</p>
-              <p><strong>Total Refunded:</strong> {formulas.total_refunded || 'SUM(amount) from completed refunds records.'}</p>
-            </div>
-            <div className="space-y-1 bg-white/70 p-3 rounded-lg border border-blue-100">
-              <p><strong>Average Order Value (AOV):</strong> {formulas.aov || 'Gross Sales / Paid Orders.'}</p>
-              <p><strong>Order Conversion:</strong> {formulas.conversion_rate || '(Paid Orders / Total Orders) * 100.'}</p>
-              <p><strong>Repeat Customer Rate:</strong> {formulas.repeat_customer_rate || 'Customers with 2+ paid orders / total paying customers.'}</p>
-            </div>
-          </div>
-          <p className="text-[11px] text-blue-800 italic pt-1 border-t border-blue-200/50">
-            Rule: {formulas.reconciliation_rule || 'Pending payments and abandoned checkouts are never counted as sales.'}
-          </p>
-        </div>
-      )}
-
-      {loading ? (
-        <div className="flex h-96 w-full flex-col items-center justify-center gap-3">
-          <div className="size-8 animate-spin rounded-full border-2 border-black border-t-transparent" />
-          <span className="text-xs text-[#6b7280]">Reconciling database records...</span>
-        </div>
+      {!params ? (
+        <Panel>
+          <p className="px-4 py-10 text-center text-[13px] text-[#6b7280]">Choose a start and end date, then select Apply.</p>
+        </Panel>
       ) : (
-        <div className="flex flex-col gap-6">
-          {/* KPI Summary Cards */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-              <span className="text-xs font-medium text-[#6b7280]">Gross Revenue</span>
-              <p className="mt-2 text-2xl font-bold text-[#111827]">
-                {formatCurrency(summary.gross_sales)}
-              </p>
-              <p className="mt-1 text-[11px] text-[#6b7280]">
-                Net (less refunds): {formatCurrency(summary.net_sales)}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-              <span className="text-xs font-medium text-[#6b7280]">Average Order Value (AOV)</span>
-              <p className="mt-2 text-2xl font-bold text-[#111827]">
-                {formatCurrency(summary.aov)}
-              </p>
-              <p className="mt-1 text-[11px] text-[#6b7280]">
-                From {summary.paid_orders} settled orders
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-              <span className="text-xs font-medium text-[#6b7280]">Units Sold & Fulfillment</span>
-              <p className="mt-2 text-2xl font-bold text-[#111827]">
-                {summary.total_units_sold} items
-              </p>
-              <p className="mt-1 text-[11px] text-amber-600 font-medium">
-                {summary.pending_fulfillment} pending dispatch
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-              <span className="text-xs font-medium text-[#6b7280]">Repeat Customer Rate</span>
-              <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-emerald-700">
-                  {summary.repeat_customer_rate ?? 0}%
-                </span>
-                <span className="text-xs text-[#9ca3af]">
-                  ({summary.conversion_rate ?? 0}% checkout conversion)
-                </span>
-              </div>
-              <p className="mt-1 text-[11px] text-[#6b7280]">
-                {summary.paid_orders} settled / {summary.total_orders} total checkout orders
-              </p>
-            </div>
-          </div>
-
-          {/* Daily Table */}
-          <div className="rounded-xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-bold text-[#111827]">Daily Settlement Breakdown</h3>
-            <p className="text-[11px] text-[#6b7280]">
-              Day-by-day order counts and settled transaction volume directly from MySQL source records
-            </p>
-
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="border-b border-[#f3f4f6] text-[11px] font-semibold uppercase tracking-wider text-[#9ca3af]">
-                  <tr>
-                    <th className="py-2.5">Date</th>
-                    <th className="py-2.5">Total Orders</th>
-                    <th className="py-2.5">Paid Orders</th>
-                    <th className="py-2.5">Conversion</th>
-                    <th className="py-2.5 text-right">Settled Revenue</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#f9fafb]">
-                  {daily.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="py-6 text-center text-xs text-[#9ca3af]">
-                        No orders recorded in this date range.
-                      </td>
-                    </tr>
-                  ) : (
-                    daily.map((d: any) => (
-                      <tr key={d.date}>
-                        <td className="py-2 font-mono text-[#111827]">{d.date}</td>
-                        <td className="py-2 text-[#4b5563]">{d.orders_count}</td>
-                        <td className="py-2 font-semibold text-[#111827]">{d.paid_count}</td>
-                        <td className="py-2">
-                          <span className="rounded bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold text-[#374151]">
-                            {d.orders_count > 0
-                              ? `${Math.round((d.paid_count / d.orders_count) * 100)}%`
-                              : '0%'}
-                          </span>
-                        </td>
-                        <td className="py-2 text-right font-bold text-[#111827]">
-                          {formatCurrency(d.sales)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Category & Payment Breakdown */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {/* Category Breakdown */}
-            <div className="rounded-xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-bold text-[#111827]">Revenue by Category</h3>
-              <p className="text-[11px] text-[#6b7280]">
-                Product sales volume grouped by category
-              </p>
-
-              <div className="mt-4 flex flex-col divide-y divide-[#f9fafb]">
-                {categories.length === 0 ? (
-                  <p className="py-4 text-center text-xs text-[#9ca3af]">
-                    No category sales data recorded.
-                  </p>
-                ) : (
-                  categories.map((c: any) => (
-                    <div key={c.category_name} className="flex items-center justify-between py-2.5 text-xs">
-                      <div>
-                        <p className="font-semibold text-[#111827]">{c.category_name}</p>
-                        <p className="text-[11px] text-[#6b7280]">
-                          {c.units_sold} units across {c.order_count} orders
-                        </p>
-                      </div>
-                      <span className="font-bold text-[#111827]">
-                        {formatCurrency(c.revenue)}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* Gateway Breakdown */}
-            <div className="rounded-xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-bold text-[#111827]">Gateway Volume Breakdown</h3>
-              <p className="text-[11px] text-[#6b7280]">
-                Volume and success rate across payment options
-              </p>
-
-              <div className="mt-4 flex flex-col divide-y divide-[#f9fafb]">
-                {gateways.length === 0 ? (
-                  <p className="py-4 text-center text-xs text-[#9ca3af]">
-                    No gateway transactions recorded.
-                  </p>
-                ) : (
-                  gateways.map((g: any) => (
-                    <div key={g.provider_name} className="flex items-center justify-between py-2.5 text-xs">
-                      <div>
-                        <span className="rounded bg-neutral-100 px-2 py-0.5 text-[10px] font-bold uppercase text-[#374151]">
-                          {g.provider_name}
-                        </span>
-                        <p className="mt-1 text-[11px] text-[#6b7280]">
-                          {g.successful_count} successful / {g.total_attempts} attempts (
-                          {g.total_attempts > 0
-                            ? Math.round((g.successful_count / g.total_attempts) * 100)
-                            : 0}
-                          %)
-                        </p>
-                      </div>
-                      <span className="font-bold text-[#111827]">
-                        {formatCurrency(g.total_volume)}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <DataState loading={loading} error={error} onRetry={reload} hasData={!!data} empty={!data}>
+          {data && <Report report={data} />}
+        </DataState>
       )}
     </div>
   );
-};
+}
+
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1 rounded-xl border border-[#e5e7eb] bg-white p-4">
+      <p className="text-xs font-medium text-[#6b7280]">{label}</p>
+      <p className="truncate text-2xl font-semibold tabular-nums text-[#111827]">{value}</p>
+      {sub && <p className="text-xs text-[#6b7280]">{sub}</p>}
+    </div>
+  );
+}
+
+function pct(part: number, whole: number): string {
+  return whole > 0 ? `${Math.round((part / whole) * 100)}%` : '—';
+}
+
+function Report({ report }: { report: AnalyticsReport }) {
+  const s = report.summary;
+  const [showFormulas, setShowFormulas] = useState(false);
+  const daily = report.daily_breakdown ?? [];
+  const categories = report.category_breakdown ?? [];
+  const gateways = report.gateway_breakdown ?? [];
+  const formulas = Object.entries(report.formulas ?? {});
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-[#6b7280]">
+        {formatDate(report.filters.start_date)} – {formatDate(report.filters.end_date)}
+      </p>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat label="Net sales" value={formatPrice(num(s.net_sales))} sub={`${formatPrice(num(s.gross_sales))} gross · ${formatPrice(num(s.total_refunded))} refunded (${num(s.refund_count)})`} />
+        <Stat label="Average order value" value={formatPrice(num(s.aov))} sub={`From ${num(s.paid_orders).toLocaleString()} paid orders`} />
+        <Stat label="Units sold" value={num(s.total_units_sold).toLocaleString()} sub={`${num(s.pending_fulfillment).toLocaleString()} of these orders still to ship`} />
+        <Stat
+          label="Checkout conversion"
+          value={`${num(s.conversion_rate)}%`}
+          sub={`${num(s.paid_orders).toLocaleString()} paid of ${num(s.total_orders).toLocaleString()} placed · ${num(s.repeat_customer_rate)}% repeat customers`}
+        />
+      </div>
+
+      <Panel title="Daily breakdown">
+        {daily.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No orders in this range.</p>
+        ) : (
+          <div className="max-h-[420px] overflow-y-auto">
+            <Table minWidth={520}>
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  <th scope="col" className="text-right">Orders placed</th>
+                  <th scope="col" className="text-right">Paid</th>
+                  <th scope="col" className="text-right">Paid rate</th>
+                  <th scope="col" className="text-right">Sales</th>
+                </tr>
+              </thead>
+              <tbody>
+                {daily.map((d) => (
+                  <tr key={d.date}>
+                    <td>{formatDate(d.date)}</td>
+                    <td className="text-right tabular-nums">{num(d.orders_count)}</td>
+                    <td className="text-right tabular-nums">{num(d.paid_count)}</td>
+                    <td className="text-right tabular-nums">{pct(num(d.paid_count), num(d.orders_count))}</td>
+                    <td className="text-right tabular-nums">{formatPrice(num(d.sales))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+        )}
+      </Panel>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel title="Sales by category">
+          {categories.length === 0 ? (
+            <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No paid sales in this range.</p>
+          ) : (
+            <Table minWidth={420}>
+              <thead>
+                <tr>
+                  <th scope="col">Category</th>
+                  <th scope="col" className="text-right">Units</th>
+                  <th scope="col" className="text-right">Orders</th>
+                  <th scope="col" className="text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {categories.map((c) => (
+                  <tr key={c.category_name}>
+                    <td>{c.category_name}</td>
+                    <td className="text-right tabular-nums">{num(c.units_sold)}</td>
+                    <td className="text-right tabular-nums">{num(c.order_count)}</td>
+                    <td className="text-right tabular-nums">{formatPrice(num(c.revenue))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Panel>
+
+        <Panel title="Payment gateways">
+          {gateways.length === 0 ? (
+            <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No payment attempts in this range.</p>
+          ) : (
+            <Table minWidth={420}>
+              <thead>
+                <tr>
+                  <th scope="col">Gateway</th>
+                  <th scope="col" className="text-right">Orders</th>
+                  <th scope="col" className="text-right">Paid</th>
+                  <th scope="col" className="text-right">Volume</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gateways.map((g) => (
+                  <tr key={g.provider_name}>
+                    <td>{g.provider_name === 'Pending' ? 'No payment started' : gatewayLabel(g.provider_name)}</td>
+                    <td className="text-right tabular-nums">{num(g.total_attempts)}</td>
+                    <td className="text-right tabular-nums">
+                      {num(g.successful_count)} <span className="text-xs text-[#6b7280]">({pct(num(g.successful_count), num(g.total_attempts))})</span>
+                    </td>
+                    <td className="text-right tabular-nums">{formatPrice(num(g.total_volume))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Panel>
+      </div>
+
+      {formulas.length > 0 && (
+        <Panel
+          title="How these numbers are calculated"
+          actions={
+            <Button size="sm" variant="ghost" aria-expanded={showFormulas} aria-controls="analytics-formulas" onClick={() => setShowFormulas((v) => !v)}>
+              {showFormulas ? 'Hide' : 'Show'}
+            </Button>
+          }
+        >
+          {showFormulas && (
+            <dl id="analytics-formulas" className="divide-y divide-[#f3f4f6] text-[13px]">
+              {formulas.map(([key, text]) => (
+                <div key={key} className="grid gap-1 px-4 py-2.5 sm:grid-cols-[200px_1fr]">
+                  <dt className="font-medium text-[#111827]">{humanize(key)}</dt>
+                  <dd className="text-[#374151]">{text}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </Panel>
+      )}
+    </div>
+  );
+}

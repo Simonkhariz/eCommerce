@@ -6,10 +6,14 @@ namespace App\Controllers;
 
 use App\Database\Database;
 use App\Middleware\JsonBodyMiddleware;
+use App\Services\AuditService;
+use App\Services\CheckoutService;
+use App\Support\RequestContext;
 use App\Support\Response;
 
 /**
- * Controller for administrative configuration of delivery destination zones and shipping fees.
+ * Admin configuration of delivery zones and fees.
+ * A zone covers a list of Nigerian states (or '*' for every state not covered elsewhere).
  */
 class AdminZoneController
 {
@@ -21,149 +25,186 @@ class AdminZoneController
     }
 
     /**
-     * List all destination shipping zones and fee rates.
+     * GET /api/v1/admin/shipping-zones
      */
     public function index(): void
     {
-        $zones = $this->db->fetchAll("SELECT * FROM `shipping_zones` ORDER BY `id` ASC");
+        $zones = array_map([$this, 'present'], $this->db->fetchAll("SELECT * FROM `shipping_zones` ORDER BY `fee` ASC, `id` ASC"));
 
-        foreach ($zones as &$zone) {
-            if (is_string($zone['states_covered'])) {
-                $zone['states_covered'] = json_decode($zone['states_covered'], true) ?: [];
-            }
-            $zone['fee'] = (float) $zone['fee'];
-            $zone['is_active'] = (bool) $zone['is_active'];
-        }
-        unset($zone);
-
-        Response::success($zones, 'Shipping destination zones retrieved.');
+        Response::success([
+            'zones' => $zones,
+            'states' => CheckoutService::NIGERIAN_STATES,
+        ], 'Shipping destination zones retrieved.');
     }
 
     /**
-     * Retrieve single destination zone.
+     * GET /api/v1/admin/shipping-zones/{id}
      */
     public function show(array $params): void
     {
-        $id = (int) ($params['id'] ?? 0);
-        $zone = $this->db->fetchOne("SELECT * FROM `shipping_zones` WHERE `id` = ?", 'i', [$id]);
-
-        if ($zone === null) {
-            Response::error('Shipping zone not found.', 404, 'ZONE_NOT_FOUND');
-        }
-
-        if (is_string($zone['states_covered'])) {
-            $zone['states_covered'] = json_decode($zone['states_covered'], true) ?: [];
-        }
-        $zone['fee'] = (float) $zone['fee'];
-        $zone['is_active'] = (bool) $zone['is_active'];
-
-        Response::success($zone, 'Shipping zone retrieved.');
+        Response::success($this->present($this->find((int) ($params['id'] ?? 0))), 'Shipping zone retrieved.');
     }
 
     /**
-     * Create a new destination shipping zone and fee.
+     * POST /api/v1/admin/shipping-zones
      */
     public function create(): void
     {
-        $body = JsonBodyMiddleware::getBody();
+        $in = $this->input(JsonBodyMiddleware::getBody());
 
-        $name = trim($body['name'] ?? '');
-        $code = trim(strtoupper($body['code'] ?? ''));
-        $description = trim($body['description'] ?? '');
-        $fee = (float) ($body['fee'] ?? 0.0);
-        $estimatedDays = trim($body['estimated_days'] ?? '2-4 business days');
-        $statesCovered = $body['states_covered'] ?? ['*'];
-        $isActive = isset($body['is_active']) ? ((bool) $body['is_active'] ? 1 : 0) : 1;
-
-        if ($name === '' || $code === '') {
-            Response::error('Zone name and unique code are required.', 422, 'VALIDATION_ERROR', [
-                'name' => empty($name) ? 'Name is required' : null,
-                'code' => empty($code) ? 'Code is required' : null,
-            ]);
+        if ($this->db->fetchOne("SELECT id FROM `shipping_zones` WHERE `code` = ?", 's', [$in['code']]) !== null) {
+            Response::error('A shipping zone with this code already exists.', 422, 'VALIDATION_ERROR', ['code' => 'Code already in use.']);
         }
-
-        $existing = $this->db->fetchOne("SELECT id FROM `shipping_zones` WHERE `code` = ?", 's', [$code]);
-        if ($existing !== null) {
-            Response::error('A shipping zone with this code already exists.', 409, 'DUPLICATE_ZONE_CODE');
-        }
-
-        $statesJson = is_array($statesCovered) ? json_encode($statesCovered) : '["*"]';
 
         $id = (int) $this->db->insert(
             "INSERT INTO `shipping_zones` (`name`, `code`, `description`, `states_covered`, `fee`, `estimated_days`, `is_active`)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
             'ssssdsi',
-            [$name, $code, $description, $statesJson, $fee, $estimatedDays, $isActive]
+            [$in['name'], $in['code'], $in['description'], json_encode($in['states_covered']), $in['fee'], $in['estimated_days'], $in['is_active']]
         );
 
-        $created = $this->db->fetchOne("SELECT * FROM `shipping_zones` WHERE `id` = ?", 'i', [$id]);
-        $created['states_covered'] = json_decode($created['states_covered'], true) ?: [];
-        $created['fee'] = (float) $created['fee'];
-        $created['is_active'] = (bool) $created['is_active'];
-
-        Response::success($created, 'Destination shipping zone created.', 201);
+        $created = $this->present($this->find($id));
+        AuditService::record($this->adminId(), 'shipping_zone.create', 'shipping_zone', (string) $id, null, $created);
+        Response::success($created, 'Delivery zone created.', 201);
     }
 
     /**
-     * Update an existing destination zone and fee.
+     * PUT /api/v1/admin/shipping-zones/{id}
      */
     public function update(array $params): void
     {
         $id = (int) ($params['id'] ?? 0);
-        $existing = $this->db->fetchOne("SELECT id FROM `shipping_zones` WHERE `id` = ?", 'i', [$id]);
-        if ($existing === null) {
+        $before = $this->present($this->find($id));
+        $in = $this->input(JsonBodyMiddleware::getBody(), $before);
+
+        if ($this->db->fetchOne("SELECT id FROM `shipping_zones` WHERE `code` = ? AND `id` <> ?", 'si', [$in['code'], $id]) !== null) {
+            Response::error('A shipping zone with this code already exists.', 422, 'VALIDATION_ERROR', ['code' => 'Code already in use.']);
+        }
+
+        $this->db->execute(
+            "UPDATE `shipping_zones`
+             SET `name` = ?, `code` = ?, `description` = ?, `states_covered` = ?, `fee` = ?, `estimated_days` = ?, `is_active` = ?
+             WHERE `id` = ?",
+            'ssssdsii',
+            [$in['name'], $in['code'], $in['description'], json_encode($in['states_covered']), $in['fee'], $in['estimated_days'], $in['is_active'], $id]
+        );
+
+        $updated = $this->present($this->find($id));
+        AuditService::record($this->adminId(), 'shipping_zone.update', 'shipping_zone', (string) $id, $before, $updated);
+        Response::success($updated, 'Delivery zone updated.');
+    }
+
+    /**
+     * DELETE /api/v1/admin/shipping-zones/{id}
+     * Orders keep their own fee and zone snapshot, so deleting a zone never changes past orders.
+     */
+    public function delete(array $params): void
+    {
+        $id = (int) ($params['id'] ?? 0);
+        $before = $this->present($this->find($id));
+
+        $this->db->execute("DELETE FROM `shipping_zones` WHERE `id` = ?", 'i', [$id]);
+        AuditService::record($this->adminId(), 'shipping_zone.delete', 'shipping_zone', (string) $id, $before, null);
+        Response::success(['id' => $id], 'Delivery zone deleted.');
+    }
+
+    // -------------------------------------------------------------------------
+
+    private function find(int $id): array
+    {
+        $zone = $this->db->fetchOne("SELECT * FROM `shipping_zones` WHERE `id` = ?", 'i', [$id]);
+        if ($zone === null) {
             Response::error('Shipping zone not found.', 404, 'ZONE_NOT_FOUND');
         }
+        return $zone;
+    }
 
-        $body = JsonBodyMiddleware::getBody();
+    private function present(array $zone): array
+    {
+        $zone['id'] = (int) $zone['id'];
+        $zone['states_covered'] = is_string($zone['states_covered'])
+            ? (json_decode($zone['states_covered'], true) ?: [])
+            : (array) $zone['states_covered'];
+        $zone['fee'] = (float) $zone['fee'];
+        $zone['is_active'] = (bool) $zone['is_active'];
+        return $zone;
+    }
 
-        $fields = [];
-        $types = '';
-        $values = [];
+    /**
+     * Validate zone input; on update, missing fields keep their current values.
+     *
+     * @return array{name: string, code: string, description: string, states_covered: list<string>, fee: float, estimated_days: string, is_active: int}
+     */
+    private function input(array $body, ?array $current = null): array
+    {
+        $str = static fn (string $key, string $default = ''): string => array_key_exists($key, $body)
+            ? trim((string) $body[$key])
+            : (string) ($current[$key] ?? $default);
 
-        if (array_key_exists('name', $body)) {
-            $fields[] = "`name` = ?";
-            $types .= 's';
-            $values[] = trim($body['name']);
+        $name = $str('name');
+        $code = strtoupper($str('code'));
+        $description = $str('description');
+        $estimatedDays = $str('estimated_days', '2-4 business days');
+        $feeRaw = array_key_exists('fee', $body) ? $body['fee'] : ($current['fee'] ?? null);
+        $statesRaw = array_key_exists('states_covered', $body) ? $body['states_covered'] : ($current['states_covered'] ?? []);
+        $isActive = array_key_exists('is_active', $body) ? (int) (bool) $body['is_active'] : (int) ($current['is_active'] ?? 1);
+
+        $errors = [];
+        if ($name === '') {
+            $errors['name'] = 'Name is required.';
         }
-        if (array_key_exists('description', $body)) {
-            $fields[] = "`description` = ?";
-            $types .= 's';
-            $values[] = trim($body['description']);
+        if (!preg_match('/^[A-Z0-9_-]{2,30}$/', $code)) {
+            $errors['code'] = 'Use 2-30 letters, numbers, dashes or underscores.';
         }
-        if (array_key_exists('fee', $body)) {
-            $fields[] = "`fee` = ?";
-            $types .= 'd';
-            $values[] = (float) $body['fee'];
+        if (!is_numeric($feeRaw) || (float) $feeRaw < 0 || (float) $feeRaw > 1000000) {
+            $errors['fee'] = 'Enter a delivery fee of 0 or more.';
         }
-        if (array_key_exists('estimated_days', $body)) {
-            $fields[] = "`estimated_days` = ?";
-            $types .= 's';
-            $values[] = trim($body['estimated_days']);
-        }
-        if (array_key_exists('states_covered', $body)) {
-            $fields[] = "`states_covered` = ?";
-            $types .= 's';
-            $values[] = json_encode($body['states_covered']);
-        }
-        if (array_key_exists('is_active', $body)) {
-            $fields[] = "`is_active` = ?";
-            $types .= 'i';
-            $values[] = $body['is_active'] ? 1 : 0;
+        if ($estimatedDays === '') {
+            $errors['estimated_days'] = 'Give customers a delivery estimate, e.g. "2-4 business days".';
         }
 
-        if (!empty($fields)) {
-            $sql = "UPDATE `shipping_zones` SET " . implode(', ', $fields) . " WHERE `id` = ?";
-            $types .= 'i';
-            $values[] = $id;
-            $this->db->execute($sql, $types, $values);
+        $states = [];
+        if (!is_array($statesRaw) || $statesRaw === []) {
+            $errors['states_covered'] = 'Pick at least one state.';
+        } else {
+            $unknown = [];
+            foreach ($statesRaw as $state) {
+                $state = trim((string) $state);
+                if ($state === '*') {
+                    $states[] = '*';
+                    continue;
+                }
+                $canonical = CheckoutService::canonicalState($state);
+                if ($canonical === null) {
+                    $unknown[] = $state;
+                } else {
+                    $states[] = $canonical;
+                }
+            }
+            if ($unknown !== []) {
+                $errors['states_covered'] = 'Not Nigerian states: ' . implode(', ', $unknown) . '.';
+            }
+            $states = array_values(array_unique($states));
         }
 
-        $updated = $this->db->fetchOne("SELECT * FROM `shipping_zones` WHERE `id` = ?", 'i', [$id]);
-        $updated['states_covered'] = json_decode($updated['states_covered'], true) ?: [];
-        $updated['fee'] = (float) $updated['fee'];
-        $updated['is_active'] = (bool) $updated['is_active'];
+        if ($errors !== []) {
+            Response::error('Please fix the highlighted fields.', 422, 'VALIDATION_ERROR', $errors);
+        }
 
-        Response::success($updated, 'Shipping destination zone updated.');
+        return [
+            'name' => $name,
+            'code' => $code,
+            'description' => $description,
+            'states_covered' => $states,
+            'fee' => round((float) $feeRaw, 2),
+            'estimated_days' => $estimatedDays,
+            'is_active' => $isActive,
+        ];
+    }
+
+    private function adminId(): ?int
+    {
+        $admin = RequestContext::getUser();
+        return $admin ? (int) $admin['id'] : null;
     }
 }

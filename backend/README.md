@@ -141,7 +141,7 @@ Placing an order reserves its stock until `orders.expires_at` (60 minutes after 
 latest gateway checkout attempt; 24 hours when the customer pays by WhatsApp/manual transfer).
 Overdue orders are cancelled and their stock and promo use released exactly once.
 
-The API does a small sweep whenever an order is placed or the admin order list is opened. Schedule
+The API does a small sweep whenever an order is placed or the admin order list or dashboard is opened. Schedule
 the full job so stock is released even when the store is quiet; it asks Kora/Monnify for the final
 status first, so a payment completed at the last minute is applied instead of cancelled:
 ```bash
@@ -155,6 +155,12 @@ schtasks /Create /SC MINUTE /MO 10 /TN "ShopCo Expire Orders" /TR "C:\xampp\php\
 
 Optional `.env` settings: `ORDER_PAYMENT_WINDOW_MINUTES` (default 60) and
 `ORDER_MANUAL_PAYMENT_WINDOW_HOURS` (default 24).
+
+### Admin panel
+The admin lives at `/admin` on the storefront (one route per screen, e.g. `/admin/orders`, `/admin/shipping/zones`).
+On a brand-new database `/admin` sends you to `/admin/setup` to create the first administrator and the store
+details; after that the setup endpoint is closed and `/admin/login` is the way in. Old `/admin?tab=…` links
+redirect to the matching route.
 
 ### Payment rules (PaymentFinalizer)
 Every confirmation path (Kora/Monnify webhooks and verification, admin "Confirm payment") goes

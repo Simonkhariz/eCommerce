@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Config\Env;
 use App\Database\Database;
 use RuntimeException;
 use InvalidArgumentException;
@@ -640,7 +641,7 @@ class CheckoutService
     }
 
     /** The 36 states and the Federal Capital Territory. */
-    private const NIGERIAN_STATES = [
+    public const NIGERIAN_STATES = [
         'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno', 'Cross River',
         'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT', 'Gombe', 'Imo', 'Jigawa', 'Kaduna', 'Kano',
         'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo',
@@ -759,28 +760,39 @@ class CheckoutService
     }
 
     /**
-     * Retrieve store origin information from store_settings.
+     * Store details from store_settings (set during setup and in admin Settings).
+     * Missing values come back empty rather than invented.
      */
     public function getStoreOrigin(): array
     {
-        $settingsRows = $this->db->fetchAll(
-            "SELECT `key_name`, `value` FROM `store_settings` 
-             WHERE `key_name` IN ('store_name', 'store_origin_city', 'store_origin_state', 'store_origin_address', 'store_contact_phone', 'store_contact_email')"
-        );
-
-        $settings = [];
-        foreach ($settingsRows as $row) {
-            $settings[$row['key_name']] = $row['value'];
-        }
+        $settings = array_column($this->db->fetchAll(
+            "SELECT `key_name`, `value` FROM `store_settings`
+             WHERE `key_name` IN ('store_name', 'store_origin_city', 'store_origin_state', 'store_origin_address',
+                                  'store_contact_phone', 'store_contact_email', 'store_whatsapp_phone')"
+        ), 'value', 'key_name');
 
         return [
-            'store_name' => $settings['store_name'] ?? 'SHOP.CO',
-            'origin_city' => $settings['store_origin_city'] ?? 'Enugu',
-            'origin_state' => $settings['store_origin_state'] ?? 'Enugu',
-            'origin_address' => $settings['store_origin_address'] ?? '12 Okpara Avenue, Independence Layout, Enugu, Nigeria',
-            'contact_phone' => $settings['store_contact_phone'] ?? '+234 803 000 0000',
-            'contact_email' => $settings['store_contact_email'] ?? 'support@shop.co',
+            'store_name' => ($settings['store_name'] ?? '') !== '' ? $settings['store_name'] : 'SHOP.CO',
+            'origin_city' => $settings['store_origin_city'] ?? '',
+            'origin_state' => $settings['store_origin_state'] ?? '',
+            'origin_address' => $settings['store_origin_address'] ?? '',
+            'contact_phone' => $settings['store_contact_phone'] ?? '',
+            'contact_email' => $settings['store_contact_email'] ?? '',
+            'whatsapp_phone' => self::supportWhatsAppPhone($settings['store_whatsapp_phone'] ?? null),
         ];
+    }
+
+    /**
+     * WhatsApp number for manual payments and support: the admin setting wins, then STORE_WHATSAPP_PHONE.
+     */
+    public static function supportWhatsAppPhone(?string $fromSettings = null): string
+    {
+        if ($fromSettings === null) {
+            $row = Database::getInstance()->fetchOne("SELECT `value` FROM `store_settings` WHERE `key_name` = 'store_whatsapp_phone'");
+            $fromSettings = $row['value'] ?? null;
+        }
+        $phone = trim((string) $fromSettings);
+        return $phone !== '' ? $phone : trim((string) Env::get('STORE_WHATSAPP_PHONE', ''));
     }
 
     /**

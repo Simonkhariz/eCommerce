@@ -329,7 +329,7 @@ class CheckoutController
 
         Response::success([
             'methods' => $methods,
-            'support_phone' => Env::get('STORE_WHATSAPP_PHONE', ''),
+            'support_phone' => CheckoutService::supportWhatsAppPhone(),
         ], 'Payment methods retrieved.');
     }
 
@@ -399,7 +399,7 @@ class CheckoutController
                     'currency' => $order['currency'],
                     'status' => 'pending',
                     'expires_at' => $fresh['expires_at'] ?? null,
-                    'support_phone' => Env::get('STORE_WHATSAPP_PHONE', ''),
+                    'support_phone' => CheckoutService::supportWhatsAppPhone(),
                 ], 'Order reserved while you complete payment with our team on WhatsApp.');
             }
         } catch (\InvalidArgumentException $e) {

@@ -110,7 +110,12 @@ class AdminCatalogController
             );
         } catch (\Throwable $e) {
             error_log('[Admin Product Create Failed] ' . $e->getMessage());
-            Response::error('Failed to create product: ' . $e->getMessage(), 400, 'PRODUCT_CREATE_FAILED');
+            $duplicate = $e instanceof \mysqli_sql_exception && (int) $e->getCode() === 1062;
+            Response::error(
+                $duplicate ? 'Another product already uses this slug or SKU.' : 'The product could not be created. Please try again.',
+                $duplicate ? 422 : 500,
+                $duplicate ? 'DUPLICATE_PRODUCT' : 'PRODUCT_CREATE_FAILED'
+            );
         }
     }
 
@@ -196,8 +201,11 @@ class AdminCatalogController
             ]);
 
             Response::success($result, "Product status updated to '{$status}'.");
+        } catch (\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422, 'UPDATE_STATUS_FAILED');
         } catch (\Throwable $e) {
-            Response::error($e->getMessage(), 400, 'UPDATE_STATUS_FAILED');
+            error_log('[Admin Product Status Failed] ' . $e->getMessage());
+            Response::error('The product status could not be changed. Please try again.', 500, 'UPDATE_STATUS_FAILED');
         }
     }
 
@@ -261,38 +269,49 @@ class AdminCatalogController
     }
 
     /**
+     * GET /api/v1/admin/categories
+     * All categories including inactive ones, with product counts.
+     */
+    public function listCategories(): void
+    {
+        Response::success($this->categoryRepo->getAllForAdmin(), 'Categories retrieved.');
+    }
+
+    /**
      * POST /api/v1/admin/categories
-     * Create a new category.
      */
     public function createCategory(): void
     {
         $body = JsonBodyMiddleware::getBody();
         $errors = CategoryValidator::validate($body);
         if (!empty($errors)) {
-            Response::error('Validation failed for category.', 422, 'VALIDATION_ERROR', $errors);
+            Response::error('Please fix the highlighted fields.', 422, 'VALIDATION_ERROR', $errors);
+        }
+        if ($this->categoryRepo->findBySlug(trim((string) $body['slug'])) !== null) {
+            Response::error('Another category already uses this slug.', 422, 'VALIDATION_ERROR', ['slug' => 'Slug already in use.']);
         }
 
-        try {
-            $catId = $this->categoryRepo->create($body);
-            $created = $this->categoryRepo->findById($catId);
-            Response::success($created, 'Category created successfully.', 201);
-        } catch (\Throwable $e) {
-            error_log('[Admin Category Create Failed] ' . $e->getMessage());
-            Response::error('Failed to create category. Check that category slug is unique.', 400, 'CATEGORY_CREATE_FAILED');
-        }
+        $catId = $this->categoryRepo->create([
+            'name' => trim((string) $body['name']),
+            'slug' => trim((string) $body['slug']),
+            'description' => isset($body['description']) ? trim((string) $body['description']) : null,
+            'image_url' => isset($body['image_url']) && $body['image_url'] !== '' ? (string) $body['image_url'] : null,
+            'display_order' => (int) ($body['display_order'] ?? 0),
+            'is_active' => array_key_exists('is_active', $body) ? (int) (bool) $body['is_active'] : 1,
+        ]);
+        $created = $this->categoryRepo->findById($catId);
+
+        AuditService::record($this->currentAdminId(), 'category.create', 'category', (string) $catId, null, $created);
+        Response::success($created, 'Category created.', 201);
     }
 
     /**
      * PUT /api/v1/admin/categories/{id}
-     * Update an existing category.
+     * Also used to restore a deactivated category ({is_active: true}).
      */
     public function updateCategory(array $params): void
     {
-        $id = isset($params['id']) ? (int) $params['id'] : 0;
-        if ($id <= 0) {
-            Response::error('Valid category ID required.', 400, 'BAD_REQUEST');
-        }
-
+        $id = (int) ($params['id'] ?? 0);
         $existing = $this->categoryRepo->findById($id);
         if (!$existing) {
             Response::error('Category not found.', 404, 'RESOURCE_NOT_FOUND');
@@ -301,29 +320,57 @@ class AdminCatalogController
         $body = JsonBodyMiddleware::getBody();
         $errors = CategoryValidator::validate($body, true);
         if (!empty($errors)) {
-            Response::error('Validation failed.', 422, 'VALIDATION_ERROR', $errors);
+            Response::error('Please fix the highlighted fields.', 422, 'VALIDATION_ERROR', $errors);
+        }
+        if (isset($body['slug'])) {
+            $other = $this->categoryRepo->findBySlug(trim((string) $body['slug']));
+            if ($other !== null && (int) $other['id'] !== $id) {
+                Response::error('Another category already uses this slug.', 422, 'VALIDATION_ERROR', ['slug' => 'Slug already in use.']);
+            }
         }
 
-        $mergedData = array_merge($existing, $body);
-        $this->categoryRepo->update($id, $mergedData);
+        $merged = $existing;
+        foreach (['name', 'slug', 'description', 'image_url'] as $key) {
+            if (array_key_exists($key, $body)) {
+                $merged[$key] = $body[$key] === null || $body[$key] === '' ? ($key === 'name' || $key === 'slug' ? $existing[$key] : null) : trim((string) $body[$key]);
+            }
+        }
+        if (array_key_exists('display_order', $body)) {
+            $merged['display_order'] = (int) $body['display_order'];
+        }
+        if (array_key_exists('is_active', $body)) {
+            $merged['is_active'] = (int) (bool) $body['is_active'];
+        }
+
+        $this->categoryRepo->update($id, $merged);
         $updated = $this->categoryRepo->findById($id);
 
-        Response::success($updated, 'Category updated successfully.');
+        $action = (int) $existing['is_active'] === 0 && (int) $updated['is_active'] === 1 ? 'category.restore' : 'category.update';
+        AuditService::record($this->currentAdminId(), $action, 'category', (string) $id, $existing, $updated);
+        Response::success($updated, $action === 'category.restore' ? 'Category restored.' : 'Category updated.');
     }
 
     /**
      * DELETE /api/v1/admin/categories/{id}
-     * Deactivate a category.
+     * Deactivates the category (hidden from the storefront). Products keep their category.
      */
     public function deleteCategory(array $params): void
     {
-        $id = isset($params['id']) ? (int) $params['id'] : 0;
-        if ($id <= 0) {
-            Response::error('Valid category ID required.', 400, 'BAD_REQUEST');
+        $id = (int) ($params['id'] ?? 0);
+        $existing = $this->categoryRepo->findById($id);
+        if (!$existing) {
+            Response::error('Category not found.', 404, 'RESOURCE_NOT_FOUND');
         }
 
         $this->categoryRepo->delete($id);
-        Response::success(['id' => $id, 'is_active' => 0], 'Category deactivated successfully.');
+        AuditService::record($this->currentAdminId(), 'category.deactivate', 'category', (string) $id, $existing, ['is_active' => 0]);
+        Response::success(['id' => $id, 'is_active' => false], 'Category hidden from the store. You can restore it any time.');
+    }
+
+    private function currentAdminId(): ?int
+    {
+        $admin = RequestContext::getUser();
+        return $admin ? (int) $admin['id'] : null;
     }
 
     /**

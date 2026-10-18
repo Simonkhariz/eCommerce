@@ -1,431 +1,357 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { InventoryRow, adminAdjustStock, adminGetInventory, adminGetInventoryLogs, errorMessage, fieldErrors } from '@/lib/admin-api';
+import { formatDateTime, formatPrice, num } from '@/lib/admin-format';
 import {
-  apiAdminGetInventory,
-  apiAdminAdjustStock,
-  apiAdminGetInventoryLogs,
-} from '@/lib/api-client';
-import { AdminIcon } from './AdminIcon';
-import { RefreshCw, X } from 'lucide-react';
+  Button,
+  DataState,
+  DetailList,
+  Field,
+  FilterSelect,
+  Modal,
+  Notice,
+  PageHeader,
+  Pagination,
+  Panel,
+  SearchInput,
+  Select,
+  StatusPill,
+  Table,
+  TextInput,
+  Toolbar,
+  redirectIfSignedOut,
+  useAdminData,
+  useDebouncedValue,
+  useToast,
+  useUrlFilters,
+} from '@/components/admin/ui';
 
-export const AdminInventory: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'stock' | 'logs'>('stock');
-  const [variants, setVariants] = useState<any[]>([]);
-  const [logs, setLogs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'low_stock' | 'out_of_stock'>('all');
-  const [search, setSearch] = useState('');
+const REASONS = ['Restock delivery', 'Stock count correction', 'Damaged / lost', 'Returned to stock', 'Other'];
 
-  // Stock Adjustment Modal State
-  const [selectedVariant, setSelectedVariant] = useState<any | null>(null);
-  const [changeAmount, setChangeAmount] = useState<number>(0);
-  const [reason, setReason] = useState<string>('Restock / Shipment arrival');
-  const [adjusting, setAdjusting] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+function stockPill(stock: number, threshold: number) {
+  if (stock <= 0) return <StatusPill label="Out of stock" tone="red" />;
+  if (stock <= threshold) return <StatusPill label="Low" tone="amber" />;
+  return <StatusPill label="In stock" tone="green" />;
+}
 
-  const fetchInventory = async () => {
-    setLoading(true);
-    try {
-      if (activeTab === 'stock') {
-        const res = await apiAdminGetInventory({ filter, search });
-        const list = Array.isArray(res) ? res : (res as any)?.items || (res as any)?.data || [];
-        setVariants(list);
-      } else {
-        const res = await apiAdminGetInventoryLogs();
-        const list = Array.isArray(res) ? res : (res as any)?.items || (res as any)?.data || [];
-        setLogs(list);
-      }
-    } catch (err: any) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+function variantLabel(size: string, color: string): string {
+  return [size, color].filter(Boolean).join(' / ') || '—';
+}
+
+export function AdminInventory() {
+  const [filters, setFilters] = useUrlFilters({ view: 'stock', filter: 'all', search: '', page: '1' });
+  const view = filters.view === 'logs' ? 'logs' : 'stock';
+
+  return (
+    <div className="flex w-full flex-col">
+      <PageHeader title="Inventory" description="Stock per size and colour. Every change is recorded in stock movements." />
+
+      <div role="tablist" aria-label="Inventory views" className="mb-3 inline-flex w-fit rounded-lg border border-[#e5e7eb] bg-[#f9fafb] p-0.5">
+        {(
+          [
+            ['stock', 'Stock levels'],
+            ['logs', 'Stock movements'],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={view === key}
+            onClick={() => setFilters({ view: key, filter: 'all', search: '', page: '1' })}
+            className={`rounded-md px-3 py-1.5 text-[13px] font-medium outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40 ${
+              view === key ? 'bg-white text-[#111827] shadow-sm' : 'text-[#6b7280] hover:text-[#111827]'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'stock' ? (
+        <StockLevels filters={filters} setFilters={setFilters} />
+      ) : (
+        <StockMovements page={Number(filters.page) || 1} onPage={(p) => setFilters({ page: String(p) })} />
+      )}
+    </div>
+  );
+}
+
+type Filters = { view: string; filter: string; search: string; page: string };
+
+function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c: Partial<Filters>) => void }) {
+  const toast = useToast();
+  const page = Number(filters.page) || 1;
+  const stockFilter = (['all', 'low_stock', 'out_of_stock'].includes(filters.filter) ? filters.filter : 'all') as 'all' | 'low_stock' | 'out_of_stock';
+
+  const [searchText, setSearchText] = useState(filters.search);
+  const debouncedSearch = useDebouncedValue(searchText, 300);
+  useEffect(() => {
+    if (debouncedSearch !== filters.search) setFilters({ search: debouncedSearch });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch]);
+
+  const { data, loading, error, reload } = useAdminData(
+    () => adminGetInventory({ filter: stockFilter, search: filters.search, page, per_page: 25 }),
+    [stockFilter, filters.search, page]
+  );
+  const rows = data?.items ?? [];
+
+  const [target, setTarget] = useState<InventoryRow | null>(null);
+  const [change, setChange] = useState('');
+  const [reason, setReason] = useState(REASONS[0]);
+  const [note, setNote] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const openAdjust = (row: InventoryRow) => {
+    setTarget(row);
+    setChange('');
+    setReason(REASONS[0]);
+    setNote('');
+    setErrors({});
   };
 
-  useEffect(() => {
-    fetchInventory();
-  }, [activeTab, filter, search]);
+  const current = target ? num(target.stock_quantity) : 0;
+  const amount = parseInt(change, 10);
+  const validAmount = Number.isInteger(amount) && amount !== 0;
+  const resulting = current + (validAmount ? amount : 0);
 
-  const handleAdjustSubmit = async (e: React.FormEvent) => {
+  const handleAdjust = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedVariant || changeAmount === 0 || !reason.trim()) return;
+    if (!target) return;
+    const local: Record<string, string> = {};
+    if (!validAmount) local.change = 'Enter a whole number other than 0 (e.g. 10 or -3).';
+    else if (resulting < 0) local.change = `Stock can't go below 0 (only ${current} in stock).`;
+    if (reason === 'Other' && !note.trim()) local.note = 'Describe the reason.';
+    setErrors(local);
+    if (Object.keys(local).length) return;
 
-    setAdjusting(true);
-    setActionError(null);
+    const reasonText = (reason === 'Other' ? note.trim() : note.trim() ? `${reason} – ${note.trim()}` : reason).slice(0, 240);
+    setSaving(true);
     try {
-      await apiAdminAdjustStock({
-        variant_id: selectedVariant.id,
-        change_amount: changeAmount,
-        reason: reason.trim(),
-      });
-      setActionSuccess(
-        `Successfully adjusted ${selectedVariant.sku} stock by ${changeAmount > 0 ? '+' : ''}${changeAmount}.`
-      );
-      setSelectedVariant(null);
-      setChangeAmount(0);
-      fetchInventory();
-    } catch (err: any) {
-      setActionError(err?.message || 'Failed to adjust inventory stock.');
+      await adminAdjustStock({ variant_id: target.id, change_amount: amount, reason: reasonText });
+      toast.success(`Stock for ${target.product_name} (${variantLabel(target.size, target.color_name)}) is now ${resulting}.`);
+      setTarget(null);
+      reload();
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      const fields = fieldErrors(err);
+      if (fields.adjustment) fields.change = fields.adjustment;
+      setErrors(fields);
+      if (!fields.change && !fields.reason) toast.error(errorMessage(err, 'The stock could not be adjusted.'));
     } finally {
-      setAdjusting(false);
+      setSaving(false);
     }
   };
 
   return (
-    <div className="flex w-full flex-col gap-6">
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e5e7eb] pb-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#111827]">Inventory Management</h1>
-          <p className="text-xs text-[#6b7280]">
-            Track SKU variant stock levels, enforce reorder thresholds, and log stock adjustments.
-          </p>
-        </div>
+    <>
+      <Toolbar>
+        <SearchInput label="Search inventory" placeholder="Search product or SKU" value={searchText} onChange={setSearchText} />
+        <FilterSelect
+          label="Stock level"
+          value={stockFilter}
+          onChange={(v) => setFilters({ filter: v })}
+          options={[
+            { value: 'all', label: 'All stock levels' },
+            { value: 'low_stock', label: 'Low stock' },
+            { value: 'out_of_stock', label: 'Out of stock' },
+          ]}
+        />
+      </Toolbar>
 
-        {/* Tab switch */}
-        <div className="flex items-center rounded-lg border border-[#e5e7eb] bg-white p-1 shadow-sm">
-          <button
-            onClick={() => setActiveTab('stock')}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              activeTab === 'stock'
-                ? 'bg-black text-white'
-                : 'text-[#4b5563] hover:text-[#111827]'
-            }`}
-          >
-            Live Stock Overview
-          </button>
-          <button
-            onClick={() => setActiveTab('logs')}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              activeTab === 'logs'
-                ? 'bg-black text-white'
-                : 'text-[#4b5563] hover:text-[#111827]'
-            }`}
-          >
-            Movement Audit Logs
-          </button>
-        </div>
-      </div>
-
-      {actionSuccess && (
-        <div className="flex items-center justify-between rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800">
-          <span>{actionSuccess}</span>
-          <button onClick={() => setActionSuccess(null)} className="p-0.5 text-emerald-700 hover:text-emerald-900"><X className="w-3.5 h-3.5" /></button>
-        </div>
-      )}
-
-      {/* Live Stock View */}
-      {activeTab === 'stock' && (
-        <div className="flex flex-col gap-4">
-          {/* Filters & Search Row */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <input
-                type="search"
-                placeholder="Search SKU or product..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-64 rounded-lg border border-[#e5e7eb] px-3 text-xs outline-none focus:border-black"
-              />
-              <select
-                value={filter}
-                onChange={(e: any) => setFilter(e.target.value)}
-                className="h-8 rounded-lg border border-[#e5e7eb] bg-white px-2.5 text-xs text-[#374151] outline-none"
-              >
-                <option value="all">All Variants</option>
-                <option value="low_stock">Low Stock Only</option>
-                <option value="out_of_stock">Out of Stock</option>
-              </select>
-            </div>
-
-            <button
-              onClick={fetchInventory}
-              disabled={loading}
-              className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-medium text-[#374151] shadow-sm hover:bg-[#f9fafb] disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span>Refresh Stock</span>
-            </button>
-          </div>
-
-          {/* Variants Table */}
-          <div className="overflow-x-auto rounded-xl border border-[#e5e7eb] bg-white shadow-sm">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-[#f3f4f6] bg-[#fafafa] text-[11px] font-semibold uppercase tracking-wider text-[#9ca3af]">
-                <tr>
-                  <th className="px-4 py-3">Product Name</th>
-                  <th className="px-4 py-3">SKU</th>
-                  <th className="px-4 py-3">Variant (Size / Color)</th>
-                  <th className="px-4 py-3">Base / Override Price</th>
-                  <th className="px-4 py-3">Current Stock</th>
-                  <th className="px-4 py-3">Threshold</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#f9fafb]">
-                {loading ? (
-                  <tr>
-                    <td colSpan={8} className="py-12 text-center text-xs text-[#6b7280]">
-                      Loading real-time inventory records...
-                    </td>
-                  </tr>
-                ) : variants.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="py-12 text-center text-xs text-[#9ca3af]">
-                      No product variants matching the criteria.
-                    </td>
-                  </tr>
-                ) : (
-                  variants.map((v) => {
-                    const isOutOfStock = v.stock_quantity === 0;
-                    const isLowStock = v.stock_quantity <= v.low_stock_threshold && !isOutOfStock;
-
-                    return (
-                      <tr key={v.id} className="transition-colors hover:bg-[#fbfbfb]">
-                        <td className="px-4 py-3 font-medium text-[#111827]">
-                          {v.product_name}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-[#4b5563]">{v.sku}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="size-3.5 rounded-full border border-black/10 shrink-0"
-                              style={{ backgroundColor: v.color_hex || '#000' }}
-                            />
-                            <span>
-                              {v.size} · {v.color_name}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          ₦{Number(v.price_override || v.base_price).toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 font-bold text-sm">
-                          <span
-                            className={
-                              isOutOfStock
-                                ? 'text-red-600'
-                                : isLowStock
-                                ? 'text-amber-600'
-                                : 'text-emerald-700'
-                            }
-                          >
-                            {v.stock_quantity}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-[#6b7280]">{v.low_stock_threshold}</td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span
-                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium border ${
-                              isOutOfStock
-                                ? 'bg-rose-50 text-rose-700 border-rose-200/60'
-                                : isLowStock
-                                ? 'bg-amber-50 text-amber-700 border-amber-200/60'
-                                : 'bg-emerald-50 text-emerald-700 border-emerald-200/60'
-                            }`}
-                          >
-                            <span
-                              className={`size-1.5 rounded-full shrink-0 ${
-                                isOutOfStock
-                                  ? 'bg-rose-600'
-                                  : isLowStock
-                                  ? 'bg-amber-500'
-                                  : 'bg-emerald-600'
-                              }`}
-                            />
-                            <span>
-                              {isOutOfStock
-                                ? 'Out of Stock'
-                                : isLowStock
-                                ? 'Low Stock'
-                                : 'In Stock'}
-                            </span>
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <button
-                            onClick={() => {
-                              setSelectedVariant(v);
-                              setChangeAmount(0);
-                              setActionError(null);
-                            }}
-                            title={`Adjust warehouse stock for ${v.sku}`}
-                            aria-label="Adjust Stock"
-                            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 text-xs font-medium text-neutral-700 shadow-xs transition-colors"
-                          >
-                            <AdminIcon name="timer" size={12} />
-                            <span>Adjust</span>
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Movement Logs View */}
-      {activeTab === 'logs' && (
-        <div className="overflow-x-auto rounded-xl border border-[#e5e7eb] bg-white shadow-sm">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-[#f3f4f6] bg-[#fafafa] text-[11px] font-semibold uppercase tracking-wider text-[#9ca3af]">
+      <Panel>
+        <DataState
+          loading={loading}
+          error={error}
+          onRetry={reload}
+          hasData={!!data}
+          empty={rows.length === 0}
+          emptyTitle={filters.search || stockFilter !== 'all' ? 'No variants match these filters' : 'No product variants yet'}
+          emptyDescription={filters.search || stockFilter !== 'all' ? 'Try a different search or stock level.' : 'Add products with sizes and colours to track stock here.'}
+        >
+          <Table minWidth={860}>
+            <thead>
               <tr>
-                <th className="px-4 py-3">Timestamp</th>
-                <th className="px-4 py-3">Product / SKU</th>
-                <th className="px-4 py-3">Prev Stock</th>
-                <th className="px-4 py-3">Adjustment</th>
-                <th className="px-4 py-3">New Stock</th>
-                <th className="px-4 py-3">Reason</th>
-                <th className="px-4 py-3">Adjusted By</th>
+                <th>Product</th>
+                <th>SKU</th>
+                <th>Size / colour</th>
+                <th>Stock</th>
+                <th>Price</th>
+                <th>Updated</th>
+                <th className="text-right">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#f9fafb]">
-              {loading ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-xs text-[#6b7280]">
-                    Loading stock movement logs...
-                  </td>
-                </tr>
-              ) : logs.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-xs text-[#9ca3af]">
-                    No inventory movement records found.
-                  </td>
-                </tr>
-              ) : (
-                logs.map((log) => (
-                  <tr key={log.id} className="transition-colors hover:bg-[#fbfbfb]">
-                    <td className="px-4 py-3 font-mono text-[#6b7280]">
-                      {log.created_at ? log.created_at.slice(0, 16) : ''}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-[#111827]">{log.product_name}</div>
-                      <div className="font-mono text-[11px] text-[#9ca3af]">
-                        {log.variant_sku} ({log.size} / {log.color_name})
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-[#6b7280]">{log.previous_stock}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`font-semibold ${
-                          log.change_amount > 0 ? 'text-emerald-700' : 'text-red-600'
-                        }`}
+            <tbody>
+              {rows.map((row) => {
+                const stock = num(row.stock_quantity);
+                const price = row.price_override !== null && num(row.price_override) > 0 ? num(row.price_override) : num(row.base_price);
+                return (
+                  <tr key={row.id}>
+                    <td>
+                      <Link
+                        href={`/admin/products?search=${encodeURIComponent(row.product_name)}`}
+                        className="font-medium text-[#111827] hover:underline"
                       >
-                        {log.change_amount > 0 ? `+${log.change_amount}` : log.change_amount}
+                        {row.product_name}
+                      </Link>
+                      {row.product_status !== 'published' && <span className="ml-1.5 text-xs text-[#6b7280]">({row.product_status})</span>}
+                    </td>
+                    <td className="font-mono text-xs text-[#4b5563]">{row.sku}</td>
+                    <td>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className="size-3.5 shrink-0 rounded-full border border-black/10"
+                          style={{ backgroundColor: row.color_hex || '#ffffff' }}
+                          aria-hidden="true"
+                        />
+                        {variantLabel(row.size, row.color_name)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-bold text-[#111827]">{log.new_stock}</td>
-                    <td className="px-4 py-3 text-[#374151]">{log.reason}</td>
-                    <td className="px-4 py-3 text-[#6b7280]">
-                      {log.adjusted_by_name || 'Admin'}
+                    <td>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="font-semibold tabular-nums">{stock}</span>
+                        {stockPill(stock, num(row.low_stock_threshold))}
+                      </span>
+                    </td>
+                    <td className="tabular-nums">
+                      {formatPrice(price)}
+                      {row.price_override !== null && num(row.price_override) > 0 && <span className="ml-1 text-xs text-[#6b7280]">(variant price)</span>}
+                    </td>
+                    <td className="whitespace-nowrap text-[#4b5563]">{formatDateTime(row.updated_at)}</td>
+                    <td className="text-right">
+                      <Button size="sm" onClick={() => openAdjust(row)}>
+                        Adjust
+                      </Button>
                     </td>
                   </tr>
-                ))
-              )}
+                );
+              })}
             </tbody>
-          </table>
-        </div>
-      )}
+          </Table>
+          <Pagination meta={data?.pagination} onPage={(p) => setFilters({ page: String(p) })} />
+        </DataState>
+      </Panel>
 
-      {/* Adjust Stock Modal */}
-      {selectedVariant && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl animate-fade">
-            <div className="flex items-center justify-between border-b border-[#e5e7eb] pb-3">
-              <h3 className="text-base font-bold text-[#111827]">Adjust Physical Stock</h3>
-              <button
-                onClick={() => setSelectedVariant(null)}
-                className="rounded-lg p-1 text-[#9ca3af] hover:bg-[#f3f4f6] hover:text-black"
-                aria-label="Close dialog"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAdjustSubmit} className="mt-4 flex flex-col gap-4">
-              <div className="rounded-lg bg-[#f9fafb] p-3 text-xs">
-                <p className="font-semibold text-[#111827]">{selectedVariant.product_name}</p>
-                <p className="text-[11px] text-[#6b7280]">
-                  SKU: {selectedVariant.sku} · {selectedVariant.size} / {selectedVariant.color_name}
-                </p>
-                <div className="mt-2 flex items-center justify-between">
-                  <span>Current Physical Stock:</span>
-                  <span className="font-bold text-sm text-black">
-                    {selectedVariant.stock_quantity} units
-                  </span>
-                </div>
-              </div>
-
-              {actionError && (
-                <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-800">
-                  {actionError}
-                </div>
+      <Modal
+        open={!!target}
+        onClose={() => setTarget(null)}
+        busy={saving}
+        size="sm"
+        title="Adjust stock"
+        description={target ? `${target.product_name} · ${variantLabel(target.size, target.color_name)} · ${target.sku}` : undefined}
+        footer={
+          <>
+            <Button onClick={() => setTarget(null)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" form="adjust-stock-form" loading={saving}>
+              Save adjustment
+            </Button>
+          </>
+        }
+      >
+        {target && (
+          <form id="adjust-stock-form" onSubmit={handleAdjust} className="space-y-4" noValidate>
+            <DetailList
+              items={[
+                { label: 'Current stock', value: <span className="font-semibold tabular-nums">{current}</span> },
+                {
+                  label: 'After this change',
+                  value: <span className={`font-semibold tabular-nums ${resulting < 0 ? 'text-red-600' : ''}`}>{validAmount ? resulting : '—'}</span>,
+                },
+              ]}
+            />
+            <Field label="Change" required error={errors.change} hint="Positive adds stock, negative removes it.">
+              {(p) => (
+                <TextInput {...p} data-autofocus type="number" step={1} inputMode="numeric" placeholder="e.g. 10 or -3" value={change} onChange={(e) => setChange(e.target.value)} />
               )}
-
-              <div>
-                <label className="block text-xs font-semibold text-[#374151]">
-                  Change Amount (+ to add, - to deduct)
-                </label>
-                <input
-                  type="number"
-                  value={changeAmount || ''}
-                  onChange={(e) => setChangeAmount(parseInt(e.target.value, 10) || 0)}
-                  placeholder="e.g. 20 or -5"
-                  required
-                  className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-sm font-semibold outline-none focus:border-black"
-                />
-                <p className="mt-1 text-[11px] text-[#6b7280]">
-                  New stock will be:{' '}
-                  <span className="font-bold text-black">
-                    {Math.max(0, (selectedVariant.stock_quantity || 0) + changeAmount)} units
-                  </span>
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#374151]">
-                  Mandatory Audit Reason
-                </label>
-                <select
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] bg-white px-2.5 text-xs outline-none focus:border-black"
-                >
-                  <option value="Restock / Shipment arrival">Restock / Shipment arrival</option>
-                  <option value="Inventory cycle count recount">Inventory cycle count recount</option>
-                  <option value="Damaged goods write-off">Damaged goods write-off</option>
-                  <option value="Customer return restocked">Customer return restocked</option>
-                  <option value="Demo unit allocated">Demo unit allocated</option>
-                  <option value="Supplier discrepancy correction">Supplier discrepancy correction</option>
-                </select>
-              </div>
-
-              <div className="mt-2 flex items-center justify-end gap-2 border-t border-[#e5e7eb] pt-4">
-                <button
-                  type="button"
-                  onClick={() => setSelectedVariant(null)}
-                  className="rounded-lg border border-[#e5e7eb] px-4 py-2 text-xs font-medium text-[#4b5563] hover:bg-[#f9fafb]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={adjusting || changeAmount === 0}
-                  className="rounded-lg bg-black px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800 disabled:opacity-50"
-                >
-                  {adjusting ? 'Saving & Auditing...' : 'Confirm Stock Adjustment'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+            </Field>
+            <Field label="Reason" required error={errors.reason}>
+              {(p) => (
+                <Select {...p} value={reason} onChange={(e) => setReason(e.target.value)}>
+                  {REASONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+            <Field
+              label={reason === 'Other' ? 'Describe the reason' : 'Note'}
+              required={reason === 'Other'}
+              error={errors.note}
+              hint={reason === 'Other' ? undefined : 'Optional, e.g. a delivery or count reference.'}
+            >
+              {(p) => <TextInput {...p} maxLength={180} value={note} onChange={(e) => setNote(e.target.value)} />}
+            </Field>
+            {validAmount && resulting === 0 && <Notice tone="warning">This variant will show as sold out in the store.</Notice>}
+          </form>
+        )}
+      </Modal>
+    </>
   );
-};
+}
+
+function StockMovements({ page, onPage }: { page: number; onPage: (page: number) => void }) {
+  const { data, loading, error, reload } = useAdminData(() => adminGetInventoryLogs({ page, per_page: 25 }), [page]);
+  const rows = data?.items ?? [];
+
+  return (
+    <Panel>
+      <DataState
+        loading={loading}
+        error={error}
+        onRetry={reload}
+        hasData={!!data}
+        empty={rows.length === 0}
+        emptyTitle="No stock movements yet"
+        emptyDescription="Adjustments, new variants and product-form stock edits appear here."
+      >
+        <Table minWidth={860}>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Product</th>
+              <th>Variant</th>
+              <th>Stock</th>
+              <th>Change</th>
+              <th>Reason</th>
+              <th>By</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((log) => {
+              const delta = num(log.change_amount);
+              return (
+                <tr key={log.id}>
+                  <td className="whitespace-nowrap text-[#4b5563]">{formatDateTime(log.created_at)}</td>
+                  <td className="font-medium text-[#111827]">{log.product_name}</td>
+                  <td>
+                    {variantLabel(log.size, log.color_name)}
+                    <span className="block font-mono text-xs text-[#6b7280]">{log.variant_sku}</span>
+                  </td>
+                  <td className="whitespace-nowrap tabular-nums">
+                    {log.previous_stock} → {log.new_stock}
+                  </td>
+                  <td className={`whitespace-nowrap font-semibold tabular-nums ${delta > 0 ? 'text-emerald-700' : delta < 0 ? 'text-red-700' : ''}`}>
+                    {delta > 0 ? `+${delta}` : delta}
+                  </td>
+                  <td className="max-w-[260px] break-words">{log.reason}</td>
+                  <td className="whitespace-nowrap text-[#4b5563]">{log.adjusted_by_name ?? '—'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+        <Pagination meta={data?.pagination} onPage={onPage} />
+      </DataState>
+    </Panel>
+  );
+}

@@ -63,8 +63,15 @@ class Database
         try {
             $conn = new mysqli($host, $username, $password, $database, $port);
             $conn->set_charset('utf8mb4');
-            // Align NOW() with PHP's date() so token/session expiry comparisons agree.
-            $conn->query("SET time_zone = '" . $conn->real_escape_string(date('P')) . "'");
+            // Align NOW() with the store clock (APP_TIMEZONE, which the API and scripts also give PHP)
+            // so token/session/order expiry comparisons agree, whatever php.ini's default zone is.
+            try {
+                $zone = new \DateTimeZone((string) (Env::get('APP_TIMEZONE', 'Africa/Lagos') ?: 'Africa/Lagos'));
+            } catch (\Exception $e) {
+                $zone = new \DateTimeZone('Africa/Lagos');
+            }
+            $offset = (new \DateTimeImmutable('now', $zone))->format('P');
+            $conn->query("SET time_zone = '" . $conn->real_escape_string($offset) . "'");
             $this->connection = $conn;
             return $this->connection;
         } catch (Throwable $e) {

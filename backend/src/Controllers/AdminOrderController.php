@@ -84,12 +84,14 @@ class AdminOrderController
                        o.currency, o.subtotal, o.shipping_fee, o.discount_amount, o.grand_total,
                        o.shipping_zone_snapshot, o.shipping_address_snapshot, o.created_at, o.updated_at,
                        o.expires_at, o.requires_attention, o.attention_reason,
+                       COALESCE(cu.email, o.guest_email) AS customer_email,
                        p.provider as payment_provider, p.provider_reference as payment_reference, p.status as payment_record_status,
                        s.carrier, s.tracking_number, s.tracking_url, s.status as shipment_status, s.shipped_at, s.delivered_at,
                        (SELECT COUNT(*) FROM `order_items` oi WHERE oi.order_id = o.id) as items_count,
                        (SELECT SUM(quantity) FROM `order_items` oi WHERE oi.order_id = o.id) as total_quantity
                 FROM `orders` o
                 LEFT JOIN `payments` p ON p.order_id = o.id AND p.id = (SELECT MAX(p2.id) FROM `payments` p2 WHERE p2.order_id = o.id)
+                LEFT JOIN `users` cu ON cu.id = o.user_id
                 LEFT JOIN `shipments` s ON s.order_id = o.id AND s.id = (SELECT MAX(s2.id) FROM `shipments` s2 WHERE s2.order_id = o.id)
                 {$whereSql}
                 ORDER BY o.id DESC
@@ -106,7 +108,6 @@ class AdminOrderController
             $ord['grand_total'] = (float) $ord['grand_total'];
             $ord['items_count'] = (int) $ord['items_count'];
             $ord['total_quantity'] = (int) ($ord['total_quantity'] ?? 0);
-            $ord['requires_attention'] = (bool) $ord['requires_attention'];
             $ord['requires_attention'] = (bool) $ord['requires_attention'];
 
             $ord['shipping_zone_snapshot'] = is_string($ord['shipping_zone_snapshot'])

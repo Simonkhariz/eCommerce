@@ -1,0 +1,291 @@
+'use client';
+
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { ExternalLink, LogOut } from 'lucide-react';
+import { AdminIcon } from '@/components/admin/AdminIcon';
+import { useAdminSession } from '@/components/admin/AdminAuthGate';
+import { ADMIN_NAV, AdminNavItem, findAdminNav, isActiveAdminLink } from '@/lib/admin-nav';
+import { adminGetOrders } from '@/lib/admin-api';
+
+/**
+ * Admin chrome: sidebar navigation (real links), header breadcrumb, attention bell and sign-out.
+ * The sidebar is sticky on desktop and a drawer on mobile.
+ */
+export function AdminShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname() || '/admin';
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [attentionCount, setAttentionCount] = useState<number | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Close the mobile drawer on navigation.
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
+
+  // Orders flagged for attention (late / duplicate / mismatched payments), refreshed on navigation.
+  useEffect(() => {
+    let cancelled = false;
+    adminGetOrders({ status: 'attention', per_page: 1 })
+      .then((res) => !cancelled && setAttentionCount(res.pagination.total))
+      .catch(() => !cancelled && setAttentionCount(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setDrawerOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [drawerOpen]);
+
+  const current = findAdminNav(pathname);
+
+  return (
+    <div className="flex min-h-dvh w-full bg-[#f8f8f8]">
+      <a
+        href="#admin-main"
+        className="sr-only z-[80] rounded-lg bg-white px-3 py-2 text-sm font-semibold focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
+      >
+        Skip to content
+      </a>
+
+      {/* Desktop sidebar */}
+      {!collapsed && (
+        <div className="sticky top-0 hidden h-dvh w-[250px] shrink-0 lg:block">
+          <AdminSidebar pathname={pathname} onClose={() => setCollapsed(true)} closeLabel="Hide sidebar" />
+        </div>
+      )}
+
+      {/* Mobile drawer */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="animate-fade absolute inset-0 bg-black/30" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
+          <div className="absolute inset-y-0 left-0 h-dvh w-[260px] max-w-[85vw] shadow-2xl" role="dialog" aria-modal="true" aria-label="Admin navigation">
+            <AdminSidebar pathname={pathname} onClose={() => setDrawerOpen(false)} closeLabel="Close menu" />
+          </div>
+        </div>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col bg-white shadow-[inset_0_0_0_0.8px_#e5e7eb] lg:min-h-dvh">
+        <header className="sticky top-0 z-30 flex h-[52px] w-full items-center justify-between gap-2 border-b border-[#e5e7eb]/80 bg-white/95 px-3 backdrop-blur sm:px-4">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <button
+              ref={menuButtonRef}
+              type="button"
+              onClick={() => (window.innerWidth >= 1024 ? setCollapsed((c) => !c) : setDrawerOpen(true))}
+              aria-label={collapsed ? 'Show sidebar' : 'Open menu'}
+              className={`flex size-9 shrink-0 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50 text-neutral-700 outline-none transition-colors hover:bg-neutral-100 focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40 ${
+                collapsed ? '' : 'lg:hidden'
+              }`}
+            >
+              <AdminIcon name="sidebar-right" size={18} className="rotate-180" />
+            </button>
+
+            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2">
+              <span className="hidden shrink-0 text-sm text-[#6b7280] sm:inline">{current?.section ?? 'Admin'}</span>
+              <span className="hidden h-2.5 w-1.5 shrink-0 sm:inline" aria-hidden="true">
+                <AdminIcon name="breadcrumb-slash" width={7} height={11} className="-translate-y-0.5" />
+              </span>
+              <span aria-current="page" className="truncate text-sm font-semibold text-[#1f2937]">
+                {current?.label ?? 'Admin'}
+              </span>
+            </nav>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <Link
+              href="/"
+              target="_blank"
+              rel="noopener"
+              className="hidden items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-[#f8f8f8] px-2.5 py-1 text-xs font-medium text-[#4b5563] transition-colors hover:bg-white hover:text-[#1f2937] sm:inline-flex"
+            >
+              View store
+              <ExternalLink className="size-3 text-neutral-400" aria-hidden="true" />
+              <span className="sr-only">(opens in a new tab)</span>
+            </Link>
+
+            <Link
+              href="/admin/orders?status=attention"
+              aria-label={attentionCount ? `${attentionCount} orders need attention` : 'Orders needing attention'}
+              title="Orders needing attention"
+              className="relative rounded-md p-1.5 outline-none transition-colors hover:bg-black/[0.05] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
+            >
+              <AdminIcon name="bell" />
+              {!!attentionCount && (
+                <span className="absolute -right-0.5 -top-0.5 flex min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white">
+                  {attentionCount > 99 ? '99+' : attentionCount}
+                </span>
+              )}
+            </Link>
+
+            <Link
+              href="/admin/settings"
+              aria-label="Store settings"
+              title="Store settings"
+              className="rounded-md p-1.5 outline-none transition-colors hover:bg-black/[0.05] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
+            >
+              <AdminIcon name="hd-settings" />
+            </Link>
+          </div>
+        </header>
+
+        <main id="admin-main" tabIndex={-1} className="flex w-full min-w-0 flex-1 flex-col px-3 py-4 outline-none sm:px-5 sm:py-5">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function AdminSidebar({ pathname, onClose, closeLabel }: { pathname: string; onClose: () => void; closeLabel: string }) {
+  const { admin, signOut } = useAdminSession();
+  const [signingOut, setSigningOut] = useState(false);
+
+  // Groups open by default when they contain the current page.
+  const initialOpen = useMemo(() => {
+    const open: Record<string, boolean> = {};
+    ADMIN_NAV.forEach((section) =>
+      section.items.forEach((item) => {
+        if (item.children?.some((c) => isActiveAdminLink(pathname, c.href))) open[item.href] = true;
+      })
+    );
+    return open;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(initialOpen);
+
+  useEffect(() => {
+    ADMIN_NAV.forEach((section) =>
+      section.items.forEach((item) => {
+        if (item.children?.some((c) => isActiveAdminLink(pathname, c.href))) {
+          setOpenGroups((prev) => (prev[item.href] ? prev : { ...prev, [item.href]: true }));
+        }
+      })
+    );
+  }, [pathname]);
+
+  const renderItem = (item: AdminNavItem) => {
+    const linkBase =
+      'flex h-8 w-full items-center gap-2.5 rounded-lg border-[0.8px] px-2.5 text-[13px] font-medium leading-none outline-none transition-[background-color,border-color,color] duration-150 focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40';
+    const active = 'border-[#e5e7eb] bg-white text-[#1f2937] shadow-[0px_4px_7px_0px_rgba(0,0,0,0.04)]';
+    const inactive = 'border-transparent text-[#4b5563] hover:bg-white/70 hover:text-[#1f2937]';
+
+    if (!item.children) {
+      const isActive = isActiveAdminLink(pathname, item.href);
+      return (
+        <Link key={item.href} href={item.href} aria-current={isActive ? 'page' : undefined} className={`${linkBase} ${isActive ? active : inactive}`}>
+          <AdminIcon name={item.icon} size={16} />
+          {item.label}
+        </Link>
+      );
+    }
+
+    const isOpen = !!openGroups[item.href];
+    const groupId = `nav-group-${item.href.replace(/\W+/g, '-')}`;
+    return (
+      <div key={item.href} className="flex flex-col">
+        <button
+          type="button"
+          aria-expanded={isOpen}
+          aria-controls={groupId}
+          onClick={() => setOpenGroups((prev) => ({ ...prev, [item.href]: !isOpen }))}
+          className={`${linkBase} justify-between ${inactive}`}
+        >
+          <span className="flex items-center gap-2.5">
+            <AdminIcon name={item.icon} size={16} />
+            {item.label}
+          </span>
+          <span className={`transition-transform duration-200 ${isOpen ? '' : 'rotate-180'}`}>
+            <AdminIcon name="arrow-up" size={12} />
+          </span>
+        </button>
+        {isOpen && (
+          <ul id={groupId} className="mt-0.5 flex flex-col gap-0.5 pl-7">
+            {item.children.map((child) => {
+              const isActive = isActiveAdminLink(pathname, child.href);
+              return (
+                <li key={child.href}>
+                  <Link
+                    href={child.href}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`flex h-7 items-center rounded-md px-2 text-xs outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40 ${
+                      isActive ? 'bg-white font-semibold text-[#1f2937] shadow-sm' : 'text-[#4b5563] hover:bg-white/70 hover:text-[#1f2937]'
+                    }`}
+                  >
+                    {child.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <aside className="flex h-full w-full flex-col border-r border-[#e5e7eb] bg-[#f8f8f8]" aria-label="Admin">
+      <div className="flex items-center justify-between border-b border-[#e5e7eb]/60 px-3.5 py-3.5">
+        <Link href="/admin" className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40">
+          <img src="/admin/logo.svg" alt="" width={24} height={24} />
+          <span className="flex flex-col">
+            <span className="text-[15px] font-bold leading-none tracking-tight text-[#1f2937]">SHOP.CO</span>
+            <span className="mt-0.5 text-xs leading-tight text-[#6b7280]">Store admin</span>
+          </span>
+        </Link>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={closeLabel}
+          className="-m-1 rounded-md p-1 outline-none transition-colors hover:bg-black/[0.05] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
+        >
+          <AdminIcon name="sidebar-right" size={16} />
+        </button>
+      </div>
+
+      <nav className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 py-3.5" aria-label="Admin sections">
+        {ADMIN_NAV.map((section) => (
+          <div key={section.title} className="flex flex-col gap-1.5">
+            <p className="px-1 text-[11px] font-bold uppercase tracking-wider text-[#6b7280]">{section.title}</p>
+            <div className="flex flex-col gap-0.5">{section.items.map(renderItem)}</div>
+          </div>
+        ))}
+      </nav>
+
+      <div className="flex items-center justify-between gap-2 border-t border-[#e5e7eb] px-3 py-3">
+        <Link href="/admin/account" className="flex min-w-0 items-center gap-2.5 rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#111827] text-xs font-bold uppercase text-white" aria-hidden="true">
+            {(admin.full_name || admin.email).trim().charAt(0)}
+          </span>
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate text-xs font-semibold text-[#1f2937]">{admin.full_name || 'Administrator'}</span>
+            <span className="truncate text-xs text-[#6b7280]">{admin.email}</span>
+          </span>
+        </Link>
+        <button
+          type="button"
+          onClick={async () => {
+            setSigningOut(true);
+            await signOut();
+          }}
+          disabled={signingOut}
+          aria-label="Sign out"
+          title="Sign out"
+          className="shrink-0 rounded-md p-1.5 text-[#6b7280] outline-none transition-colors hover:bg-black/[0.05] hover:text-[#1f2937] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40 disabled:opacity-50"
+        >
+          <LogOut className="size-4" aria-hidden="true" />
+        </button>
+      </div>
+    </aside>
+  );
+}

@@ -1,365 +1,346 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Plus, X, RefreshCw } from 'lucide-react';
+import React, { useState } from 'react';
+import { Plus } from 'lucide-react';
 import {
-  apiAdminGetPromotions,
-  apiAdminCreatePromotion,
-  apiAdminUpdatePromotion,
-  apiAdminDeletePromotion,
-} from '@/lib/api-client';
-import { AdminIcon } from './AdminIcon';
+  adminDeletePromotion,
+  adminGetPromotions,
+  adminSavePromotion,
+  errorMessage,
+  fieldErrors,
+  type Promotion,
+  type PromotionInput,
+} from '@/lib/admin-api';
+import { formatDate } from '@/lib/admin-format';
+import type { StatusTone } from '@/lib/order-status';
+import {
+  Button,
+  Checkbox,
+  DataState,
+  Field,
+  Modal,
+  PageHeader,
+  Panel,
+  StatusPill,
+  Table,
+  TextInput,
+  redirectIfSignedOut,
+  useAdminData,
+  useConfirm,
+  useToast,
+} from '@/components/admin/ui';
 
-export const AdminPromotions: React.FC = () => {
-  const [promotions, setPromotions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+function toTime(value: string | null): number | null {
+  if (!value) return null;
+  const t = new Date(value.replace(' ', 'T')).getTime();
+  return Number.isNaN(t) ? null : t;
+}
 
-  // Form state
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [code, setCode] = useState('');
-  const [description, setDescription] = useState('');
-  const [discountPercent, setDiscountPercent] = useState<number>(10);
-  const [maxUses, setMaxUses] = useState<number>(500);
-  const [isActive, setIsActive] = useState<boolean>(true);
-  const [expiresAt, setExpiresAt] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
+/** Whether a customer could use the code right now, and why not. */
+function promotionState(p: Promotion): { label: string; tone: StatusTone } {
+  const now = Date.now();
+  const starts = toTime(p.starts_at);
+  const ends = toTime(p.expires_at);
+  if (!p.is_active) return { label: 'Paused', tone: 'neutral' };
+  if (ends !== null && ends < now) return { label: 'Expired', tone: 'neutral' };
+  if (p.max_uses > 0 && p.used_count >= p.max_uses) return { label: 'Used up', tone: 'neutral' };
+  if (starts !== null && starts > now) return { label: 'Scheduled', tone: 'blue' };
+  return { label: 'Live', tone: 'green' };
+}
 
-  const fetchPromotions = async () => {
-    setLoading(true);
+/** 'YYYY-MM-DD HH:MM:SS' → 'YYYY-MM-DD' for date inputs. */
+function dateOnly(value: string | null): string {
+  return value ? value.slice(0, 10) : '';
+}
+
+interface FormState {
+  code: string;
+  description: string;
+  discount_percent: string;
+  max_uses: string;
+  starts_at: string;
+  expires_at: string;
+  is_active: boolean;
+}
+
+const EMPTY_FORM: FormState = {
+  code: '',
+  description: '',
+  discount_percent: '10',
+  max_uses: '0',
+  starts_at: '',
+  expires_at: '',
+  is_active: true,
+};
+
+export function AdminPromotions() {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const { data, loading, error, reload } = useAdminData(() => adminGetPromotions(), []);
+  const [editing, setEditing] = useState<Promotion | 'new' | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const promotions = data ?? [];
+
+  const toInput = (p: Promotion, changes: Partial<PromotionInput> = {}): PromotionInput => ({
+    code: p.code,
+    description: p.description,
+    discount_percent: p.discount_percent,
+    max_uses: p.max_uses,
+    is_active: p.is_active,
+    starts_at: dateOnly(p.starts_at) || null,
+    expires_at: dateOnly(p.expires_at) || null,
+    ...changes,
+  });
+
+  const toggleActive = async (p: Promotion) => {
+    setBusyId(p.id);
     try {
-      const res = await apiAdminGetPromotions();
-      const list = Array.isArray(res) ? res : (res as any)?.items || (res as any)?.data || [];
-      setPromotions(list);
-    } catch (err: any) {
-      console.error(err);
+      await adminSavePromotion(p.id, toInput(p, { is_active: !p.is_active }));
+      toast.success(p.is_active ? `${p.code} paused.` : `${p.code} switched on.`);
+      reload();
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      toast.error(errorMessage(err, 'Could not update this code.'));
     } finally {
-      setLoading(false);
+      setBusyId(null);
     }
   };
 
-  useEffect(() => {
-    fetchPromotions();
-  }, []);
-
-  const resetForm = () => {
-    setEditingId(null);
-    setCode('');
-    setDescription('');
-    setDiscountPercent(10);
-    setMaxUses(500);
-    setIsActive(true);
-    setExpiresAt('');
-    setError(null);
-  };
-
-  const handleOpenEdit = (p: any) => {
-    setEditingId(p.id);
-    setCode(p.code);
-    setDescription(p.description);
-    setDiscountPercent(p.discount_percent);
-    setMaxUses(p.max_uses);
-    setIsActive(Boolean(p.is_active));
-    setExpiresAt(p.expires_at ? p.expires_at.slice(0, 10) : '');
-    setIsModalOpen(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!code.trim() || discountPercent <= 0 || discountPercent > 100) {
-      setError('Please provide a valid code and discount between 1% and 100%.');
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
+  const remove = async (p: Promotion) => {
+    const used = p.used_count > 0;
+    const ok = await confirm({
+      title: `Delete ${p.code}?`,
+      message: used
+        ? 'This code has been used on orders, so it will be switched off instead of deleted (order history keeps it).'
+        : 'Customers will no longer be able to use this code.',
+      confirmLabel: used ? 'Switch off' : 'Delete code',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setBusyId(p.id);
     try {
-      if (editingId) {
-        await apiAdminUpdatePromotion(editingId, {
-          code: code.trim().toUpperCase(),
-          description: description.trim(),
-          discount_percent: discountPercent,
-          max_uses: maxUses,
-          is_active: isActive ? 1 : 0,
-          expires_at: expiresAt || null,
-        });
-        setFeedback(`Promotion ${code} updated successfully.`);
-      } else {
-        await apiAdminCreatePromotion({
-          code: code.trim().toUpperCase(),
-          description: description.trim(),
-          discount_percent: discountPercent,
-          max_uses: maxUses,
-          is_active: isActive ? 1 : 0,
-          expires_at: expiresAt || null,
-        });
-        setFeedback(`Promotion ${code} created successfully.`);
-      }
-      setIsModalOpen(false);
-      resetForm();
-      fetchPromotions();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to save promotion.');
+      const res = await adminDeletePromotion(p.id);
+      toast.success(res.message || 'Promotion deleted.');
+      reload();
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      toast.error(errorMessage(err, 'Could not delete this code.'));
     } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleDelete = async (id: number, promoCode: string) => {
-    if (!confirm(`Are you sure you want to permanently delete coupon ${promoCode}?`)) return;
-    try {
-      await apiAdminDeletePromotion(id);
-      setFeedback(`Coupon ${promoCode} deleted.`);
-      fetchPromotions();
-    } catch (err: any) {
-      alert(err?.message || 'Failed to delete coupon');
+      setBusyId(null);
     }
   };
 
   return (
-    <div className="flex w-full flex-col gap-6">
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e5e7eb] pb-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#111827]">
-            Promotions & Coupons
-          </h1>
-          <p className="text-xs text-[#6b7280]">
-            Manage promotional discount codes, validity windows, and checkout redemption limits.
-          </p>
-        </div>
+    <div>
+      <PageHeader
+        title="Promo codes"
+        description="Percentage discounts customers enter at checkout. The server checks dates, limits and status on every order."
+        actions={
+          <Button variant="primary" onClick={() => setEditing('new')}>
+            <Plus className="size-4" aria-hidden="true" />
+            New code
+          </Button>
+        }
+      />
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchPromotions}
-            className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-medium text-[#374151] shadow-xs hover:bg-[#f9fafb]"
-          >
-            <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
-          </button>
-          <button
-            onClick={() => {
-              resetForm();
-              setIsModalOpen(true);
-            }}
-            className="flex items-center gap-1.5 rounded-lg bg-black px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-neutral-800"
-          >
-            <Plus className="size-3.5" />
-            <span>Add Coupon</span>
-          </button>
-        </div>
-      </div>
-
-      {feedback && (
-        <div className="flex items-center justify-between rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800">
-          <span>{feedback}</span>
-          <button onClick={() => setFeedback(null)} className="p-0.5 hover:opacity-75" aria-label="Dismiss">
-            <X className="size-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Promotions Table */}
-      <div className="overflow-x-auto rounded-xl border border-[#e5e7eb] bg-white shadow-sm">
-        <table className="w-full text-left text-xs">
-          <thead className="border-b border-[#f3f4f6] bg-[#fafafa] text-[11px] font-semibold uppercase tracking-wider text-[#9ca3af]">
-            <tr>
-              <th className="px-4 py-3">Coupon Code</th>
-              <th className="px-4 py-3">Description</th>
-              <th className="px-4 py-3">Discount</th>
-              <th className="px-4 py-3">Usage (Used / Max)</th>
-              <th className="px-4 py-3">Expires At</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#f9fafb]">
-            {loading ? (
+      <Panel>
+        <DataState
+          loading={loading}
+          error={error}
+          onRetry={reload}
+          hasData={!!data}
+          empty={promotions.length === 0}
+          emptyTitle="No promo codes yet"
+          emptyDescription="Create a code to offer a percentage off at checkout."
+        >
+          <Table minWidth={900}>
+            <thead>
               <tr>
-                <td colSpan={7} className="py-12 text-center text-xs text-[#6b7280]">
-                  Loading promotional codes...
-                </td>
+                <th scope="col">Code</th>
+                <th scope="col">Discount</th>
+                <th scope="col">Uses</th>
+                <th scope="col">Runs</th>
+                <th scope="col">Status</th>
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
-            ) : promotions.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="py-12 text-center text-xs text-[#9ca3af]">
-                  No promotional coupons created yet.
-                </td>
-              </tr>
-            ) : (
-              promotions.map((p) => (
-                <tr key={p.id} className="transition-colors hover:bg-[#fbfbfb]">
-                  <td className="px-4 py-3 font-mono font-bold text-[#111827]">{p.code}</td>
-                  <td className="px-4 py-3 text-[#4b5563]">{p.description}</td>
-                  <td className="px-4 py-3 font-bold text-emerald-700">
-                    {p.discount_percent}% OFF
-                  </td>
-                  <td className="px-4 py-3 text-[#374151]">
-                    {p.used_count || 0} / {p.max_uses}
-                  </td>
-                  <td className="px-4 py-3 text-[#6b7280]">
-                    {p.expires_at ? p.expires_at.slice(0, 10) : 'Never'}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium border ${
-                        p.is_active
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200/60'
-                          : 'bg-neutral-50 text-neutral-600 border-neutral-200/60'
-                      }`}
-                    >
-                      <span
-                        className={`size-1.5 rounded-full shrink-0 ${
-                          p.is_active ? 'bg-emerald-600' : 'bg-neutral-400'
-                        }`}
-                      />
-                      <span>{p.is_active ? 'Active' : 'Disabled'}</span>
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => handleOpenEdit(p)}
-                        className="inline-flex items-center justify-center h-7 px-2.5 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 text-xs font-medium text-neutral-700 shadow-xs transition-colors"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(p.id, p.code)}
-                        className="inline-flex items-center justify-center h-7 px-2.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {promotions.map((p) => {
+                const state = promotionState(p);
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <span className="block font-mono text-[13px] font-semibold text-[#111827]">{p.code}</span>
+                      {p.description && <span className="block max-w-[280px] truncate text-xs text-[#6b7280]">{p.description}</span>}
+                    </td>
+                    <td className="tabular-nums">{p.discount_percent}% off</td>
+                    <td className="whitespace-nowrap tabular-nums">
+                      {p.used_count} / {p.max_uses > 0 ? p.max_uses : 'Unlimited'}
+                    </td>
+                    <td className="whitespace-nowrap text-xs text-[#374151]">
+                      <span className="block">From {p.starts_at ? formatDate(p.starts_at) : 'creation'}</span>
+                      <span className="block">Until {p.expires_at ? `end of ${formatDate(p.expires_at)}` : 'no end date'}</span>
+                    </td>
+                    <td>
+                      <StatusPill {...state} />
+                    </td>
+                    <td>
+                      <div className="flex justify-end gap-1.5">
+                        <Button size="sm" variant="ghost" disabled={busyId === p.id} onClick={() => setEditing(p)}>
+                          Edit
+                        </Button>
+                        <Button size="sm" loading={busyId === p.id} onClick={() => toggleActive(p)}>
+                          {p.is_active ? 'Pause' : 'Switch on'}
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-red-700" disabled={busyId === p.id} onClick={() => remove(p)}>
+                          Delete
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </DataState>
+      </Panel>
 
-      {/* Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl animate-fade">
-            <div className="flex items-center justify-between border-b border-[#e5e7eb] pb-3">
-              <h3 className="text-base font-bold text-[#111827]">
-                {editingId ? 'Edit Promotion' : 'Create New Promotion'}
-              </h3>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="rounded-lg p-1 text-[#9ca3af] hover:bg-[#f3f4f6] hover:text-black"
-                aria-label="Close dialog"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-4">
-              {error && (
-                <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-800">{error}</div>
-              )}
-
-              <div>
-                <label className="block text-xs font-semibold text-[#374151]">
-                  Coupon Code (uppercase)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. FLASH30"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  required
-                  className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 font-mono text-sm font-bold uppercase outline-none focus:border-black"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#374151]">Description</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 30% off weekend flash deals"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  required
-                  className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs outline-none focus:border-black"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-[#374151]">Discount (%)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={discountPercent}
-                    onChange={(e) => setDiscountPercent(parseInt(e.target.value, 10) || 10)}
-                    required
-                    className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs font-semibold outline-none focus:border-black"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#374151]">Max Uses</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={maxUses}
-                    onChange={(e) => setMaxUses(parseInt(e.target.value, 10) || 100)}
-                    required
-                    className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs outline-none focus:border-black"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#374151]">
-                  Expiration Date (optional)
-                </label>
-                <input
-                  type="date"
-                  value={expiresAt}
-                  onChange={(e) => setExpiresAt(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs outline-none focus:border-black"
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="promoActive"
-                  checked={isActive}
-                  onChange={(e) => setIsActive(e.target.checked)}
-                  className="size-4 rounded border-gray-300 text-black focus:ring-black"
-                />
-                <label htmlFor="promoActive" className="text-xs font-semibold text-[#374151]">
-                  Enable this promotion immediately
-                </label>
-              </div>
-
-              <div className="mt-2 flex items-center justify-end gap-2 border-t border-[#e5e7eb] pt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="rounded-lg border border-[#e5e7eb] px-4 py-2 text-xs font-medium text-[#4b5563] hover:bg-[#f9fafb]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-lg bg-black px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800 disabled:opacity-50"
-                >
-                  {submitting ? 'Saving...' : editingId ? 'Update Promotion' : 'Create Promotion'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <PromotionModal
+        promotion={editing}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          setEditing(null);
+          reload();
+        }}
+      />
     </div>
   );
-};
+}
+
+function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion | 'new' | null; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const existing = promotion && promotion !== 'new' ? promotion : null;
+
+  React.useEffect(() => {
+    setErrors({});
+    if (!promotion) return;
+    setForm(
+      promotion === 'new'
+        ? EMPTY_FORM
+        : {
+            code: promotion.code,
+            description: promotion.description ?? '',
+            discount_percent: String(promotion.discount_percent),
+            max_uses: String(promotion.max_uses),
+            starts_at: dateOnly(promotion.starts_at),
+            expires_at: dateOnly(promotion.expires_at),
+            is_active: promotion.is_active,
+          }
+    );
+  }, [promotion]);
+
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = form.code.trim().toUpperCase();
+    const percent = parseInt(form.discount_percent, 10);
+    const maxUses = parseInt(form.max_uses || '0', 10);
+    const local: Record<string, string> = {};
+    if (!/^[A-Z0-9_-]{3,30}$/.test(code)) local.code = 'Use 3-30 letters, numbers, dashes or underscores.';
+    if (!Number.isFinite(percent) || percent < 1 || percent > 90) local.discount_percent = 'Discount must be between 1% and 90%.';
+    if (!Number.isFinite(maxUses) || maxUses < 0) local.max_uses = 'Use 0 for unlimited, or a positive limit.';
+    if (form.starts_at && form.expires_at && form.expires_at < form.starts_at) local.expires_at = 'The end date must be on or after the start date.';
+    setErrors(local);
+    if (Object.keys(local).length) return;
+
+    setSaving(true);
+    try {
+      await adminSavePromotion(existing?.id ?? null, {
+        code,
+        description: form.description.trim(),
+        discount_percent: percent,
+        max_uses: maxUses,
+        is_active: form.is_active,
+        starts_at: form.starts_at || null,
+        expires_at: form.expires_at || null,
+      });
+      toast.success(existing ? `${code} updated.` : `${code} created.`);
+      onSaved();
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      const fields = fieldErrors(err);
+      setErrors(fields);
+      if (!Object.keys(fields).length) toast.error(errorMessage(err, 'Could not save this code.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={!!promotion}
+      onClose={onClose}
+      busy={saving}
+      title={existing ? `Edit ${existing.code}` : 'New promo code'}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" form="promotion-form" variant="primary" loading={saving}>
+            {existing ? 'Save changes' : 'Create code'}
+          </Button>
+        </>
+      }
+    >
+      <form id="promotion-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2" noValidate>
+        <Field label="Code" required error={errors.code} hint="What customers type at checkout.">
+          {(p) => (
+            <TextInput
+              {...p}
+              data-autofocus
+              value={form.code}
+              onChange={(e) => set('code', e.target.value.toUpperCase())}
+              className="font-mono uppercase"
+              maxLength={30}
+              autoComplete="off"
+            />
+          )}
+        </Field>
+        <Field label="Discount (%)" required error={errors.discount_percent} hint="1% to 90%.">
+          {(p) => (
+            <TextInput {...p} type="number" min={1} max={90} step={1} value={form.discount_percent} onChange={(e) => set('discount_percent', e.target.value)} />
+          )}
+        </Field>
+        <Field label="Description" error={errors.description} className="sm:col-span-2" hint="Shown to customers when the code is applied.">
+          {(p) => <TextInput {...p} value={form.description} onChange={(e) => set('description', e.target.value)} maxLength={255} />}
+        </Field>
+        <Field label="Maximum uses" error={errors.max_uses} hint="0 means unlimited.">
+          {(p) => <TextInput {...p} type="number" min={0} step={1} value={form.max_uses} onChange={(e) => set('max_uses', e.target.value)} />}
+        </Field>
+        <div className="hidden sm:block" aria-hidden="true" />
+        <Field label="Start date" error={errors.starts_at} hint="Leave empty to start now.">
+          {(p) => <TextInput {...p} type="date" value={form.starts_at} onChange={(e) => set('starts_at', e.target.value)} />}
+        </Field>
+        <Field label="End date" error={errors.expires_at} hint="The code works until the end of this day. Leave empty for no end.">
+          {(p) => <TextInput {...p} type="date" value={form.expires_at} min={form.starts_at || undefined} onChange={(e) => set('expires_at', e.target.value)} />}
+        </Field>
+        <div className="sm:col-span-2">
+          <Checkbox label="Active" hint="Paused codes are refused at checkout." checked={form.is_active} onChange={(v) => set('is_active', v)} />
+        </div>
+        {existing && existing.used_count > 0 && (
+          <p className="text-xs text-[#6b7280] sm:col-span-2">
+            Used {existing.used_count} time{existing.used_count === 1 ? '' : 's'}. Changing the discount only affects new orders.
+          </p>
+        )}
+      </form>
+    </Modal>
+  );
+}

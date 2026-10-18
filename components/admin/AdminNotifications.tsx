@@ -1,180 +1,150 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { RefreshCw, X } from 'lucide-react';
-import { apiAdminGetOutbox, apiAdminRetryOutbox } from '@/lib/api-client';
-import { AdminIcon } from './AdminIcon';
+import React, { useState } from 'react';
+import { RefreshCw, RotateCcw } from 'lucide-react';
+import { adminGetOutbox, adminRetryOutbox, errorMessage, OutboxRow } from '@/lib/admin-api';
+import { formatDateTime, formatRelative, humanize } from '@/lib/admin-format';
+import {
+  Button,
+  DataState,
+  FilterSelect,
+  PageHeader,
+  Pagination,
+  Panel,
+  StatusPill,
+  Table,
+  Toolbar,
+  redirectIfSignedOut,
+  useAdminData,
+  useToast,
+  useUrlFilters,
+} from '@/components/admin/ui';
 
-export const AdminNotifications: React.FC = () => {
-  const [outbox, setOutbox] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [retryingId, setRetryingId] = useState<number | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
+const STATUS_OPTIONS = [
+  { value: 'all', label: 'All emails' },
+  { value: 'pending', label: 'Waiting to send' },
+  { value: 'sent', label: 'Sent' },
+  { value: 'failed', label: 'Failed' },
+];
 
-  const fetchOutbox = async () => {
-    setLoading(true);
+const STATUS_PILL: Record<OutboxRow['status'], { label: string; tone: 'amber' | 'green' | 'red' }> = {
+  pending: { label: 'Waiting', tone: 'amber' },
+  sent: { label: 'Sent', tone: 'green' },
+  failed: { label: 'Failed', tone: 'red' },
+};
+
+/** Every email the store has queued: order confirmations, shipping updates, sign-in links, newsletters. */
+export function AdminNotifications() {
+  const toast = useToast();
+  const [filters, setFilters] = useUrlFilters({ status: 'all', page: '1' });
+  const page = Math.max(1, parseInt(filters.page, 10) || 1);
+  const { data, loading, error, reload } = useAdminData(
+    () => adminGetOutbox({ status: filters.status, page, per_page: 25 }),
+    [filters.status, page]
+  );
+  const [retrying, setRetrying] = useState<number | null>(null);
+
+  const retry = async (row: OutboxRow) => {
+    setRetrying(row.id);
     try {
-      const res = await apiAdminGetOutbox(statusFilter);
-      const list = Array.isArray(res) ? res : (res as any)?.items || (res as any)?.data || [];
-      setOutbox(list);
-    } catch (err: any) {
-      console.error(err);
+      await adminRetryOutbox(row.id);
+      toast.success(`Email to ${row.recipient_email} re-sent.`);
+      await reload();
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      toast.error(errorMessage(err, 'The email could not be re-sent.'));
     } finally {
-      setLoading(false);
+      setRetrying(null);
     }
   };
 
-  useEffect(() => {
-    fetchOutbox();
-  }, [statusFilter]);
-
-  const handleRetry = async (id: number) => {
-    setRetryingId(id);
-    try {
-      await apiAdminRetryOutbox(id);
-      setFeedback(`Notification #${id} dispatched successfully.`);
-      fetchOutbox();
-    } catch (err: any) {
-      alert(err?.message || 'Failed to dispatch email');
-    } finally {
-      setRetryingId(null);
-    }
-  };
+  const rows = data?.items ?? [];
 
   return (
-    <div className="flex w-full flex-col gap-6">
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e5e7eb] pb-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#111827]">
-            Notifications &amp; Email Outbox
-          </h1>
-          <p className="text-xs text-[#6b7280]">
-            Review transactional order receipts, shipment notifications, marketing broadcasts, and retry delivery.
-          </p>
-        </div>
+    <div className="flex w-full flex-col">
+      <PageHeader
+        title="Email outbox"
+        description="Every email the store has queued. Message bodies are not shown here because they can contain customer details."
+        actions={
+          <Button onClick={reload} loading={loading && !!data}>
+            <RefreshCw className="size-3.5" aria-hidden="true" />
+            Refresh
+          </Button>
+        }
+      />
+      <Toolbar>
+        <FilterSelect label="Status" value={filters.status} onChange={(v) => setFilters({ status: v })} options={STATUS_OPTIONS} />
+      </Toolbar>
 
-        <button
-          onClick={fetchOutbox}
-          className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-medium text-[#374151] shadow-xs hover:bg-[#f9fafb]"
+      <Panel>
+        <DataState
+          loading={loading}
+          error={error}
+          onRetry={reload}
+          hasData={!!data}
+          empty={rows.length === 0}
+          emptyTitle={filters.status === 'all' ? 'No emails yet' : `No ${STATUS_OPTIONS.find((o) => o.value === filters.status)?.label.toLowerCase()} emails`}
         >
-          <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Refresh Outbox</span>
-        </button>
-      </div>
-
-      {feedback && (
-        <div className="flex items-center justify-between rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800">
-          <span>{feedback}</span>
-          <button onClick={() => setFeedback(null)} className="p-0.5 hover:opacity-75" aria-label="Dismiss">
-            <X className="size-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Filter */}
-      <div className="flex items-center gap-2">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="h-8 rounded-lg border border-[#e5e7eb] bg-white px-2.5 text-xs text-[#374151] outline-none"
-        >
-          <option value="all">All Delivery States</option>
-          <option value="pending">Pending Queue</option>
-          <option value="sent">Sent Successfully</option>
-          <option value="failed">Failed Delivery</option>
-        </select>
-        <span className="text-xs text-[#6b7280]">
-          Total Emails: <strong>{outbox.length}</strong>
-        </span>
-      </div>
-
-      {/* Outbox Table */}
-      <div className="overflow-x-auto rounded-xl border border-[#e5e7eb] bg-white shadow-sm">
-        <table className="w-full text-left text-xs">
-          <thead className="border-b border-[#f3f4f6] bg-[#fafafa] text-[11px] font-semibold uppercase tracking-wider text-[#9ca3af]">
-            <tr>
-              <th className="px-4 py-3">Recipient</th>
-              <th className="px-4 py-3">Subject</th>
-              <th className="px-4 py-3">Template</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Attempts</th>
-              <th className="px-4 py-3">Sent / Queued At</th>
-              <th className="px-4 py-3 text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#f9fafb]">
-            {loading ? (
+          <Table minWidth={900}>
+            <thead>
               <tr>
-                <td colSpan={7} className="py-12 text-center text-xs text-[#6b7280]">
-                  Loading email outbox queue...
-                </td>
+                <th scope="col">Recipient</th>
+                <th scope="col">Subject</th>
+                <th scope="col">Type</th>
+                <th scope="col">Status</th>
+                <th scope="col" className="text-right">Attempts</th>
+                <th scope="col">Queued</th>
+                <th scope="col">Sent</th>
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
-            ) : outbox.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="py-12 text-center text-xs text-[#9ca3af]">
-                  No outbound email notifications found.
-                </td>
-              </tr>
-            ) : (
-              outbox.map((mail) => (
-                <tr key={mail.id} className="transition-colors hover:bg-[#fbfbfb]">
-                  <td className="px-4 py-3 font-semibold text-[#111827]">
-                    {mail.recipient_email}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-[#374151]">{mail.subject}</td>
-                  <td className="px-4 py-3 text-[#6b7280]">
-                    <span className="rounded bg-neutral-100 px-2 py-0.5 font-mono text-[10px]">
-                      {mail.template}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium border capitalize ${
-                        mail.status === 'sent'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200/60'
-                          : mail.status === 'pending'
-                          ? 'bg-amber-50 text-amber-700 border-amber-200/60'
-                          : 'bg-rose-50 text-rose-700 border-rose-200/60'
-                      }`}
-                    >
-                      <span
-                        className={`size-1.5 rounded-full shrink-0 ${
-                          mail.status === 'sent'
-                            ? 'bg-emerald-600'
-                            : mail.status === 'pending'
-                            ? 'bg-amber-500'
-                            : 'bg-rose-600'
-                        }`}
-                      />
-                      <span>{mail.status}</span>
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-[#4b5563]">{mail.attempt_count}</td>
-                  <td className="px-4 py-3 text-[#6b7280]">
-                    {mail.sent_at || mail.created_at || '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
-                    {mail.status !== 'sent' && (
-                      <button
-                        onClick={() => handleRetry(mail.id)}
-                        disabled={retryingId === mail.id}
-                        title="Retry outbound email dispatch immediately"
-                        aria-label="Dispatch Email"
-                        className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg bg-neutral-900 hover:bg-black text-white text-xs font-medium transition-all shadow-xs disabled:opacity-50"
-                      >
-                        <AdminIcon name="zap" size={12} className="brightness-200" />
-                        <span>{retryingId === mail.id ? 'Sending...' : 'Dispatch'}</span>
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const s = STATUS_PILL[row.status] ?? { label: humanize(row.status), tone: 'amber' as const };
+                return (
+                  <tr key={row.id}>
+                    <td className="max-w-[220px]">
+                      <span className="block truncate" title={row.recipient_email}>
+                        {row.recipient_email}
+                      </span>
+                    </td>
+                    <td className="max-w-[260px]">
+                      <span className="block truncate" title={row.subject}>
+                        {row.subject}
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap text-xs text-[#374151]">{humanize(row.template)}</td>
+                    <td>
+                      <StatusPill label={s.label} tone={s.tone} />
+                      {row.last_error && (
+                        <span className="mt-1 block max-w-[240px] truncate text-xs text-red-700" title={row.last_error}>
+                          {row.last_error}
+                        </span>
+                      )}
+                    </td>
+                    <td className="text-right tabular-nums">{row.attempt_count ?? 0}</td>
+                    <td className="whitespace-nowrap text-xs text-[#6b7280]" title={formatDateTime(row.created_at)}>
+                      {formatRelative(row.created_at)}
+                    </td>
+                    <td className="whitespace-nowrap text-xs text-[#6b7280]">{row.sent_at ? formatDateTime(row.sent_at) : '—'}</td>
+                    <td className="text-right">
+                      {row.status === 'failed' && (
+                        <Button size="sm" onClick={() => retry(row)} loading={retrying === row.id} disabled={retrying !== null && retrying !== row.id}>
+                          <RotateCcw className="size-3.5" aria-hidden="true" />
+                          Retry
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+          <Pagination meta={data?.pagination} onPage={(p) => setFilters({ page: String(p) })} />
+        </DataState>
+      </Panel>
     </div>
   );
-};
+}

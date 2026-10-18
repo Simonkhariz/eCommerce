@@ -40,6 +40,33 @@ class CategoryRepository
         return $rows;
     }
 
+    /**
+     * Every category, active or not, with total and published product counts (admin list).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getAllForAdmin(): array
+    {
+        $rows = $this->db->fetchAll(
+            "SELECT c.id, c.name, c.slug, c.description, c.image_url, c.display_order, c.is_active,
+                    COUNT(p.id) AS product_count,
+                    COALESCE(SUM(p.status = 'published'), 0) AS published_count
+             FROM categories c
+             LEFT JOIN products p ON p.category_id = c.id
+             GROUP BY c.id
+             ORDER BY c.is_active DESC, c.display_order ASC, c.name ASC"
+        );
+        foreach ($rows as &$row) {
+            $row['id'] = (int) $row['id'];
+            $row['display_order'] = (int) $row['display_order'];
+            $row['is_active'] = (bool) $row['is_active'];
+            $row['product_count'] = (int) $row['product_count'];
+            $row['published_count'] = (int) $row['published_count'];
+        }
+        unset($row);
+        return $rows;
+    }
+
     public function findById(int $id): ?array
     {
         return $this->db->fetchOne("SELECT * FROM categories WHERE id = ? LIMIT 1", "i", [$id]);

@@ -5,9 +5,26 @@
 // API's HTTP-only SameSite session cookies just work and no token is exposed to JavaScript.
 const BACKEND_ORIGIN = (process.env.BACKEND_ORIGIN || 'http://127.0.0.1:8000').replace(/\/$/, '');
 
+// Links from the old single-page admin (/admin?tab=orders) go to the real routes.
+const LEGACY_ADMIN_TABS = {
+  orders: 'orders', shipping: 'shipping', products: 'products', categories: 'categories',
+  inventory: 'inventory', customers: 'customers', payments: 'payments', refunds: 'refunds',
+  promotions: 'promotions', marketing: 'marketing', storefront: 'storefront', analytics: 'analytics',
+  notifications: 'notifications', 'audit-logs': 'audit-logs', settings: 'settings',
+  'system-status': 'system', account: 'account',
+};
+
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  async redirects() {
+    return Object.entries(LEGACY_ADMIN_TABS).map(([tab, route]) => ({
+      source: '/admin',
+      has: [{ type: 'query', key: 'tab', value: tab }],
+      destination: `/admin/${route}`,
+      permanent: false,
+    }));
+  },
   async rewrites() {
     return [
       { source: '/api/v1/:path*', destination: `${BACKEND_ORIGIN}/api/v1/:path*` },

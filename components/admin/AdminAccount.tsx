@@ -1,216 +1,165 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
-import { apiAdminGetAccount, apiAdminUpdateAccount } from '@/lib/api-client';
+import React, { useEffect, useState } from 'react';
+import { adminGetAccount, adminUpdateAccount, errorMessage, fieldErrors } from '@/lib/admin-api';
+import { formatDate, humanize } from '@/lib/admin-format';
+import {
+  Button,
+  DataState,
+  DetailList,
+  Field,
+  PageHeader,
+  Panel,
+  TextInput,
+  redirectIfSignedOut,
+  useAdminData,
+  useToast,
+} from '@/components/admin/ui';
 
-export const AdminAccount: React.FC = () => {
-  const [account, setAccount] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+const MIN_PASSWORD = 10;
 
-  // Form Fields
+/**
+ * The signed-in administrator's profile and password.
+ * Changing the password signs out every other admin session.
+ */
+export function AdminAccount() {
+  const toast = useToast();
+  const { data: account, loading, error, reload } = useAdminData(() => adminGetAccount(), []);
+
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [profileErrors, setProfileErrors] = useState<Record<string, string>>({});
+  const [savingProfile, setSavingProfile] = useState(false);
+
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordErrors, setPasswordErrors] = useState<Record<string, string>>({});
+  const [savingPassword, setSavingPassword] = useState(false);
 
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  useEffect(() => {
+    if (!account) return;
+    setFullName(account.full_name ?? '');
+    setPhone(account.phone ?? '');
+  }, [account]);
 
-  const fetchAccount = async () => {
-    setLoading(true);
+  const profileChanged = !!account && (fullName.trim() !== (account.full_name ?? '') || phone.trim() !== (account.phone ?? ''));
+
+  const handleProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fullName.trim()) {
+      setProfileErrors({ full_name: 'Name cannot be empty.' });
+      return;
+    }
+    setSavingProfile(true);
+    setProfileErrors({});
     try {
-      const res = await apiAdminGetAccount();
-      const u = res?.data ?? res ?? {};
-      setAccount(u);
-      setFullName(u.full_name || '');
-      setPhone(u.phone || '');
-    } catch (err: any) {
-      console.error(err);
+      const res = await adminUpdateAccount({ full_name: fullName.trim(), phone: phone.trim() });
+      toast.success(res.message || 'Profile updated.');
+      reload();
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      const fields = fieldErrors(err);
+      setProfileErrors(fields);
+      if (Object.keys(fields).length === 0) toast.error(errorMessage(err));
     } finally {
-      setLoading(false);
+      setSavingProfile(false);
     }
   };
 
-  useEffect(() => {
-    fetchAccount();
-  }, []);
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handlePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setFeedback(null);
+    if (!account) return;
+    const local: Record<string, string> = {};
+    if (!currentPassword) local.current_password = 'Enter your current password.';
+    if (newPassword.length < MIN_PASSWORD) local.new_password = `Use at least ${MIN_PASSWORD} characters.`;
+    if (newPassword !== confirmPassword) local.confirm_password = 'The passwords do not match.';
+    setPasswordErrors(local);
+    if (Object.keys(local).length > 0) return;
 
-    if (newPassword && newPassword !== confirmPassword) {
-      setError('New passwords do not match.');
-      return;
-    }
-
-    if (newPassword && newPassword.length < 8) {
-      setError('New password must be at least 8 characters long.');
-      return;
-    }
-
-    setSaving(true);
+    setSavingPassword(true);
     try {
-      await apiAdminUpdateAccount({
-        full_name: fullName.trim(),
-        phone: phone.trim(),
-        ...(newPassword
-          ? { current_password: currentPassword, new_password: newPassword }
-          : {}),
+      // The endpoint updates the profile too, so send the saved profile unchanged.
+      const res = await adminUpdateAccount({
+        full_name: account.full_name,
+        phone: account.phone ?? '',
+        current_password: currentPassword,
+        new_password: newPassword,
       });
-      setFeedback('Admin account profile and credentials updated successfully.');
+      toast.success(res.message || 'Password changed.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      fetchAccount();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to update admin account.');
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      const fields = fieldErrors(err);
+      setPasswordErrors(fields);
+      if (Object.keys(fields).length === 0) toast.error(errorMessage(err));
     } finally {
-      setSaving(false);
+      setSavingPassword(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex h-96 w-full flex-col items-center justify-center gap-3">
-        <div className="size-8 animate-spin rounded-full border-2 border-black border-t-transparent" />
-        <span className="text-xs text-[#6b7280]">Loading administrator profile...</span>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex w-full flex-col gap-6">
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e5e7eb] pb-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#111827]">
-            Admin Account &amp; Security
-          </h1>
-          <p className="text-xs text-[#6b7280]">
-            Manage single administrative credentials, contact information, and session security.
-          </p>
-        </div>
-      </div>
+    <div className="flex flex-col gap-4">
+      <PageHeader title="My account" description="Your administrator profile and sign-in password." />
 
-      {feedback && (
-        <div className="flex items-center justify-between rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800">
-          <span>{feedback}</span>
-          <button onClick={() => setFeedback(null)} className="p-0.5 hover:opacity-75" aria-label="Dismiss">
-            <X className="size-3.5" />
-          </button>
-        </div>
-      )}
+      <DataState loading={loading} error={error} onRetry={reload} hasData={!!account} empty={false}>
+        {account && (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Panel title="Profile" bodyClassName="p-4">
+              <div className="mb-4">
+                <DetailList
+                  items={[
+                    { label: 'Email (used to sign in)', value: account.email },
+                    { label: 'Role', value: humanize(account.role) },
+                    { label: 'Member since', value: formatDate(account.created_at) },
+                  ]}
+                />
+              </div>
+              <form onSubmit={handleProfile} className="flex flex-col gap-4" noValidate>
+                <Field label="Full name" required error={profileErrors.full_name}>
+                  {(p) => <TextInput {...p} autoComplete="name" value={fullName} onChange={(e) => setFullName(e.target.value)} />}
+                </Field>
+                <Field label="Phone" error={profileErrors.phone}>
+                  {(p) => <TextInput {...p} type="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />}
+                </Field>
+                <div>
+                  <Button type="submit" variant="primary" loading={savingProfile} disabled={!profileChanged}>
+                    Save profile
+                  </Button>
+                </div>
+              </form>
+            </Panel>
 
-      {error && (
-        <div className="flex items-center justify-between rounded-lg bg-red-50 p-3 text-xs text-red-800">
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="p-0.5 hover:opacity-75" aria-label="Dismiss">
-            <X className="size-3.5" />
-          </button>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-        {/* Profile Info */}
-        <div className="rounded-xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-[#111827]">Administrator Profile</h2>
-          <p className="text-xs text-[#6b7280]">Personal identity and primary administrator role</p>
-
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div>
-              <label className="block text-xs font-semibold text-[#374151]">Full Name</label>
-              <input
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-                className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs font-semibold outline-none focus:border-black"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-[#374151]">Admin Email</label>
-              <input
-                type="email"
-                value={account?.email || ''}
-                disabled
-                className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] bg-[#f9fafb] px-3 font-mono text-xs text-[#6b7280] outline-none"
-              />
-              <span className="text-[10px] text-[#9ca3af]">Protected login email identifier</span>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-[#374151]">Phone</label>
-              <input
-                type="text"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+234 812 000 0000"
-                className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs outline-none focus:border-black"
-              />
-            </div>
+            <Panel title="Change password" bodyClassName="p-4">
+              <form onSubmit={handlePassword} className="flex flex-col gap-4" noValidate>
+                {/* Hidden username helps password managers pair the new password with this account. */}
+                <input type="email" autoComplete="username" value={account.email} readOnly hidden />
+                <Field label="Current password" required error={passwordErrors.current_password}>
+                  {(p) => (
+                    <TextInput {...p} type="password" autoComplete="current-password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+                  )}
+                </Field>
+                <Field label="New password" required error={passwordErrors.new_password} hint={`At least ${MIN_PASSWORD} characters.`}>
+                  {(p) => <TextInput {...p} type="password" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />}
+                </Field>
+                <Field label="Confirm new password" required error={passwordErrors.confirm_password}>
+                  {(p) => (
+                    <TextInput {...p} type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                  )}
+                </Field>
+                <p className="text-xs text-[#6b7280]">Changing your password signs out every other device where you are signed in to the admin.</p>
+                <div>
+                  <Button type="submit" variant="primary" loading={savingPassword}>
+                    Change password
+                  </Button>
+                </div>
+              </form>
+            </Panel>
           </div>
-        </div>
-
-        {/* Change Password */}
-        <div className="rounded-xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-[#111827]">Change Security Password</h2>
-          <p className="text-xs text-[#6b7280]">
-            Leave blank if you do not wish to update your administrator credentials
-          </p>
-
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div>
-              <label className="block text-xs font-semibold text-[#374151]">Current Password</label>
-              <input
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="••••••••••••"
-                className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs outline-none focus:border-black"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-[#374151]">New Password</label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Min. 8 characters"
-                className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs outline-none focus:border-black"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-[#374151]">Confirm New Password</label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Repeat new password"
-                className="mt-1 h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-xs outline-none focus:border-black"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Save button */}
-        <div className="flex justify-end pb-8">
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-lg bg-black px-6 py-2.5 text-xs font-semibold text-white shadow hover:bg-neutral-800 disabled:opacity-50"
-          >
-            {saving ? 'Updating Account...' : 'Save Account Changes'}
-          </button>
-        </div>
-      </form>
+        )}
+      </DataState>
     </div>
   );
-};
+}
