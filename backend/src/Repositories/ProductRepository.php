@@ -57,15 +57,21 @@ class ProductRepository
             }
         }
 
-        // Search query
+        // Search: whole words (and their beginnings, "shirt" finds "shirts") in the name, dress style and
+        // description through the full-text index, so it stays fast with a large catalogue.
+        // Very short searches ("ts") fall back to matching the name.
         if (!empty($filters['search'])) {
-            $searchTerm = '%' . trim((string) $filters['search']) . '%';
-            $conditions[] = "(p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ? OR p.dress_style LIKE ?)";
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $types .= "ssss";
+            $term = trim((string) $filters['search']);
+            $words = self::searchWords($term);
+            if ($words !== []) {
+                $conditions[] = "MATCH(p.name, p.description, p.dress_style) AGAINST (? IN BOOLEAN MODE)";
+                $params[] = implode(' ', array_map(static fn (string $w): string => '+' . $w . '*', $words));
+                $types .= "s";
+            } else {
+                $conditions[] = "p.name LIKE ?";
+                $params[] = '%' . addcslashes($term, '%_\\') . '%';
+                $types .= "s";
+            }
         }
 
         // Price range
@@ -80,9 +86,9 @@ class ProductRepository
             $types .= "d";
         }
 
-        // Dress style filter (case-insensitive)
+        // Dress style filter (the column's collation already ignores case, so the index is used)
         if (!empty($filters['dress_style'])) {
-            $conditions[] = "LOWER(p.dress_style) = LOWER(?)";
+            $conditions[] = "p.dress_style = ?";
             $params[] = (string) $filters['dress_style'];
             $types .= "s";
         }
@@ -185,13 +191,9 @@ class ProductRepository
             case 'best_selling':
             case 'popular':
             case 'popularity':
-                // Real sales: units on paid orders (refunded/cancelled orders don't count).
-                $sortOrder = "(SELECT COALESCE(SUM(oi.quantity), 0)
-                               FROM order_items oi
-                               JOIN orders o ON o.id = oi.order_id
-                               WHERE oi.product_id = p.id
-                                 AND o.payment_status IN ('successful', 'partially_refunded')
-                                 AND o.order_status NOT IN ('cancelled', 'refunded')) DESC, p.created_at DESC";
+                // Real sales: units on paid orders (refunded/cancelled orders don't count),
+                // kept on the product by App\Services\ProductSales.
+                $sortOrder = "p.units_sold DESC, p.created_at DESC";
                 break;
             case 'newest':
             case 'latest':
@@ -303,6 +305,22 @@ class ProductRepository
             'per_page' => $perPage,
             'total_pages' => (int) ceil($total / $perPage),
         ];
+    }
+
+    /** Words that the full-text index ignores; requiring them would match nothing. */
+    private const SEARCH_STOPWORDS = ['a', 'about', 'an', 'are', 'as', 'at', 'be', 'by', 'com', 'de', 'en', 'for', 'from', 'how', 'i', 'in', 'is', 'it', 'la', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'was', 'what', 'when', 'where', 'who', 'will', 'with', 'und', 'www'];
+
+    /**
+     * Search words usable with the full-text index: letters/digits, at least 3 characters
+     * (the index's shortest word), no stop words, at most 8 words.
+     *
+     * @return string[]
+     */
+    private static function searchWords(string $term): array
+    {
+        $parts = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($term), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $words = array_filter($parts, static fn (string $w): bool => mb_strlen($w) >= 3 && !in_array($w, self::SEARCH_STOPWORDS, true));
+        return array_slice(array_values(array_unique($words)), 0, 8);
     }
 
     /**

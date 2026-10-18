@@ -134,6 +134,7 @@ class PaymentFinalizer
                     'i',
                     [$orderId]
                 );
+                ProductSales::refreshForOrder($db, $orderId);
                 $db->insert(
                     "INSERT INTO `order_status_history` (`order_id`, `previous_status`, `new_status`, `comment`, `changed_by_user_id`)
                      VALUES (?, 'pending_payment', 'paid', ?, ?)",

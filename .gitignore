@@ -34,6 +34,7 @@ yarn-error.log*
 # Backend runtime data (logs contain customer PII; uploads are user content)
 backend/storage/logs/*
 backend/storage/framework/*
+backend/storage/cache/*
 !backend/storage/**/.gitkeep
 backend/public/uploads/*
 !backend/public/uploads/.gitkeep

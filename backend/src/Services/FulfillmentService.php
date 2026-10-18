@@ -526,6 +526,7 @@ class FulfillmentService
             'sssi',
             [$newStatus, $newPaymentStatus, $newStatus, $orderId]
         );
+        ProductSales::refreshForOrder($db, $orderId);
 
         $db->insert(
             "INSERT INTO `order_status_history` (`order_id`, `previous_status`, `new_status`, `comment`, `changed_by_user_id`)
@@ -625,6 +626,7 @@ class FulfillmentService
             'ssii',
             [$newOrderStatus, $refundStatus, $fullyRefunded ? 1 : 0, (int) $order['id']]
         );
+        ProductSales::refreshForOrder($db, (int) $order['id']);
 
         $db->insert(
             "INSERT INTO `order_status_history` (`order_id`, `previous_status`, `new_status`, `comment`, `changed_by_user_id`)

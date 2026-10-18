@@ -106,22 +106,50 @@ class Response
             ob_clean();
         }
 
-        if (!headers_sent()) {
-            http_response_code($status);
-            header('Content-Type: application/json; charset=utf-8');
-            header('X-Content-Type-Options: nosniff');
-            header('X-Frame-Options: DENY');
-
-            foreach ($headers as $key => $value) {
-                header("{$key}: {$value}");
-            }
-        }
-
         $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
         if ($json === false) {
             http_response_code(500);
             echo '{"success":false,"error":{"code":"JSON_ENCODE_ERROR","message":"Failed to serialize response payload."}}';
             exit;
+        }
+
+        $public = $status === 200 && self::$publicCache !== null;
+        $etag = $public ? '"' . md5($json) . '"' : null;
+
+        if (!headers_sent()) {
+            http_response_code($status);
+            header('Content-Type: application/json; charset=utf-8');
+            header('X-Content-Type-Options: nosniff');
+            header('X-Frame-Options: DENY');
+            // Only public catalogue data may be kept by browsers; everything else (accounts,
+            // orders, admin) is never stored.
+            header('Cache-Control: ' . ($public ? self::$publicCache : 'no-store'));
+            header('Vary: Accept-Encoding');
+            if ($etag !== null) {
+                header('ETag: ' . $etag);
+            }
+
+            foreach ($headers as $key => $value) {
+                header("{$key}: {$value}");
+            }
+
+            // Unchanged since the browser's copy: answer with no body.
+            if ($etag !== null && trim((string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) === $etag) {
+                http_response_code(304);
+                if (self::$exitOnResponse) {
+                    exit;
+                }
+                return;
+            }
+
+            // JSON shrinks 5-10x with gzip, which matters most on mobile data.
+            if (strlen($json) > 1024 && self::clientAcceptsGzip() && !ini_get('zlib.output_compression') && function_exists('gzencode')) {
+                $compressed = gzencode($json, 5);
+                if ($compressed !== false) {
+                    header('Content-Encoding: gzip');
+                    $json = $compressed;
+                }
+            }
         }
 
         echo $json;
@@ -131,4 +159,21 @@ class Response
     }
 
     public static bool $exitOnResponse = true;
+
+    /** Cache-Control for the current response when it is public catalogue data (else no-store). */
+    private static ?string $publicCache = null;
+
+    /**
+     * Mark the response as public data browsers may reuse for $maxAge seconds (and serve while
+     * refreshing for $staleSeconds more). Never use for anything tied to a customer or admin.
+     */
+    public static function cachePublic(int $maxAge, int $staleSeconds = 0): void
+    {
+        self::$publicCache = sprintf('public, max-age=%d%s', $maxAge, $staleSeconds > 0 ? ", stale-while-revalidate={$staleSeconds}" : '');
+    }
+
+    private static function clientAcceptsGzip(): bool
+    {
+        return (bool) preg_match('/\bgzip\b/i', (string) ($_SERVER['HTTP_ACCEPT_ENCODING'] ?? ''));
+    }
 }

@@ -8,6 +8,7 @@ use App\Database\Database;
 use App\Repositories\CategoryRepository;
 use App\Repositories\ProductRepository;
 use App\Services\CheckoutService;
+use App\Support\Cache;
 use App\Support\Response;
 
 /**
@@ -51,7 +52,12 @@ class CatalogController
         $page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
         $perPage = isset($_GET['per_page']) ? (int) $_GET['per_page'] : (isset($_GET['limit']) ? (int) $_GET['limit'] : 12);
 
-        $result = $this->productRepo->listPublished($filters, $page, $perPage);
+        // Browsing pages are the same for every visitor; searches vary too much to be worth keeping.
+        $load = fn (): array => $this->productRepo->listPublished($filters, $page, $perPage);
+        $result = empty($filters['search'])
+            ? Cache::remember('products:' . json_encode([$filters, $page, $perPage]), $load)
+            : $load();
+        Response::cachePublic(30, 120);
 
         Response::success(
             $result['items'],
@@ -88,6 +94,9 @@ class CatalogController
 
         $product['reviews'] = $this->productRepo->approvedReviews((int) $product['id']);
 
+        // Stock changes often: browsers re-check every time, but get "not modified" when it hasn't.
+        Response::cachePublic(0);
+
         Response::success($product, 'Product details retrieved successfully.');
     }
 
@@ -97,8 +106,12 @@ class CatalogController
      */
     public function facets(): void
     {
-        $facets = $this->productRepo->facets();
-        $facets['categories'] = $this->categoryRepo->getAllActive();
+        $facets = Cache::remember('facets', function (): array {
+            $facets = $this->productRepo->facets();
+            $facets['categories'] = $this->categoryRepo->getAllActive();
+            return $facets;
+        }, 10); // Only admin changes affect these (and they clear the cache).
+        Response::cachePublic(60, 300);
 
         Response::success($facets, 'Catalogue filter options retrieved.');
     }
@@ -109,7 +122,8 @@ class CatalogController
      */
     public function categories(): void
     {
-        $categories = $this->categoryRepo->getAllActive();
+        $categories = Cache::remember('categories', fn (): array => $this->categoryRepo->getAllActive(), 10);
+        Response::cachePublic(60, 300);
         Response::success($categories, 'Categories retrieved successfully.');
     }
 
@@ -118,6 +132,13 @@ class CatalogController
      * Single aggregated payload for fast homepage hydration.
      */
     public function homepage(): void
+    {
+        $payload = Cache::remember('homepage', fn (): array => $this->homepagePayload());
+        Response::cachePublic(60, 300);
+        Response::success($payload, 'Storefront homepage payload retrieved successfully.');
+    }
+
+    private function homepagePayload(): array
     {
         $featured = $this->productRepo->getFeatured(4);
         $flashDeals = $this->productRepo->getFlashDeals(4);
@@ -170,7 +191,7 @@ class CatalogController
         $flashEnds = array_filter(array_column($flashDeals, 'flash_deal_ends_at'));
         sort($flashEnds);
 
-        $payload = [
+        return [
             'stats' => $stats,
             'flash_deals_end_at' => $flashEnds[0] ?? null,
             'featured_products' => $featured,
@@ -182,7 +203,5 @@ class CatalogController
             'banners' => $banners,
             'reviews' => $reviews,
         ];
-
-        Response::success($payload, 'Storefront homepage payload retrieved successfully.');
     }
 }

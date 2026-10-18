@@ -170,6 +170,8 @@ class CheckoutController
 
         $origin = $this->checkoutService->getStoreOrigin();
 
+        // Same for every visitor; the delivery fee itself is recalculated at checkout.
+        Response::cachePublic(30, 120);
         Response::success([
             'zones' => $zones,
             'origin' => $origin,
@@ -329,6 +331,8 @@ class CheckoutController
             ];
         }
 
+        // Same for every visitor; the server still refuses a method that was switched off.
+        Response::cachePublic(30, 120);
         Response::success([
             'methods' => $methods,
             'support_phone' => CheckoutService::supportWhatsAppPhone(),

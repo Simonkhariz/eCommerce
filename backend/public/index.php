@@ -34,6 +34,7 @@ use App\Middleware\AdminAuthMiddleware;
 use App\Middleware\CorsMiddleware;
 use App\Middleware\CustomerAuthMiddleware;
 use App\Middleware\JsonBodyMiddleware;
+use App\Support\Cache;
 use App\Support\Response;
 use App\Support\Router;
 
@@ -236,6 +237,14 @@ $router->post('/api/v1/admin/marketing/broadcast', [AdminOperationsController::c
 
 $router->get('/api/v1/admin/account', [AdminOperationsController::class, 'getAdminAccount'], $adminGuard);
 $router->put('/api/v1/admin/account', [AdminOperationsController::class, 'updateAdminAccount'], $adminGuard);
+
+// Admin changes (products, categories, banners, reviews, settings...) clear the public
+// catalogue cache once the request has finished, so the store shows them straight away.
+$requestMethod = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+if (!in_array($requestMethod, ['GET', 'HEAD', 'OPTIONS'], true) && str_starts_with($requestPath, '/api/v1/admin/')) {
+    register_shutdown_function([Cache::class, 'bumpCatalog']);
+}
 
 // 6. Dispatch Request
 $router->dispatch();
