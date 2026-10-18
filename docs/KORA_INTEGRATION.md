@@ -171,26 +171,27 @@ Accept: application/json
 > [!CAUTION]
 > **Security Rule**: Never expose your root XAMPP environment or MySQL database port (3306) directly to the public internet or via default port forwarding. Forward **only** the isolated PHP backend application port (8000) through a secure temporary tunnel when real webhook dispatch is required.
 
-### Method 1: Offline Automated Test Suite (Recommended)
-You can test the entire webhook and verification lifecycle locally without any external tunnels or internet access:
+### Method 1: Automated test suite (recommended)
+Runs against a throw-away database; nothing is sent to Kora:
 ```bash
-php backend/tests/test_step10_kora_verification.php
+php backend/tests/run.php PaymentIntegrity
 ```
-This runs 32 automated tests covering HMAC SHA-256 signature verification, duplicate webhook deduplication, zero stock re-deduction, amount and currency tampering rejection, delayed bank transfers, out-of-order events, network timeouts, and asynchronous order finalization.
+It covers signatures computed over the raw `data` bytes, bad signatures (401, recorded), duplicate and
+replayed webhooks, amount and currency mismatches, late payments on expired orders (flagged, not
+revived), duplicate payments, and that a paid order is never moved backwards.
 
-### Method 2: Local HTTP cURL Testing
-While your backend is running on `http://127.0.0.1:8000`:
-1. Generate an HMAC SHA-256 signature using your sandbox secret key over the JSON-encoded `data` object:
-   ```bash
-   php -r '$data = ["reference" => "PAY-ORD-20261016-TEST", "amount" => 14500, "currency" => "NGN", "status" => "success"]; echo hash_hmac("sha256", json_encode($data, JSON_UNESCAPED_SLASHES), "sk_test_placeholder");'
-   ```
-2. Post the payload directly to the local endpoint:
-   ```bash
-   curl -X POST http://127.0.0.1:8000/api/v1/webhooks/kora \
-     -H "Content-Type: application/json" \
-     -H "x-korapay-signature: <GENERATED_SIGNATURE>" \
-     -d '{"event":"charge.success","event_id":"evt_test_101","data":{"reference":"PAY-ORD-20261016-TEST","amount":14500,"currency":"NGN","status":"success"}}'
-   ```
+### Method 2: Local HTTP test with curl
+While the API runs on `http://127.0.0.1:8000`, sign the **exact bytes** of the `data` object you send
+(the API hashes the raw substring, not a re-encoded copy):
+```bash
+DATA='{"reference":"<payment reference from the payments table>","amount":14500,"currency":"NGN","status":"success"}'
+SIG=$(php -r 'echo hash_hmac("sha256", $argv[1], $argv[2]);' "$DATA" "<your KORA_SECRET_KEY>")
+curl -X POST http://127.0.0.1:8000/api/v1/webhooks/kora \
+  -H "Content-Type: application/json" \
+  -H "x-korapay-signature: $SIG" \
+  -d "{\"event\":\"charge.success\",\"data\":$DATA}"
+```
+The amount must equal the order total and the reference must belong to an open payment attempt.
 
 ### Method 3: Live Sandbox Webhook Testing via Secure Tunnel
 To receive live asynchronous sandbox events dispatched from Kora's cloud dashboard to your local machine:

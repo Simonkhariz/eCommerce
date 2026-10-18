@@ -46,10 +46,12 @@ class AdminDashboardController
             $period = 30;
         }
         $currentStart = date('Y-m-d 00:00:00', strtotime('-' . ($period - 1) . ' days'));
-        $now = date('Y-m-d H:i:s');
+        // Exclusive end at the start of tomorrow (same window as the analytics report), so money
+        // verified in the current second is counted.
+        $currentEnd = date('Y-m-d 00:00:00', strtotime('+1 day'));
         $previousStart = date('Y-m-d 00:00:00', strtotime('-' . (2 * $period - 1) . ' days'));
 
-        $current = $this->periodTotals($currentStart, $now);
+        $current = $this->periodTotals($currentStart, $currentEnd);
         $previous = $this->periodTotals($previousStart, $currentStart);
 
         $delta = static function (float $now, float $before): ?float {
@@ -161,7 +163,7 @@ class AdminDashboardController
             'period' => [
                 'days' => $period,
                 'start' => $currentStart,
-                'end' => $now,
+                'end' => date('Y-m-d H:i:s'),
                 'previous_start' => $previousStart,
             ],
             'kpis' => [

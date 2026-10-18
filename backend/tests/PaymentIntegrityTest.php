@@ -31,6 +31,12 @@ use App\Services\PaymentFinalizer;
 Env::load(BASE_PATH . '/.env');
 date_default_timezone_set(Env::get('APP_TIMEZONE', 'Africa/Lagos') ?: 'Africa/Lagos');
 
+if (getenv('SHOPCO_ENV_FILE') === false && getenv('ALLOW_DEV_DB') !== '1') {
+    fwrite(STDERR, "Run this through php backend/tests/run.php (throw-away database), or set ALLOW_DEV_DB=1 to use the configured database on purpose.
+");
+    exit(2);
+}
+
 $api = rtrim(getenv('API_URL') ?: 'http://127.0.0.1:8000/api/v1', '/');
 $db = Database::getInstance();
 $pass = 0;

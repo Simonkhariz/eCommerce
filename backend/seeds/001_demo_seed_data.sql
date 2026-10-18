@@ -1,3 +1,5 @@
+-- NOTE: rating_avg / rating_count values below are ignored: seed.php recomputes them from approved
+-- reviews (none are seeded), so a fresh store shows no ratings until real reviews are approved.
 -- -----------------------------------------------------------------------------
 -- Seed 001: Initial Store Settings, Categories, Products, Variants & Shipping Zones
 -- Currency: NGN (₦) | Origin Hub: Enugu, Nigeria

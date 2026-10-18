@@ -38,7 +38,9 @@ class MailService
     public function __construct(?Database $db = null)
     {
         $this->db = $db ?? Database::getInstance();
-        $this->logPath = (defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 2)) . '/storage/logs/mail.log';
+        $base = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 2);
+        // MAIL_LOG_PATH (relative to backend/) lets tests keep their own log.
+        $this->logPath = $base . '/' . ltrim((string) (Env::get('MAIL_LOG_PATH', 'storage/logs/mail.log') ?: 'storage/logs/mail.log'), '/');
     }
 
     public static function getInstance(): self

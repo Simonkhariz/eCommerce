@@ -189,30 +189,31 @@ and flagged on the order (`requires_attention`) for the admin instead of changin
 
 ## 6. Verification & Testing Commands
 
-### Payment, order & stock integrity suite
-Requires the API to be running (`php -S 127.0.0.1:8000 -t backend/public`). Creates its own test
-data and removes it afterwards:
+### Test suites (throw-away database)
 ```bash
-php backend/tests/PaymentIntegrityTest.php
+php backend/tests/run.php                    # every suite
+php backend/tests/run.php Security Admin     # suites whose name contains these words
+php backend/tests/run.php --keep             # keep shopco_test afterwards for debugging
 ```
+The runner writes `backend/.env.testing` (a copy of `.env` pointing at `shopco_test` and a separate
+mail log), drops and re-creates that database, applies every migration, runs `seeds/seed.php`,
+starts the API on `127.0.0.1:8099` against it, runs each `backend/tests/*Test.php`, then stops the
+server and drops the database. `.env` and `shopco_dev` are never touched.
 
-### PHP Syntax Check
-Run syntax checks across all backend PHP files:
+| Suite | Covers |
+| :--- | :--- |
+| `SecurityTest` | Admin access, cookies and CSRF, magic links, guest order lookup, rate limits, uploads, CORS. |
+| `StorefrontFlowTest` | Catalogue filters and facets, cart check, delivery quotes, idempotent guest orders, payment windows, account linking, saved cart/wishlist, reviews, flash-deal expiry. |
+| `PaymentIntegrityTest` | Payment finaliser, Kora/Monnify webhooks and signatures, expiry, promos, refunds, variants, transactions. |
+| `AdminApiTest` | Every admin screen's API, the full order lifecycle, refunds, settings, sessions. |
+| `ReportingTest` | Analytics agree with the database, CSV exports, audit log, email outbox endpoints. |
+| `MailOutboxTest` | Outbox delivery, retries and backoff, SMTP protocol (fake server), templates. |
+
+Each suite refuses to run directly against the configured database unless `ALLOW_DEV_DB=1` is set.
+
+### PHP syntax check
 ```powershell
 Get-ChildItem -Path backend -Recurse -Filter "*.php" | ForEach-Object { php -l $_.FullName }
-```
-
-### Automated CLI Endpoint Tests
-Execute the built-in CLI test suite:
-```bash
-# 1. Test /api/v1/health endpoint
-php backend/tests/test_health.php
-
-# 2. Test 404 Route Not Found handling
-php backend/tests/test_router_404.php
-
-# 3. Test 405 Method Not Allowed handling
-php backend/tests/test_router_405.php
 ```
 
 ---

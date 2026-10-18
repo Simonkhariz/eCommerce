@@ -26,6 +26,7 @@ yarn-error.log*
 # Local environment
 .env*.local
 .env
+.env.testing
 
 # TypeScript incremental build info
 *.tsbuildinfo

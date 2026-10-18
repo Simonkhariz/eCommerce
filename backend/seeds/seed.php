@@ -74,6 +74,16 @@ foreach ($seedFiles as $file) {
     }
 }
 
+// Ratings only ever come from approved reviews: whatever a seed file says, recompute them.
+$db->query(
+    "UPDATE `products` p
+     LEFT JOIN (
+         SELECT `product_id`, ROUND(AVG(`rating`), 2) AS avg_rating, COUNT(*) AS review_count
+         FROM `reviews` WHERE `status` = 'approved' GROUP BY `product_id`
+     ) r ON r.product_id = p.id
+     SET p.rating_avg = COALESCE(r.avg_rating, 0), p.rating_count = COALESCE(r.review_count, 0)"
+);
+
 // Summary queries
 $catCount = $db->query("SELECT COUNT(*) AS c FROM categories")->fetch_assoc()['c'] ?? 0;
 $prodCount = $db->query("SELECT COUNT(*) AS c FROM products")->fetch_assoc()['c'] ?? 0;

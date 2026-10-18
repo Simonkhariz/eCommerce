@@ -1,5 +1,26 @@
 # Project Audit & Technical Gap Analysis
 
+> [!NOTE]
+> **Historical document.** This is the Step 1 gap analysis written before the build. Much of what it
+> describes (mock data, the single-page admin, the helpdesk dashboard) no longer exists. For the
+> current system see the root [README](../README.md); for what the later full audit found and fixed,
+> see the summary below and the git history of the `audit-fixes` branch.
+
+## Audit fixes (October 2026)
+
+| Phase | Commit | What changed |
+| :--- | :--- | :--- |
+| 0 | `de171d1` | Baseline snapshot; `.gitignore` for logs, uploads and secrets; secrets removed from docs. |
+| 1 | `750c700` | Security: no dev admin token, cookie-only sessions (hashed), customer-only magic links that are never returned by the API, CSRF, MySQL rate limiting, safe guest order lookup, upload hardening, same-origin API proxy. |
+| 2 | `c2571a3` | Money: one payment finaliser (amount/currency checks, idempotent, never moves an order backwards, flags late/duplicate/under/over-payments), Monnify signature required, stock reservation expiry, idempotent orders, exact variants, promo counted once, safe refunds, re-entrant transactions, variant upserts. |
+| 3 | `256fb2c` | Storefront: real variants and prices, honest product data, cart cleared only after verified payment, URL-driven catalogue with real filter options, guest orders linked on sign-in. |
+| 4 | `95a37d7` | Admin rebuilt on real routes with login/setup, real dashboard figures, order detail and fulfilment, delivery-zone editor, refunds with limits, promo dates, settings that take effect, opt-in newsletter with unsubscribe, pagination everywhere. |
+| 5 | `91e9a6a` | Outbox-first email with retries and an honest SMTP status, analytics from verified money, consistent audit log. |
+| 6 | `e95872b` | Storefront content made honest (no invented stats, brands, reviews or countdowns), moderated reviews, real flash-deal end times, information pages, accessibility pass. |
+| 7 | latest | Test runner on a throw-away database, suites in `backend/tests/`, docs rewritten. |
+
+---
+
 > **Generated as part of Step 1 of the E-Commerce System Implementation Blueprint.**  
 > **Status:** Completed  
 > **Target Stack:** Next.js 14 (Frontend) + PHP 8+ (MySQLi REST API Backend) + MySQL (Local XAMPP) + Kora (Korapay) Sandbox  

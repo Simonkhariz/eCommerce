@@ -1,3 +1,5 @@
+-- NOTE: rating_avg / rating_count values below are ignored: seed.php recomputes them from approved
+-- reviews (none are seeded), so a fresh store shows no ratings until real reviews are approved.
 -- -----------------------------------------------------------------------------
 -- Seed 002: Comprehensive Catalogue Products Across All Categories
 -- Populates 3-4 distinct products for T-Shirts, Shorts, Shirts, Hoodies and Jeans (physical products only).

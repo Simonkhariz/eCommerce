@@ -17,11 +17,19 @@ class Env
 
     /**
      * Load environment variables from a file.
+     *
+     * When the process environment sets SHOPCO_ENV_FILE (the test runner does), that file is
+     * loaded instead, so tests run against their own database without touching .env.
      */
     public static function load(string $filePath): void
     {
         if (self::$loaded && !empty(self::$vars)) {
             return;
+        }
+
+        $override = getenv('SHOPCO_ENV_FILE');
+        if (is_string($override) && $override !== '' && is_readable($override)) {
+            $filePath = $override;
         }
 
         if (!file_exists($filePath) || !is_readable($filePath)) {
