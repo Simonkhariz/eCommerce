@@ -9,7 +9,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Info, Loader2, RefreshCw, X } from 'lucide-react';
-import { STATUS_TONE_CLASSES, type StatusTone } from '@/lib/order-status';
+import type { StatusTone } from '@/lib/order-status';
 import type { PaginationMeta } from '@/lib/admin-api';
 import { ApiError } from '@/lib/api-client';
 
@@ -420,8 +420,8 @@ export function PageHeader({
   return (
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
-        <h1 className="text-lg font-semibold tracking-tight text-[#111827]">{title}</h1>
-        {description && <p className="mt-0.5 text-[13px] text-[#6b7280]">{description}</p>}
+        <h1 className="text-xl font-medium tracking-tight text-[#1f2937]">{title}</h1>
+        {description && <p className="mt-1 text-[13px] text-[#6b7280]">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -441,15 +441,21 @@ export function Panel({
   className?: string;
   bodyClassName?: string;
 }) {
+  // Same card frame as the overview: a muted, hatched frame with the title in it and the
+  // content on a white panel inside.
   return (
-    <section className={`rounded-xl border border-[#e5e7eb] bg-white ${className}`}>
+    <section className={`relative min-w-0 overflow-clip rounded-xl bg-[#f6f6f6] p-1 shadow-[inset_0_0_0_0.8px_#e5e7eb] ${className}`}>
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[url('/admin/card-pattern.svg')] bg-[length:1639px_560px] bg-[position:center_top] bg-no-repeat"
+      />
       {(title || actions) && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#f3f4f6] px-4 py-3">
-          {title && <h2 className="text-[13px] font-semibold text-[#111827]">{title}</h2>}
+        <div className="relative flex min-h-[36px] flex-wrap items-center justify-between gap-2 px-2 py-1.5">
+          {title && <h2 className="text-sm font-medium text-[#4b5563]">{title}</h2>}
           {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
         </div>
       )}
-      <div className={bodyClassName}>{children}</div>
+      <div className={`relative overflow-hidden rounded-[10px] border-[0.8px] border-[#e5e7eb] bg-white ${bodyClassName}`}>{children}</div>
     </section>
   );
 }
@@ -459,9 +465,23 @@ export function Toolbar({ children }: { children: React.ReactNode }) {
   return <div className="mb-3 flex flex-wrap items-center gap-2">{children}</div>;
 }
 
+const STATUS_DOT: Record<StatusTone, string> = {
+  amber: 'bg-[#f59e0b]',
+  blue: 'bg-[#3b82f6]',
+  green: 'bg-[#10b981]',
+  neutral: 'bg-[#9ca3af]',
+  red: 'bg-[#ef4444]',
+};
+
+/** Status badge in the overview's style: a coloured dot on a white badge. */
 export function StatusPill({ label, tone }: { label: string; tone: StatusTone }) {
   return (
-    <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_TONE_CLASSES[tone]}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-1.5 py-0.5 text-xs font-medium ${
+        tone === 'red' ? 'border-red-200 bg-red-50 text-red-800' : 'border-[#e5e7eb] bg-white text-[#374151]'
+      }`}
+    >
+      <span className={`size-1.5 shrink-0 rounded-full ${STATUS_DOT[tone]}`} aria-hidden="true" />
       {label}
     </span>
   );
@@ -539,7 +559,7 @@ export function Table({ children, minWidth = 720 }: { children: React.ReactNode;
     // positioned against the page and make phones zoom out to the table's full width.
     <div className="relative w-full overflow-x-auto">
       <table
-        className="w-full border-collapse text-left text-[13px] [&_td]:border-t [&_td]:border-[#f3f4f6] [&_td]:px-4 [&_td]:py-2.5 [&_td]:align-middle [&_th]:whitespace-nowrap [&_th]:bg-[#fafafa] [&_th]:px-4 [&_th]:py-2 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-[#6b7280]"
+        className="w-full border-collapse text-left text-[13px] [&_td]:border-t [&_td]:border-[#f3f4f6] [&_td]:px-4 [&_td]:py-2.5 [&_td]:align-middle [&_th]:whitespace-nowrap [&_th]:bg-[#f9fafb] [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-normal [&_th]:text-[#4b5563]"
         style={{ minWidth }}
       >
         {children}
