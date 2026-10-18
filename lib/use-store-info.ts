@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ApiCategory, apiGetShippingZones, getCatalogFacets, ShippingZone } from '@/lib/api-client';
+import { normalizePhoneDigits } from '@/lib/whatsapp';
 
 /** Store details as configured in admin Settings. Empty strings mean "not set" — never invent them. */
 export interface StoreOrigin {
@@ -97,8 +98,7 @@ export function useStoreNav(): StoreNav {
 
 /** wa.me link for a configured phone number, or null when none is set. */
 export function whatsAppLink(phone: string | null | undefined, message?: string): string | null {
-  const digits = (phone || '').replace(/\D/g, '');
-  if (!digits) return null;
-  const intl = digits.startsWith('0') && digits.length === 11 ? `234${digits.slice(1)}` : digits;
+  const intl = normalizePhoneDigits(phone);
+  if (!intl) return null;
   return `https://wa.me/${intl}${message ? `?text=${encodeURIComponent(message)}` : ''}`;
 }

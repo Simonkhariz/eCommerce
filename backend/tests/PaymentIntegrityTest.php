@@ -26,6 +26,7 @@ use App\Services\CheckoutService;
 use App\Services\FulfillmentService;
 use App\Services\KoraService;
 use App\Services\MonnifyService;
+use App\Services\PaymentAttempts;
 use App\Services\PaymentFinalizer;
 
 Env::load(BASE_PATH . '/.env');
@@ -352,6 +353,23 @@ try {
     expectThrows('manual confirmation needs a real reference', fn () => $finalizer->recordManualPayment($o5Id, 'ab', null), 'reference');
     $manual = $finalizer->recordManualPayment($o5Id, "GTB-{$stamp}", null, 'Transfer seen in bank app');
     check('manual confirmation with a reference marks the order paid', $manual['outcome'] === PaymentFinalizer::OUTCOME_PAID && orderRow($o5['order_number'])['order_status'] === 'paid');
+
+    // WhatsApp: confirming the transfer settles the customer's open WhatsApp attempt (one row),
+    // and the Kora checkout they opened but never paid is closed instead of staying "pending".
+    $o6 = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);
+    $o6Id = (int) orderRow($o6['order_number'])['id'];
+    $koraMock->initializeCheckout($o6['order_number']);
+    (new PaymentAttempts($db))->open(orderRow($o6['order_number']), 'whatsapp', 'WA-' . $o6['order_number'] . '-T1', 60);
+    $wa = $finalizer->recordManualPayment($o6Id, "OPAY-{$stamp}", null, 'Seen in bank app');
+    $o6Payments = $db->fetchAll("SELECT `provider`, `status` FROM `payments` WHERE `order_id` = ? ORDER BY `id`", 'i', [$o6Id]);
+    check('WhatsApp confirmation marks the order paid', $wa['outcome'] === PaymentFinalizer::OUTCOME_PAID && orderRow($o6['order_number'])['order_status'] === 'paid');
+    check('WhatsApp confirmation settles the WhatsApp attempt (no extra manual row)', count($o6Payments) === 2
+        && $o6Payments[1]['provider'] === 'whatsapp' && $o6Payments[1]['status'] === 'successful', json_encode($o6Payments));
+    check('unused Kora attempt is closed once the order is paid', ($o6Payments[0]['provider'] ?? '') === 'kora' && ($o6Payments[0]['status'] ?? '') === 'cancelled', json_encode($o6Payments));
+    expectThrows('one bank reference cannot confirm two orders', function () use ($placeOrder, $productId, $variantA, $finalizer, $stamp): void {
+        $o7 = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);
+        $finalizer->recordManualPayment((int) orderRow($o7['order_number'])['id'], "OPAY-{$stamp}", null);
+    }, 'already used');
 
     expectThrows('markDelivered on a cancelled order fails without touching shipments', fn () => $fulfillment->markDelivered((int) orderRow($o1['order_number'])['id']), 'Only paid');
     $shipped = $fulfillment->assignShipment($o5Id, ['carrier' => 'GIG Logistics', 'tracking_number' => "GIG-{$stamp}", 'status' => 'shipped']);

@@ -9,9 +9,11 @@ import {
   apiGetSavedCart,
   apiSaveCart,
   apiValidatePromotion,
+  apiVerifyPayment,
   getProductDetail,
 } from '@/lib/api-client';
 import { useAuth } from '@/context/AuthContext';
+import { clearPendingOrder, readGuestToken, readPendingOrder } from '@/lib/pending-order';
 
 interface ToastMessage {
   id: string;
@@ -106,6 +108,25 @@ function mergeCarts(a: CartItem[], b: CartItem[]): CartItem[] {
   }
   return Array.from(map.values());
 }
+
+/** Take the lines of a paid order (its "variant:quantity" cart signature) out of the cart. */
+function removeOrderedLines(items: CartItem[], signature: string): CartItem[] {
+  const ordered = new Map<string, number>();
+  for (const part of signature.split('|')) {
+    const at = part.lastIndexOf(':');
+    if (at > 0) ordered.set(part.slice(0, at), (ordered.get(part.slice(0, at)) ?? 0) + (parseInt(part.slice(at + 1), 10) || 0));
+  }
+  return items
+    .map((item) => {
+      const key = String(item.variantId ?? item.id);
+      const paid = ordered.get(key) ?? 0;
+      return paid > 0 ? { ...item, quantity: item.quantity - paid } : item;
+    })
+    .filter((item) => item.quantity > 0);
+}
+
+/** Don't ask the server about the same unpaid order more than once a minute. */
+const PENDING_CHECK_INTERVAL_MS = 60_000;
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isLoading: authLoading } = useAuth();
@@ -298,6 +319,47 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAppliedPromo(null);
     writeStorage(PROMO_STORAGE_KEY, null);
   };
+
+  // An order placed from this cart can be paid away from the payment return page: a WhatsApp
+  // transfer the store confirms later, or a gateway tab closed before it redirected back.
+  // When this device sees that order paid, its items leave the cart (anything added since stays).
+  const lastPendingCheck = useRef(0);
+  const checkPendingOrder = useCallback(async () => {
+    const pending = readPendingOrder();
+    if (!pending || Date.now() - lastPendingCheck.current < PENDING_CHECK_INTERVAL_MS) return;
+    lastPendingCheck.current = Date.now();
+    try {
+      const res = await apiVerifyPayment(pending.orderNumber, readGuestToken(pending.orderNumber));
+      const orderStatus = String(res.order_status || '');
+      if (res.status === 'successful' && orderStatus !== 'cancelled') {
+        const remaining = removeOrderedLines(itemsRef.current, pending.cartSignature);
+        setItems(remaining);
+        if (remaining.length === 0) {
+          setAppliedPromo(null);
+          writeStorage(PROMO_STORAGE_KEY, null);
+        }
+        clearPendingOrder(pending.orderNumber);
+      } else if (orderStatus === 'cancelled') {
+        clearPendingOrder(pending.orderNumber);
+      }
+    } catch {
+      // Offline or no access from this device: try again on the next visit.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    checkPendingOrder();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checkPendingOrder();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [isLoaded, checkPendingOrder]);
 
   const restoreItems = (newItems: CartItem[]) => {
     if (!Array.isArray(newItems) || newItems.length === 0) return;

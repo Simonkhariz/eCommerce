@@ -114,8 +114,21 @@ $t->cleanup(function () use ($t, $oldWa): void {
         $t->sql("UPDATE `store_settings` SET `value` = ? WHERE `key_name` = 'store_whatsapp_phone'", 's', [(string) $oldWa]);
     }
 });
-$t->check('save WhatsApp number', 200, $A('PUT', '/admin/settings', ['json' => ['store_whatsapp_phone' => '+234 800 000 0404']])['status']);
-$t->check('checkout uses the saved WhatsApp number', '+234 800 000 0404', TestKit::get($t->http('GET', '/checkout/payment-methods'), 'data.support_phone'));
+$t->check('save WhatsApp number in local format', 200, $A('PUT', '/admin/settings', ['json' => ['store_whatsapp_phone' => '0800 000 0404']])['status']);
+$t->check('WhatsApp number is saved as +234 and used at checkout', '+2348000000404', TestKit::get($t->http('GET', '/checkout/payment-methods'), 'data.support_phone'));
+$t->check('impossible WhatsApp number refused', 422, $A('PUT', '/admin/settings', ['json' => ['store_whatsapp_phone' => '0800 000']])['status']);
+
+$t->section('Payment method switches');
+$t->cleanup(function () use ($t): void {
+    $t->sql("DELETE FROM `store_settings` WHERE `key_name` IN ('payment_monnify_enabled', 'payment_kora_enabled', 'payment_whatsapp_enabled')");
+});
+$methodIds = fn (): array => array_column((array) TestKit::get($t->http('GET', '/checkout/payment-methods'), 'data.methods'), 'id');
+$t->check('switch Kora off', 200, $A('PUT', '/admin/settings/payment-methods', ['json' => ['kora' => false]])['status']);
+$t->ok('checkout no longer offers Kora', !in_array('kora', $methodIds(), true));
+$t->ok('settings report Kora as switched off', TestKit::get($A('GET', '/admin/settings'), 'data.readonly.payment_methods.kora.enabled') === false);
+$t->check('switching every method off is refused', 422, $A('PUT', '/admin/settings/payment-methods', ['json' => ['monnify' => false, 'kora' => false, 'whatsapp' => false]])['status']);
+$t->check('switch Kora back on', 200, $A('PUT', '/admin/settings/payment-methods', ['json' => ['kora' => true]])['status']);
+$t->ok('checkout offers Kora again', in_array('kora', $methodIds(), true));
 
 // -----------------------------------------------------------------------------
 $t->section('System status');

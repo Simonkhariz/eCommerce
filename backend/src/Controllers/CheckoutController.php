@@ -11,6 +11,7 @@ use App\Services\CheckoutService;
 use App\Services\KoraService;
 use App\Services\MonnifyService;
 use App\Services\PaymentAttempts;
+use App\Services\PaymentMethods;
 use App\Support\RateLimiter;
 use App\Support\RequestContext;
 use App\Support\Response;
@@ -283,14 +284,15 @@ class CheckoutController
     /**
      * Get available checkout payment methods configured for this store.
      * Monnify is first, Kora is second, Request from WhatsApp is last.
-     * Store admin can disable any method via environment variables.
+     * The admin switches methods on or off in Store settings; backend/.env can also disable one.
      * GET /api/v1/checkout/payment-methods
      */
     public function paymentMethods(): void
     {
-        $monnifyEnabled = filter_var(Env::get('PAYMENT_MONNIFY_ENABLED', 'true'), FILTER_VALIDATE_BOOLEAN);
-        $koraEnabled = filter_var(Env::get('PAYMENT_KORA_ENABLED', 'true'), FILTER_VALIDATE_BOOLEAN);
-        $whatsappEnabled = filter_var(Env::get('PAYMENT_WHATSAPP_ENABLED', 'true'), FILTER_VALIDATE_BOOLEAN);
+        $status = PaymentMethods::status($this->db);
+        $monnifyEnabled = $status['monnify']['enabled'];
+        $koraEnabled = $status['kora']['enabled'];
+        $whatsappEnabled = $status['whatsapp']['enabled'];
 
         $methods = [];
 
@@ -373,7 +375,7 @@ class CheckoutController
         if (!in_array($gateway, ['kora', 'monnify', 'whatsapp'], true)) {
             Response::error('Choose a payment method: kora, monnify or whatsapp.', 422, 'VALIDATION_ERROR');
         }
-        if (!filter_var(Env::get('PAYMENT_' . strtoupper($gateway) . '_ENABLED', 'true'), FILTER_VALIDATE_BOOLEAN)) {
+        if (!PaymentMethods::isEnabled($gateway, $this->db)) {
             Response::error('That payment method is currently unavailable.', 422, 'PAYMENT_METHOD_DISABLED');
         }
 

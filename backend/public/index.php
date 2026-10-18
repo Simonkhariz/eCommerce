@@ -227,6 +227,7 @@ $router->get('/api/v1/admin/audit-logs', [AdminOperationsController::class, 'lis
 
 $router->get('/api/v1/admin/settings', [AdminOperationsController::class, 'getSettings'], $adminGuard);
 $router->put('/api/v1/admin/settings', [AdminOperationsController::class, 'updateSettings'], $adminGuard);
+$router->put('/api/v1/admin/settings/payment-methods', [AdminOperationsController::class, 'updatePaymentMethods'], $adminGuard);
 
 $router->get('/api/v1/admin/system-status', [AdminOperationsController::class, 'getSystemStatus'], $adminGuard);
 

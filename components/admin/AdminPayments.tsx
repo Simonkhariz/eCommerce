@@ -66,8 +66,11 @@ export function AdminPayments() {
 
       <div className="mb-3">
         <Notice>
-          Manual payments (bank transfer or WhatsApp) are recorded from the order page: open the order and record the payment with its bank
-          reference.
+          To confirm a WhatsApp or bank-transfer payment, open{' '}
+          <Link href="/admin/orders?status=awaiting_whatsapp" className="font-semibold underline-offset-2 hover:underline">
+            Orders → Awaiting WhatsApp payment
+          </Link>{' '}
+          and press Confirm payment. &ldquo;Not used&rdquo; rows are checkouts the customer opened but paid another way (or never paid).
         </Notice>
       </div>
 
@@ -94,6 +97,7 @@ export function AdminPayments() {
             { value: 'pending', label: 'Pending' },
             { value: 'successful', label: 'Paid' },
             { value: 'failed', label: 'Failed' },
+            { value: 'cancelled', label: 'Not used' },
             { value: 'partially_refunded', label: 'Partly refunded' },
             { value: 'refunded', label: 'Refunded' },
           ]}
@@ -175,7 +179,7 @@ export function AdminPayments() {
                       )}
                     </td>
                     <td>
-                      <StatusPill {...paymentStatus(p.status)} />
+                      {p.status === 'cancelled' ? <StatusPill label="Not used" tone="neutral" /> : <StatusPill {...paymentStatus(p.status)} />}
                     </td>
                     <td className="whitespace-nowrap text-xs text-[#374151]">
                       {p.verified_at ? (

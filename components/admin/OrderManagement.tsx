@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Download } from 'lucide-react';
-import { adminDownloadExport, adminGetOrders, errorMessage } from '@/lib/admin-api';
+import { useRouter } from 'next/navigation';
+import { AlertTriangle, ChevronRight, Download } from 'lucide-react';
+import { type AdminOrderListItem, adminDownloadExport, adminGetOrders, errorMessage } from '@/lib/admin-api';
 import { ORDER_STATUS, formatDate, formatPrice, gatewayLabel, num, orderStatus, paymentStatus } from '@/lib/admin-format';
 import {
   Button,
@@ -22,12 +23,19 @@ import {
   useToast,
   useUrlFilters,
 } from '@/components/admin/ui';
+import { ManualPaymentModal } from '@/components/admin/ManualPaymentModal';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All orders' },
   { value: 'attention', label: 'Needs attention' },
+  { value: 'awaiting_whatsapp', label: 'Awaiting WhatsApp payment' },
   ...Object.entries(ORDER_STATUS).map(([value, s]) => ({ value, label: s.label })),
 ];
+
+/** The customer chose "Pay via WhatsApp" and the transfer has not been confirmed yet. */
+function awaitingWhatsApp(o: AdminOrderListItem): boolean {
+  return o.order_status === 'pending_payment' && o.payment_provider === 'whatsapp' && o.payment_record_status === 'pending';
+}
 
 /**
  * All orders, newest first. Filters live in the URL (/admin/orders?status=attention).
@@ -35,6 +43,8 @@ const STATUS_OPTIONS = [
  */
 export function OrderManagement() {
   const toast = useToast();
+  const router = useRouter();
+  const [paying, setPaying] = useState<AdminOrderListItem | null>(null);
   const [filters, setFilters] = useUrlFilters({ status: 'all', search: '', page: '1' });
   const [searchText, setSearchText] = useState(filters.search);
   const debouncedSearch = useDebouncedValue(searchText, 350);
@@ -109,7 +119,7 @@ export function OrderManagement() {
             filters.search || filters.status !== 'all' ? 'Try a different search or status.' : 'Orders appear here as soon as customers check out.'
           }
         >
-          <Table minWidth={960}>
+          <Table minWidth={1060}>
             <thead>
               <tr>
                 <th scope="col">Order</th>
@@ -124,6 +134,9 @@ export function OrderManagement() {
                 <th scope="col">Order status</th>
                 <th scope="col">Payment</th>
                 <th scope="col">Method</th>
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -131,13 +144,19 @@ export function OrderManagement() {
                 const os = orderStatus(o.order_status);
                 const ps = paymentStatus(o.payment_status);
                 const name = o.shipping_address_snapshot?.full_name?.trim();
+                const href = `/admin/orders/${encodeURIComponent(o.order_number)}`;
                 return (
-                  <tr key={o.id} className="hover:bg-[#fafafa]">
+                  <tr
+                    key={o.id}
+                    className="cursor-pointer hover:bg-[#fafafa]"
+                    onClick={(e) => {
+                      // The whole row opens the order; links and buttons inside keep their own action.
+                      if ((e.target as HTMLElement).closest('a,button')) return;
+                      router.push(href);
+                    }}
+                  >
                     <td>
-                      <Link
-                        href={`/admin/orders/${encodeURIComponent(o.order_number)}`}
-                        className="font-semibold text-[#111827] underline-offset-2 hover:underline"
-                      >
+                      <Link href={href} className="font-semibold text-[#2563eb] underline-offset-2 hover:underline">
                         {o.order_number}
                       </Link>
                       {o.requires_attention && (
@@ -161,6 +180,22 @@ export function OrderManagement() {
                       <StatusPill label={ps.label} tone={ps.tone} />
                     </td>
                     <td className="whitespace-nowrap text-[#4b5563]">{o.payment_provider ? gatewayLabel(o.payment_provider) : '—'}</td>
+                    <td className="whitespace-nowrap text-right">
+                      {awaitingWhatsApp(o) ? (
+                        <Button size="sm" variant="primary" onClick={() => setPaying(o)}>
+                          Confirm payment
+                        </Button>
+                      ) : (
+                        <Link
+                          href={href}
+                          className="inline-flex items-center gap-0.5 rounded-md px-2 py-1 text-xs font-medium text-[#4b5563] hover:bg-[#f3f4f6] hover:text-[#111827]"
+                        >
+                          Open
+                          <ChevronRight className="size-3.5" aria-hidden="true" />
+                          <span className="sr-only">order {o.order_number}</span>
+                        </Link>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -169,6 +204,16 @@ export function OrderManagement() {
           <Pagination meta={data?.pagination} onPage={(p) => setFilters({ page: String(p) })} />
         </DataState>
       </Panel>
+
+      <ManualPaymentModal
+        open={paying !== null}
+        order={paying}
+        onClose={() => setPaying(null)}
+        onDone={() => {
+          setPaying(null);
+          reload();
+        }}
+      />
     </div>
   );
 }

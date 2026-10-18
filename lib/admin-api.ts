@@ -676,6 +676,15 @@ export function adminGetAuditLogs(params: { action?: string; entity_type?: strin
 // Settings, system status, account
 // =============================================================================
 
+export type PaymentMethodId = 'monnify' | 'kora' | 'whatsapp';
+
+/** enabled = offered at checkout: the admin switch is on and backend/.env allows it. */
+export interface PaymentMethodStatus {
+  enabled: boolean;
+  admin_on: boolean;
+  server_allows: boolean;
+}
+
 export interface StoreSettings {
   editable: Array<{ key: string; value: string; help: string }>;
   readonly: {
@@ -684,7 +693,7 @@ export interface StoreSettings {
     kora_mode: 'live' | 'sandbox' | 'not_configured';
     monnify_mode: 'live' | 'sandbox' | 'not_configured';
     mail_mode: 'smtp' | 'log_only';
-    payment_methods: { monnify: boolean; kora: boolean; whatsapp: boolean };
+    payment_methods: Record<PaymentMethodId, PaymentMethodStatus>;
     order_payment_window_minutes: number;
     manual_payment_window_hours: number;
   };
@@ -696,6 +705,11 @@ export function adminGetSettings() {
 
 export function adminUpdateSettings(changes: Record<string, string>) {
   return send<Record<string, string>>('/admin/settings', 'PUT', changes);
+}
+
+/** Switch checkout payment methods on or off (at least one must stay available). */
+export function adminUpdatePaymentMethods(changes: Partial<Record<PaymentMethodId, boolean>>) {
+  return send<Record<PaymentMethodId, PaymentMethodStatus>>('/admin/settings/payment-methods', 'PUT', changes);
 }
 
 export interface SystemStatus {

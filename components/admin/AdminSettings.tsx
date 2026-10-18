@@ -2,7 +2,15 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { adminGetSettings, adminUpdateSettings, errorMessage, fieldErrors } from '@/lib/admin-api';
+import {
+  type PaymentMethodId,
+  type StoreSettings,
+  adminGetSettings,
+  adminUpdatePaymentMethods,
+  adminUpdateSettings,
+  errorMessage,
+  fieldErrors,
+} from '@/lib/admin-api';
 import { NIGERIAN_STATES } from '@/lib/nigeria';
 import {
   Button,
@@ -44,8 +52,77 @@ function gatewayMode(mode: string) {
   return <StatusPill label="Not configured" tone="neutral" />;
 }
 
-function enabled(on: boolean) {
-  return on ? <StatusPill label="On" tone="green" /> : <StatusPill label="Off" tone="neutral" />;
+const METHODS: Array<{ id: PaymentMethodId; name: string; description: string }> = [
+  { id: 'monnify', name: 'Monnify', description: 'Card, bank transfer, USSD. Confirmed automatically.' },
+  { id: 'kora', name: 'Kora', description: 'Card and bank transfer. Confirmed automatically.' },
+  { id: 'whatsapp', name: 'Pay via WhatsApp', description: 'Customer sends the invoice on WhatsApp and pays by transfer; you confirm it in Orders.' },
+];
+
+/**
+ * On/off switches for the payment methods offered at checkout. Saves immediately.
+ */
+function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['readonly']; onSaved: () => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState<PaymentMethodId | null>(null);
+
+  const mode = (id: PaymentMethodId) =>
+    id === 'kora' ? gatewayMode(settings.kora_mode) : id === 'monnify' ? gatewayMode(settings.monnify_mode) : null;
+
+  const toggle = async (id: PaymentMethodId, on: boolean) => {
+    setBusy(id);
+    try {
+      await adminUpdatePaymentMethods({ [id]: on });
+      toast.success(`${METHODS.find((m) => m.id === id)?.name} is now ${on ? 'on' : 'off'} at checkout.`);
+      onSaved();
+    } catch (err) {
+      if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The change could not be saved.'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Panel title="Payment methods at checkout" bodyClassName="p-0">
+      <ul className="divide-y divide-[#f3f4f6]">
+        {METHODS.map((m) => {
+          const s = settings.payment_methods[m.id];
+          const labelId = `pm-${m.id}`;
+          return (
+            <li key={m.id} className="flex items-center justify-between gap-4 px-4 py-3">
+              <div className="min-w-0">
+                <p id={labelId} className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[#111827]">
+                  {m.name}
+                  {mode(m.id)}
+                </p>
+                <p className="mt-0.5 text-xs text-[#6b7280]">{m.description}</p>
+                {!s.server_allows && (
+                  <p className="mt-1 text-xs font-medium text-amber-700">
+                    Turned off in backend/.env (PAYMENT_{m.id.toUpperCase()}_ENABLED), so customers can&apos;t use it even when this is on.
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={s.admin_on}
+                aria-labelledby={labelId}
+                disabled={busy !== null}
+                onClick={() => toggle(m.id, !s.admin_on)}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/50 disabled:opacity-60 ${
+                  s.admin_on ? 'bg-[#1f2937]' : 'bg-[#d1d5db]'
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`inline-block size-5 rounded-full bg-white shadow transition-transform ${s.admin_on ? 'translate-x-[22px]' : 'translate-x-0.5'}`}
+                />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </Panel>
+  );
 }
 
 /**
@@ -173,6 +250,8 @@ export function AdminSettings() {
               </form>
             </Panel>
 
+            <PaymentMethodsPanel settings={ro} onSaved={reload} />
+
             <Panel title="Configured on the server" bodyClassName="p-4">
               <div className="flex flex-col gap-4">
                 <Notice>
@@ -184,16 +263,6 @@ export function AdminSettings() {
                     { label: 'Timezone', value: ro.timezone },
                     { label: 'Kora', value: gatewayMode(ro.kora_mode) },
                     { label: 'Monnify', value: gatewayMode(ro.monnify_mode) },
-                    {
-                      label: 'Payment methods at checkout',
-                      value: (
-                        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                          <span className="inline-flex items-center gap-1">Monnify {enabled(ro.payment_methods.monnify)}</span>
-                          <span className="inline-flex items-center gap-1">Kora {enabled(ro.payment_methods.kora)}</span>
-                          <span className="inline-flex items-center gap-1">WhatsApp {enabled(ro.payment_methods.whatsapp)}</span>
-                        </span>
-                      ),
-                    },
                     {
                       label: 'Email delivery',
                       value: ro.mail_mode === 'smtp' ? <StatusPill label="SMTP" tone="green" /> : <StatusPill label="Log only (not sent)" tone="amber" />,

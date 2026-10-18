@@ -141,8 +141,26 @@ class PaymentFinalizer
                     [$orderId, "Payment confirmed via {$label}. Reference: {$providerReference}", $confirmedBy]
                 );
 
+                // Other attempts the customer opened but never paid (e.g. Kora opened, then paid
+                // with Monnify) are closed, so they no longer show as pending. Money that still
+                // arrives on one of them is recorded and flagged as a duplicate payment below.
+                $db->executeUpdate(
+                    "UPDATE `payments` SET `status` = 'cancelled', `updated_at` = NOW()
+                     WHERE `order_id` = ? AND `status` = 'pending' AND `id` <> ?",
+                    'ii',
+                    [$orderId, (int) $payment['id']]
+                );
+
                 $order['order_status'] = 'paid';
                 $order['payment_status'] = 'successful';
+
+                if (!empty($order['user_id'])) {
+                    $userId = (int) $order['user_id'];
+                    $db->afterCommit(function () use ($orderId, $userId): void {
+                        $this->removePaidItemsFromSavedCart($orderId, $userId);
+                    });
+                }
+
                 $mailOrder = $order;
                 $db->afterCommit(static function () use ($mailOrder, $providerReference, $label, $method): void {
                     MailService::getInstance()->sendPaymentVerified($mailOrder, [
@@ -257,18 +275,57 @@ class PaymentFinalizer
                 throw new InvalidArgumentException('This payment reference has already been recorded for this order.');
             }
 
-            $db->insert(
-                "INSERT INTO `payments` (`order_id`, `provider`, `provider_reference`, `amount`, `currency`, `payment_method`, `status`, `provider_payload_redacted`)
-                 VALUES (?, 'manual', ?, ?, ?, 'bank_transfer', 'pending', ?)",
-                'isdss',
-                [
-                    $orderId,
-                    $providerReference,
-                    (float) $order['grand_total'],
-                    $order['currency'],
-                    json_encode(['admin_reference' => $reference, 'note' => $note, 'confirmed_by' => $adminId]),
-                ]
+            // One bank transfer can only pay for one order.
+            $usedOn = $db->fetchOne(
+                "SELECT o.`order_number` FROM `payments` p JOIN `orders` o ON o.`id` = p.`order_id`
+                 WHERE p.`provider` IN ('manual', 'whatsapp') AND p.`status` IN ('successful', 'partially_refunded', 'refunded')
+                   AND JSON_UNQUOTE(JSON_EXTRACT(p.`provider_payload_redacted`, '$.admin_reference')) = ?
+                 LIMIT 1",
+                's',
+                [$reference]
             );
+            if ($usedOn !== null) {
+                throw new InvalidArgumentException("This bank reference was already used to confirm order {$usedOn['order_number']}.");
+            }
+
+            $details = json_encode([
+                'admin_reference' => $reference,
+                'note' => $note,
+                'confirmed_by' => $adminId,
+                'confirmed_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            // When the customer chose "Pay via WhatsApp", settle that open attempt instead of
+            // adding a second row, so the order shows one payment, not a pending one plus a manual one.
+            $whatsappAttempt = $db->fetchOne(
+                "SELECT `id`, `provider_reference` FROM `payments`
+                 WHERE `order_id` = ? AND `provider` = 'whatsapp' AND `status` = 'pending'
+                 ORDER BY `id` DESC LIMIT 1 FOR UPDATE",
+                'i',
+                [$orderId]
+            );
+
+            if ($whatsappAttempt !== null) {
+                $providerReference = (string) $whatsappAttempt['provider_reference'];
+                $db->executeUpdate(
+                    "UPDATE `payments` SET `payment_method` = 'bank_transfer', `provider_payload_redacted` = ?, `updated_at` = NOW() WHERE `id` = ?",
+                    'si',
+                    [$details, (int) $whatsappAttempt['id']]
+                );
+            } else {
+                $db->insert(
+                    "INSERT INTO `payments` (`order_id`, `provider`, `provider_reference`, `amount`, `currency`, `payment_method`, `status`, `provider_payload_redacted`)
+                     VALUES (?, 'manual', ?, ?, ?, 'bank_transfer', 'pending', ?)",
+                    'isdss',
+                    [
+                        $orderId,
+                        $providerReference,
+                        (float) $order['grand_total'],
+                        $order['currency'],
+                        $details,
+                    ]
+                );
+            }
 
             return $this->finalizeSuccess($providerReference, [
                 'amount' => (float) $order['grand_total'],
@@ -278,6 +335,35 @@ class PaymentFinalizer
                 'confirmed_by' => $adminId,
             ]);
         });
+    }
+
+    /**
+     * Take a paid order's items out of the customer's saved account cart, so the cart badge
+     * clears on every device even when payment was confirmed later (e.g. a WhatsApp transfer).
+     * Runs after the payment commits; a failure here never affects the payment.
+     */
+    private function removePaidItemsFromSavedCart(int $orderId, int $userId): void
+    {
+        try {
+            $this->db->executeUpdate(
+                "UPDATE `cart_items` ci
+                 JOIN `carts` c ON c.`id` = ci.`cart_id` AND c.`user_id` = ?
+                 JOIN (SELECT `variant_id`, SUM(`quantity`) AS qty FROM `order_items`
+                       WHERE `order_id` = ? AND `variant_id` IS NOT NULL GROUP BY `variant_id`) oi
+                   ON oi.`variant_id` = ci.`variant_id`
+                 SET ci.`quantity` = ci.`quantity` - oi.qty",
+                'ii',
+                [$userId, $orderId]
+            );
+            $this->db->executeUpdate(
+                "DELETE ci FROM `cart_items` ci JOIN `carts` c ON c.`id` = ci.`cart_id`
+                 WHERE c.`user_id` = ? AND ci.`quantity` <= 0",
+                'i',
+                [$userId]
+            );
+        } catch (\Throwable $e) {
+            error_log('[Saved cart cleanup] ' . $e->getMessage());
+        }
     }
 
     /**

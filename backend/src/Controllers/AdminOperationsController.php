@@ -12,6 +12,8 @@ use App\Repositories\SessionRepository;
 use App\Services\AuditService;
 use App\Services\FulfillmentService;
 use App\Services\MailService;
+use App\Services\PaymentMethods;
+use App\Support\PhoneNumber;
 use App\Support\RateLimiter;
 use App\Support\RequestContext;
 use App\Support\Response;
@@ -31,7 +33,7 @@ class AdminOperationsController
         'store_name' => 'Store name shown in emails and receipts',
         'store_contact_email' => 'Customer support email (shown at checkout and in emails)',
         'store_contact_phone' => 'Customer support phone',
-        'store_whatsapp_phone' => 'WhatsApp number customers use for manual payments and support',
+        'store_whatsapp_phone' => 'WhatsApp number for payments and support. 080…, 070… and 090… numbers are saved as +234…',
         'store_origin_address' => 'Dispatch address (where parcels ship from)',
         'store_origin_city' => 'Dispatch city',
         'store_origin_state' => 'Dispatch state',
@@ -823,11 +825,7 @@ class AdminOperationsController
                 'kora_mode' => self::koraMode(),
                 'monnify_mode' => self::monnifyMode(),
                 'mail_mode' => self::mailMode(),
-                'payment_methods' => [
-                    'monnify' => filter_var(Env::get('PAYMENT_MONNIFY_ENABLED', 'true'), FILTER_VALIDATE_BOOLEAN),
-                    'kora' => filter_var(Env::get('PAYMENT_KORA_ENABLED', 'true'), FILTER_VALIDATE_BOOLEAN),
-                    'whatsapp' => filter_var(Env::get('PAYMENT_WHATSAPP_ENABLED', 'true'), FILTER_VALIDATE_BOOLEAN),
-                ],
+                'payment_methods' => PaymentMethods::status($this->db),
                 'order_payment_window_minutes' => \App\Services\PaymentAttempts::gatewayWindowMinutes(),
                 'manual_payment_window_hours' => (int) (\App\Services\PaymentAttempts::manualWindowMinutes() / 60),
             ],
@@ -853,8 +851,11 @@ class AdminOperationsController
                 $errors[$key] = 'Too long (255 characters maximum).';
             } elseif ($key === 'store_contact_email' && $value !== '' && !filter_var($value, FILTER_VALIDATE_EMAIL)) {
                 $errors[$key] = 'Enter a valid email address.';
-            } elseif (in_array($key, ['store_contact_phone', 'store_whatsapp_phone'], true) && $value !== '' && !preg_match('/^\+?[0-9 ()-]{7,20}$/', $value)) {
-                $errors[$key] = 'Enter a valid phone number.';
+            } elseif (in_array($key, ['store_contact_phone', 'store_whatsapp_phone'], true) && $value !== '' && PhoneNumber::toInternational($value) === null) {
+                $errors[$key] = 'Enter a valid phone number, e.g. 0803 123 4567 or +234 803 123 4567.';
+            } elseif ($key === 'store_whatsapp_phone' && $value !== '') {
+                // Saved as +234... so wa.me links work whether the admin typed 080..., 070... or 090...
+                $changes[$key] = PhoneNumber::toInternational($value);
             } elseif ($key === 'store_name' && $value === '') {
                 $errors[$key] = 'Store name cannot be empty.';
             } else {
@@ -887,6 +888,43 @@ class AdminOperationsController
             $changes
         );
         Response::success($changes, 'Settings saved.');
+    }
+
+    /**
+     * PUT /api/v1/admin/settings/payment-methods  {monnify: bool, kora: bool, whatsapp: bool}
+     * Switch checkout payment methods on or off. At least one method must stay available.
+     */
+    public function updatePaymentMethods(): void
+    {
+        $body = JsonBodyMiddleware::getBody();
+        $before = PaymentMethods::adminSwitches($this->db);
+        $after = $before;
+        foreach (PaymentMethods::ALL as $method) {
+            if (array_key_exists($method, $body)) {
+                $after[$method] = filter_var($body[$method], FILTER_VALIDATE_BOOLEAN);
+            }
+        }
+
+        $available = array_filter(PaymentMethods::ALL, static fn (string $m): bool => $after[$m] && PaymentMethods::serverAllows($m));
+        if (count($available) === 0) {
+            Response::error('Keep at least one payment method on, or customers cannot pay for orders.', 422, 'VALIDATION_ERROR');
+        }
+
+        foreach (PaymentMethods::ALL as $method) {
+            if ($after[$method] === $before[$method]) {
+                continue;
+            }
+            $this->db->execute(
+                "INSERT INTO `store_settings` (`key_name`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)",
+                'ss',
+                [PaymentMethods::settingKey($method), $after[$method] ? '1' : '0']
+            );
+        }
+
+        if ($after !== $before) {
+            AuditService::record($this->adminId(), 'settings.payment_methods', 'store_settings', 'payment_methods', $before, $after);
+        }
+        Response::success(PaymentMethods::status($this->db), 'Payment methods saved.');
     }
 
     public static function koraMode(): string

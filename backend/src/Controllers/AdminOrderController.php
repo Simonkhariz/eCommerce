@@ -53,6 +53,10 @@ class AdminOrderController
 
         if ($status === 'attention') {
             $where[] = "o.requires_attention = 1";
+        } elseif ($status === 'awaiting_whatsapp') {
+            // Customer chose "Pay via WhatsApp" and the admin has not confirmed the transfer yet.
+            $where[] = "o.order_status = 'pending_payment' AND EXISTS (
+                SELECT 1 FROM `payments` pw WHERE pw.order_id = o.id AND pw.provider = 'whatsapp' AND pw.status = 'pending')";
         } elseif ($status !== '' && $status !== 'all') {
             $where[] = "o.order_status = ?";
             $params[] = $status;

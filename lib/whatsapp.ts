@@ -7,12 +7,23 @@
 export const SUPPORT_WHATSAPP_NUMBER = '2349066707079';
 export const SUPPORT_PHONE_FORMATTED = '+234 906 670 7079';
 
-/** Normalise a configured phone number ("+234 906 ...", "0906...") to wa.me digits. */
-export function toWhatsAppDigits(phone?: string | null): string {
-  const digits = (phone || '').replace(/\D/g, '');
-  if (!digits) return SUPPORT_WHATSAPP_NUMBER;
-  if (digits.startsWith('0') && digits.length === 11) return `234${digits.slice(1)}`;
+/**
+ * International digits for wa.me from a number typed in Nigerian local format:
+ * "0803 123 4567", "803 123 4567", "+234 0803..." and "+234 803..." all become "2348031234567".
+ * Numbers from other countries are kept as typed. Returns '' when there are no digits.
+ */
+export function normalizePhoneDigits(phone?: string | null): string {
+  let digits = (phone || '').replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith('0')) return `234${digits.slice(1)}`;
+  if (digits.length === 10 && /^[789]/.test(digits)) return `234${digits}`;
+  if (digits.length === 14 && digits.startsWith('2340')) return `234${digits.slice(4)}`;
   return digits;
+}
+
+/** Normalise a configured phone number to wa.me digits (store fallback when none is set). */
+export function toWhatsAppDigits(phone?: string | null): string {
+  return normalizePhoneDigits(phone) || SUPPORT_WHATSAPP_NUMBER;
 }
 
 export interface WhatsAppOrderItem {
