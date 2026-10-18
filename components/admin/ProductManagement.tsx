@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ImageOff, Plus, Trash2, Upload } from 'lucide-react';
+import { ImageOff, Plus, Share2, Trash2, Upload } from 'lucide-react';
 import {
   AdminProduct,
   PRODUCT_IMAGE_PLACEHOLDER,
@@ -16,6 +16,7 @@ import {
 import { adminGetCategories, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { formatPrice, num } from '@/lib/admin-format';
 import { slugify } from '@/components/admin/AdminCategories';
+import { ShareProductModal, type ShareableProduct } from '@/components/admin/ShareProductModal';
 import {
   Button,
   Checkbox,
@@ -208,6 +209,7 @@ export function ProductManagement() {
   // Editor
   // ---------------------------------------------------------------------------
   const [editorOpen, setEditorOpen] = useState(false);
+  const [sharing, setSharing] = useState<ShareableProduct | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
   const [slugTouched, setSlugTouched] = useState(false);
@@ -566,9 +568,21 @@ export function ProductManagement() {
                       </select>
                     </td>
                     <td className="text-right">
-                      <Button size="sm" onClick={() => openEdit(p)}>
-                        Edit
-                      </Button>
+                      <div className="inline-flex gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setSharing({ name: p.name, slug: p.slug, status: p.status, price })}
+                          aria-label={`Share ${p.name}`}
+                          title="Send the product link to a customer"
+                        >
+                          <Share2 className="size-3.5" aria-hidden="true" />
+                          Share
+                        </Button>
+                        <Button size="sm" onClick={() => openEdit(p)}>
+                          Edit
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -578,6 +592,8 @@ export function ProductManagement() {
           <Pagination meta={data?.pagination} onPage={(n) => setFilters({ page: String(n) })} />
         </DataState>
       </Panel>
+
+      <ShareProductModal product={sharing} onClose={() => setSharing(null)} />
 
       <Modal
         open={editorOpen}
