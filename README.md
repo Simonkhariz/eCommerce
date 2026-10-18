@@ -51,6 +51,7 @@ on its own, but nothing replaces the schedule on a quiet store.
 | :--- | :--- | :--- |
 | `php backend/scripts/expire_pending_orders.php` | 10 min | Asks Kora/Monnify for the final status of overdue unpaid orders, then cancels the rest and releases their stock and promo use. |
 | `php backend/scripts/process_outbox.php` | 5 min | Sends queued email (newsletters, retries of failed order emails). |
+| `php backend/scripts/cleanup_database.php` | daily | Removes expired sessions and sign-in links, never-paid cancelled orders older than 30 days, abandoned guest carts and old emails. Paid orders are never removed. |
 
 ### Email
 

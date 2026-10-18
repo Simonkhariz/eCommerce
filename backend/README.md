@@ -166,11 +166,26 @@ php backend/scripts/process_outbox.php              # one batch of up to 100
 php backend/scripts/process_outbox.php --limit=500
 ```
 ```powershell
-schtasks /Create /SC MINUTE /MO 5 /TN "ShopCo Send Email" /TR "C:
-mpp\php\php.exe C:\path	o\E-commerce\backend\scripts\process_outbox.php"
+schtasks /Create /SC MINUTE /MO 5 /TN "ShopCo Send Email" /TR "C:\xampp\php\php.exe C:\path\to\E-commerce\backend\scripts\process_outbox.php"
 ```
 With `MAIL_MAILER=log` (the default) emails go to `backend/storage/logs/mail.log` and the admin outbox
 shows them as "Logged only". The admin Email outbox page also has "Send queued now".
+
+### Database clean-up
+Removes data the store no longer needs: expired sign-in sessions, used or expired sign-in links,
+old rate-limit counters, cancelled orders that were never paid (after 30 days), abandoned guest
+carts (30 days), old sent emails (180 days) and old gateway notifications (365 days). Paid orders,
+refunds, audit logs, stock history and orders flagged for attention are never removed.
+```bash
+php backend/scripts/cleanup_database.php --dry-run   # only count what would be removed
+php backend/scripts/cleanup_database.php
+```
+Windows Task Scheduler (daily at 03:00):
+```powershell
+schtasks /Create /SC DAILY /ST 03:00 /TN "ShopCo Cleanup" /TR "C:\xampp\php\php.exe C:\path\to\E-commerce\backend\scripts\cleanup_database.php"
+```
+Retention is set in `.env`: `CLEANUP_UNPAID_ORDER_DAYS`, `CLEANUP_GUEST_CART_DAYS`,
+`CLEANUP_EMAIL_OUTBOX_DAYS`, `CLEANUP_WEBHOOK_EVENT_DAYS` (0 switches a rule off).
 
 ### Admin panel
 The admin lives at `/admin` on the storefront (one route per screen, e.g. `/admin/orders`, `/admin/shipping/zones`).
