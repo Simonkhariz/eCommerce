@@ -201,8 +201,8 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
         </Notice>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="flex flex-col gap-4 lg:col-span-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
           <Panel title={`Items (${items.length})`}>
             {items.length === 0 ? (
               <EmptyState title="No items recorded" />
@@ -365,7 +365,7 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
           </Panel>
         </div>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4">
           <Panel title="Customer & delivery" bodyClassName="px-4 py-3">
             <DetailList
               items={[

@@ -106,16 +106,21 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
-                  <div className="flex gap-1.5 px-2">
+                  <div className="flex">
                     {activeBanners.map((_, idx) => (
                       <button
                         key={idx}
                         onClick={() => setCurrentIndex(idx)}
                         aria-label={`Go to banner ${idx + 1}`}
-                        className={`h-2 rounded-full transition-all ${
-                          idx === currentIndex ? 'w-6 bg-black' : 'w-2 bg-neutral-300'
-                        }`}
-                      />
+                        aria-current={idx === currentIndex ? 'true' : undefined}
+                        className="flex h-9 items-center px-[3px]"
+                      >
+                        <span
+                          className={`block h-2 rounded-full transition-all ${
+                            idx === currentIndex ? 'w-6 bg-black' : 'w-2 bg-neutral-300'
+                          }`}
+                        />
+                      </button>
                     ))}
                   </div>
                   <button
@@ -131,14 +136,14 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
 
             {/* Real store numbers (hidden when unknown) */}
             {statItems.length > 0 && (
-              <dl className="flex flex-wrap items-center gap-y-4 pt-4 sm:pt-6 border-t border-neutral-300/40">
+              <dl className="grid grid-cols-3 sm:flex sm:flex-wrap sm:items-center gap-y-4 pt-4 sm:pt-6 border-t border-neutral-300/40">
                 {statItems.map((item, idx) => (
                   <div
                     key={item.label}
-                    className={`pr-6 sm:pr-8 ${idx > 0 ? 'pl-6 sm:pl-8 border-l border-neutral-300' : ''}`}
+                    className={`min-w-0 pr-3 sm:pr-8 ${idx > 0 ? 'pl-3 sm:pl-8 border-l border-neutral-300' : ''}`}
                   >
                     <dt className="sr-only">{item.label}</dt>
-                    <dd className="font-bold text-2xl sm:text-4xl text-black">{item.value}</dd>
+                    <dd className="font-bold text-xl sm:text-4xl text-black">{item.value}</dd>
                     <dd className="text-xs sm:text-sm text-neutral-600" aria-hidden="true">
                       {item.label}
                     </dd>
@@ -159,7 +164,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
             </div>
 
             <div
-              className="relative w-full max-w-lg h-[460px] sm:h-[540px] lg:h-[620px] flex items-end justify-center overflow-hidden"
+              className="relative w-full max-w-lg h-[380px] sm:h-[540px] lg:h-[620px] flex items-end justify-center overflow-hidden"
               style={{ maxWidth: '32rem', maxHeight: '620px' }}
             >
               <Image

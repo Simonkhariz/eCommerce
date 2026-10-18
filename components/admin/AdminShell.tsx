@@ -126,7 +126,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               href="/admin/orders?status=attention"
               aria-label={attentionCount ? `${attentionCount} orders need attention` : 'Orders needing attention'}
               title="Orders needing attention"
-              className="relative rounded-md p-1.5 outline-none transition-colors hover:bg-black/[0.05] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
+              className="relative rounded-md p-2.5 outline-none sm:p-1.5 transition-colors hover:bg-black/[0.05] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
             >
               <AdminIcon name="bell" />
               {!!attentionCount && (
@@ -140,7 +140,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               href="/admin/settings"
               aria-label="Store settings"
               title="Store settings"
-              className="rounded-md p-1.5 outline-none transition-colors hover:bg-black/[0.05] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
+              className="rounded-md p-2.5 outline-none sm:p-1.5 transition-colors hover:bg-black/[0.05] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
             >
               <AdminIcon name="hd-settings" />
             </Link>

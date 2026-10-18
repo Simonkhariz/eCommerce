@@ -1,4 +1,6 @@
-import React from 'react';
+'use client';
+
+import React, { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ApiCategory } from '@/lib/api-client';
@@ -10,6 +12,9 @@ interface CategoryGridProps {
 }
 
 export const CategoryGrid: React.FC<CategoryGridProps> = ({ categories }) => {
+  // A picture that fails to load is dropped, leaving the plain dark card instead of a broken icon.
+  const [failed, setFailed] = useState<Record<string, true>>({});
+
   // Only the store's real categories, with their real published-product counts.
   const items = (categories ?? []).map((c) => ({
     name: c.name,
@@ -53,12 +58,13 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({ categories }) => {
             >
               {/* Background Image with Zoom (only when the category has its own image) */}
               <div className="absolute inset-0 z-0 bg-neutral-800">
-                {cat.image && (
+                {cat.image && !failed[cat.slug] && (
                   <Image
                     src={cat.image}
                     alt=""
                     fill
                     unoptimized
+                    onError={() => setFailed((f) => ({ ...f, [cat.slug]: true }))}
                     sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw"
                     className="object-cover object-center group-hover:scale-110 transition-transform duration-500 opacity-90 group-hover:opacity-100"
                   />

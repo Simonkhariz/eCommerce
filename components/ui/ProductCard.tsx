@@ -45,7 +45,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         <button
           type="button"
           onClick={() => toggleWishlist(product)}
-          className={`absolute top-2.5 right-2.5 p-2 rounded-full transition-all duration-200 z-10 ${
+          className={`absolute top-2 right-2 p-2.5 rounded-full transition-all duration-200 z-10 ${
             isFavorited
               ? 'bg-white text-red-500 shadow-md scale-105'
               : 'bg-white/80 backdrop-blur-sm text-neutral-600 hover:text-red-500 hover:bg-white shadow-sm'
@@ -85,7 +85,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
 
       <div className="flex items-center justify-between gap-2 mt-auto pt-2">
         <div className="flex items-baseline sm:items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
-          <span className="font-bold text-base sm:text-xl text-black">{formatPrice(product.price)}</span>
+          <span className="font-bold text-base sm:text-xl md:text-lg lg:text-xl text-black">{formatPrice(product.price)}</span>
           {product.originalPrice && product.originalPrice > product.price && (
             <span className="font-semibold text-xs sm:text-sm text-neutral-600 line-through">
               <span className="sr-only">Was </span>
@@ -96,11 +96,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
 
         <Link
           href={href}
-          className="bg-black hover:bg-neutral-800 text-white rounded-full p-2 sm:px-3.5 sm:py-1.5 flex items-center justify-center gap-1 text-xs font-semibold shadow-sm hover:shadow-md transition-all shrink-0"
+          className="bg-black hover:bg-neutral-800 text-white rounded-full p-2.5 sm:px-3.5 sm:py-2 md:p-2.5 lg:px-3.5 lg:py-2 flex items-center justify-center gap-1 text-xs font-semibold shadow-sm hover:shadow-md transition-all shrink-0"
           aria-label={soldOut ? `View ${product.name}` : `Choose options for ${product.name}`}
         >
           <HugeiconsIcon icon={ShoppingBag01Icon} size={15} aria-hidden="true" />
-          <span className="hidden sm:inline">{soldOut ? 'View' : 'Options'}</span>
+          <span className="hidden sm:inline md:hidden lg:inline">{soldOut ? 'View' : 'Options'}</span>
         </Link>
       </div>
     </article>

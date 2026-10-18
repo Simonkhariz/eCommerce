@@ -7,7 +7,7 @@ import { apiSubscribeNewsletter } from '@/lib/api-client';
 import { useStoreInfo, useStoreNav, whatsAppLink } from '@/lib/use-store-info';
 import { useStoreSupport } from '@/lib/use-store-support';
 
-const linkClass = 'transition-colors hover:text-black hover:underline';
+const linkClass = 'inline-block py-1 transition-colors hover:text-black hover:underline';
 
 /** Payment options the store actually accepts (through Kora / Monnify, or manual bank transfer). */
 const PAYMENT_BADGES = [
@@ -51,11 +51,11 @@ function NewsletterForm() {
   }
 
   return (
-    <form onSubmit={handleSubscribe} className="flex flex-col gap-3" noValidate>
+    <form onSubmit={handleSubscribe} className="flex flex-col gap-3 sm:flex-row sm:flex-wrap lg:flex-col lg:flex-nowrap" noValidate>
       <label htmlFor={inputId} className="sr-only">
         Email address
       </label>
-      <div className="relative">
+      <div className="relative sm:flex-1">
         <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-neutral-500" aria-hidden="true" />
         <input
           id={inputId}
@@ -76,12 +76,12 @@ function NewsletterForm() {
       <button
         type="submit"
         disabled={state === 'sending' || !email.trim()}
-        className="w-full rounded-full bg-white py-3 text-sm font-semibold text-black shadow-md transition-colors hover:bg-neutral-100 disabled:opacity-60 sm:py-3.5"
+        className="w-full rounded-full bg-white py-3 text-sm font-semibold text-black shadow-md sm:w-auto sm:px-6 lg:w-full transition-colors hover:bg-neutral-100 disabled:opacity-60 sm:py-3.5"
       >
         {state === 'sending' ? 'Subscribing…' : 'Subscribe to newsletter'}
       </button>
       {state === 'error' && (
-        <p id={statusId} role="alert" className="text-sm text-red-300">
+        <p id={statusId} role="alert" className="w-full text-sm text-red-300">
           {message}
         </p>
       )}
@@ -98,32 +98,32 @@ export const Footer: React.FC = () => {
   const waLink = whatsAppLink(whatsappNumber, 'Hello, I have a question about my order.');
 
   return (
-    <footer className="relative mt-36 bg-[#F0F0F0] pb-12 pt-36">
+    <footer className="relative mt-36 bg-[#F0F0F0] pb-12 pt-48 lg:pt-36">
       {/* Newsletter card (overhangs the top of the footer) */}
       <div className="absolute -top-24 left-0 right-0 z-20 mx-auto max-w-7xl px-4 sm:-top-28 sm:px-6 lg:px-8">
-        <div className="flex flex-col items-center justify-between gap-6 rounded-3xl bg-black p-6 text-white shadow-2xl sm:p-10 md:flex-row md:gap-10 md:p-12">
-          <div className="max-w-md">
-            <h2 className="font-integral text-2xl uppercase leading-tight tracking-tight text-white sm:text-3xl sm:leading-[1.05] md:text-4xl lg:text-[42px]">
+        <div className="flex flex-col items-center justify-between gap-6 rounded-3xl bg-black p-6 text-white shadow-2xl sm:p-10 lg:flex-row lg:gap-10 md:p-12">
+          <div className="w-full lg:max-w-md">
+            <h2 className="font-integral text-2xl uppercase leading-tight tracking-tight text-white sm:text-3xl sm:leading-[1.05] lg:text-[42px]">
               Stay up to date about our latest offers
             </h2>
           </div>
-          <div className="w-full max-w-sm flex-1 md:w-auto">
+          <div className="w-full lg:max-w-sm lg:flex-1">
             <NewsletterForm />
           </div>
         </div>
       </div>
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 gap-10 border-b border-neutral-300 pb-12 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-10 border-b border-neutral-300 pb-12 md:grid-cols-3 lg:grid-cols-5">
           {/* Brand & contact */}
-          <div className="space-y-4 lg:col-span-2">
+          <div className="col-span-2 space-y-4 md:col-span-3 lg:col-span-2">
             <Link href="/" className="block font-integral text-2xl tracking-tighter text-black sm:text-3xl lg:text-4xl">
               SHOP.CO
             </Link>
             <p className="max-w-sm text-sm leading-relaxed text-neutral-700">
               Clothes that suit your style and that you&apos;re proud to wear, delivered across Nigeria.
             </p>
-            <ul className="space-y-1.5 text-sm text-neutral-700">
+            <ul className="space-y-0.5 text-sm text-neutral-700">
               {origin?.contact_email && (
                 <li>
                   <a href={`mailto:${origin.contact_email}`} className={linkClass}>
@@ -152,7 +152,7 @@ export const Footer: React.FC = () => {
           {/* Shop */}
           <nav aria-label="Shop">
             <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-black">Shop</h3>
-            <ul className="space-y-3 text-sm text-neutral-700">
+            <ul className="space-y-1 text-sm text-neutral-700">
               <li>
                 <Link href="/category" className={linkClass}>
                   All products
@@ -176,7 +176,7 @@ export const Footer: React.FC = () => {
           {/* Help */}
           <nav aria-label="Help">
             <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-black">Help</h3>
-            <ul className="space-y-3 text-sm text-neutral-700">
+            <ul className="space-y-1 text-sm text-neutral-700">
               <li>
                 <Link href="/track-order" className={`font-semibold text-emerald-800 ${linkClass}`}>
                   Track an order
@@ -213,7 +213,7 @@ export const Footer: React.FC = () => {
           {/* Company */}
           <nav aria-label="Company">
             <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-black">Company</h3>
-            <ul className="space-y-3 text-sm text-neutral-700">
+            <ul className="space-y-1 text-sm text-neutral-700">
               <li>
                 <Link href="/about" className={linkClass}>
                   About us

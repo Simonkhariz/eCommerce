@@ -80,7 +80,7 @@ export default function HomePage() {
           <span className="sr-only">Loading products…</span>
           <div className="space-y-6" aria-hidden="true">
             <div className="h-10 bg-neutral-200 rounded-xl w-64 mx-auto animate-pulse" />
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
               {[1, 2, 3, 4].map((i) => (
                 <div key={i} className="space-y-3 animate-pulse">
                   <div className="aspect-square bg-neutral-200 rounded-2xl" />

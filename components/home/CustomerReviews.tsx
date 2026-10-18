@@ -67,13 +67,13 @@ export const CustomerReviews: React.FC<CustomerReviewsProps> = ({ reviews = [] }
 
         <ul
           ref={scrollRef}
-          className="flex gap-4 sm:gap-6 overflow-x-auto no-scrollbar pb-4 -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 snap-x"
+          className="flex gap-4 sm:gap-6 overflow-x-auto no-scrollbar pb-4 -mx-4 px-4 scroll-px-4 sm:-mx-6 sm:px-6 sm:scroll-px-6 lg:-mx-8 lg:px-8 lg:scroll-px-8 snap-x snap-mandatory"
           aria-label="Customer reviews"
         >
           {displayReviews.map((review) => (
             <li
               key={review.id}
-              className="min-w-[280px] sm:min-w-[380px] max-w-[400px] bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 flex flex-col justify-between snap-start shadow-sm shrink-0"
+              className="w-[85%] min-w-[260px] sm:w-auto sm:min-w-[380px] max-w-[400px] bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 flex flex-col justify-between snap-start shadow-sm shrink-0"
             >
               <div>
                 <div className="flex items-center gap-1 mb-3" role="img" aria-label={`${review.rating} out of 5 stars`}>

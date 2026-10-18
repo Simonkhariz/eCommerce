@@ -71,7 +71,7 @@ export const CartItemList: React.FC = () => {
                   <div className="min-w-0">
                     <Link
                       href={`/products/${item.slug}`}
-                      className="font-bold text-base sm:text-lg text-black hover:text-neutral-700 transition-colors line-clamp-1"
+                      className="font-bold text-base sm:text-lg text-black hover:text-neutral-700 transition-colors line-clamp-2"
                     >
                       {item.name}
                     </Link>
@@ -86,7 +86,7 @@ export const CartItemList: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => removeFromCart(item.id)}
-                    className="text-red-600 hover:text-red-800 p-1 transition-colors"
+                    className="-m-1.5 shrink-0 rounded-full p-2.5 text-red-600 transition-colors hover:bg-red-50 hover:text-red-800"
                     aria-label={`Remove ${item.name} (${item.size}, ${item.color.name}) from cart`}
                   >
                     <HugeiconsIcon icon={Delete02Icon} size={20} aria-hidden="true" />
@@ -105,12 +105,12 @@ export const CartItemList: React.FC = () => {
                     <div
                       role="group"
                       aria-label={`Quantity of ${item.name}`}
-                      className="flex items-center bg-[#F0F0F0] rounded-full px-3 sm:px-4 py-1.5 sm:py-2 gap-3 sm:gap-4"
+                      className="flex items-center bg-[#F0F0F0] rounded-full p-1 gap-1 sm:gap-2"
                     >
                       <button
                         type="button"
                         onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                        className="text-black hover:opacity-75"
+                        className="text-black hover:bg-black/5 rounded-full p-2.5"
                         aria-label={item.quantity <= 1 ? `Remove ${item.name} from cart` : `Decrease quantity of ${item.name}`}
                       >
                         <HugeiconsIcon icon={MinusSignIcon} size={14} aria-hidden="true" />
@@ -123,7 +123,7 @@ export const CartItemList: React.FC = () => {
                         type="button"
                         onClick={() => updateQuantity(item.id, item.quantity + 1)}
                         disabled={atMax}
-                        className="text-black hover:opacity-75 disabled:opacity-30"
+                        className="text-black hover:bg-black/5 rounded-full p-2.5 disabled:opacity-30"
                         aria-label={`Increase quantity of ${item.name}`}
                       >
                         <HugeiconsIcon icon={PlusSignIcon} size={14} aria-hidden="true" />

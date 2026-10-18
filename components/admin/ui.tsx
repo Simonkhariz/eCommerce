@@ -553,11 +553,53 @@ export function DataState({
 // =============================================================================
 
 /** Horizontally scrollable table wrapper with consistent cell styles. */
+/**
+ * When the table does not fit (phones, tablets, a narrow window), each row becomes a card
+ * with the column name beside every value (see `.admin-table` in globals.css). The column
+ * names are copied from the header cells, so screens only write an ordinary table.
+ */
 export function Table({ children, minWidth = 720 }: { children: React.ReactNode; minWidth?: number }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [stacked, setStacked] = useState(false);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+
+    const labelCells = () => {
+      const labels = Array.from(wrap.querySelectorAll('thead th')).map((th) => {
+        const text = th.textContent?.trim() ?? '';
+        // A header that is only visually hidden ("Actions") gets no label on the card.
+        const hidden = th.querySelector('.sr-only')?.textContent?.trim();
+        return hidden && hidden === text ? '' : text;
+      });
+      wrap.querySelectorAll('tbody tr').forEach((tr) => {
+        let column = 0;
+        Array.from(tr.children).forEach((cell) => {
+          const span = (cell as HTMLTableCellElement).colSpan || 1;
+          const label = span > 1 ? '' : labels[column] ?? '';
+          if (cell.getAttribute('data-label') !== label) cell.setAttribute('data-label', label);
+          column += span;
+        });
+      });
+    };
+    labelCells();
+
+    // Rows change when data loads, pages change or a row expands.
+    const rows = new MutationObserver(labelCells);
+    rows.observe(wrap, { childList: true, subtree: true });
+    const size = new ResizeObserver(() => setStacked(wrap.clientWidth < minWidth));
+    size.observe(wrap);
+    return () => {
+      rows.disconnect();
+      size.disconnect();
+    };
+  }, [minWidth]);
+
   return (
     // `relative` keeps visually-hidden labels inside the scroll area; without it they are
     // positioned against the page and make phones zoom out to the table's full width.
-    <div className="relative w-full overflow-x-auto">
+    <div ref={wrapRef} className="admin-table relative w-full overflow-x-auto" data-stacked={stacked || undefined}>
       <table
         className="w-full border-collapse text-left text-[13px] [&_td]:border-t [&_td]:border-[#f3f4f6] [&_td]:px-4 [&_td]:py-2.5 [&_td]:align-middle [&_th]:whitespace-nowrap [&_th]:bg-[#f9fafb] [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-normal [&_th]:text-[#4b5563]"
         style={{ minWidth }}

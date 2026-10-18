@@ -172,9 +172,9 @@ export function ProductDetailClient({ id }: { id: string }) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-pulse">
         <div className="h-4 bg-neutral-200 rounded w-48 mb-8" />
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
-          <div className="lg:col-span-6 aspect-square bg-neutral-200 rounded-2xl" />
-          <div className="lg:col-span-6 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 lg:gap-12">
+          <div className="md:col-span-6 aspect-square bg-neutral-200 rounded-2xl" />
+          <div className="md:col-span-6 space-y-4">
             <div className="h-8 bg-neutral-200 rounded w-3/4" />
             <div className="h-5 bg-neutral-200 rounded w-1/4" />
             <div className="h-8 bg-neutral-200 rounded w-1/3" />
@@ -257,17 +257,17 @@ export function ProductDetailClient({ id }: { id: string }) {
       </nav>
 
       {/* Main Grid: Gallery on Left + Info & Buying Actions on Right */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
-        {/* Left Gallery (6 cols on desktop) */}
-        <div className="lg:col-span-6 w-full">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-8 lg:gap-12 items-start">
+        {/* Left Gallery (6 cols on tablets and desktop) */}
+        <div className="md:col-span-6 w-full min-w-0">
           <ImageGallery
             images={product.images}
             productName={product.name}
           />
         </div>
 
-        {/* Right Info & Buying Actions (6 cols on desktop) */}
-        <div className="lg:col-span-6 space-y-6">
+        {/* Right Info & Buying Actions (6 cols on tablets and desktop) */}
+        <div className="md:col-span-6 min-w-0 space-y-6">
           <div>
             {/* Stock status */}
             <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -365,7 +365,7 @@ export function ProductDetailClient({ id }: { id: string }) {
           <h2 className="font-integral text-2xl sm:text-4xl text-center text-black mb-10">
             YOU MIGHT ALSO LIKE
           </h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
             {relatedProducts.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}

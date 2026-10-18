@@ -192,12 +192,12 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
       {/* 3. Quantity Stepper & Desktop Action CTAs */}
       <div className="space-y-3 pt-2">
         <div className="flex items-center gap-3 sm:gap-4">
-          <div className="flex items-center bg-[#F0F0F0] rounded-full px-4 py-3.5 gap-5 shrink-0">
+          <div className="flex items-center bg-[#F0F0F0] rounded-full p-1.5 gap-1 shrink-0">
             <button
               type="button"
               onClick={() => onQuantityChange(Math.max(1, quantity - 1))}
               disabled={!canPurchase || quantity <= 1}
-              className="text-black hover:opacity-75 p-0.5 disabled:opacity-30"
+              className="text-black hover:bg-black/5 rounded-full p-3 disabled:opacity-30"
               aria-label="Decrease quantity"
             >
               <HugeiconsIcon icon={MinusSignIcon} size={16} />
@@ -209,7 +209,7 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
               type="button"
               onClick={() => onQuantityChange(Math.min(maxQuantity, quantity + 1))}
               disabled={!canPurchase || quantity >= maxQuantity}
-              className="text-black hover:opacity-75 p-0.5 disabled:opacity-30"
+              className="text-black hover:bg-black/5 rounded-full p-3 disabled:opacity-30"
               aria-label="Increase quantity"
             >
               <HugeiconsIcon icon={PlusSignIcon} size={16} />

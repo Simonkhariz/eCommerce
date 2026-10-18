@@ -30,8 +30,8 @@ export const ProductSection: React.FC<ProductSectionProps> = ({
           {title}
         </h2>
 
-        {/* Responsive Grid: 2 columns on mobile, 4 columns on desktop */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        {/* Responsive Grid: 2 columns on phones, 4 columns from tablets up */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
           {products.slice(0, 4).map((product) => (
             <ProductCard key={product.id} product={product} />
           ))}
