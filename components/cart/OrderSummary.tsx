@@ -50,10 +50,10 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
 
   return (
     <div className="border border-neutral-200 rounded-3xl p-6 bg-white space-y-6">
-      <h2 className="font-bold text-xl sm:text-2xl text-black">Order Summary</h2>
+      <h2 className="font-bold text-xl sm:text-2xl text-black">Order summary</h2>
 
       {/* Financial Calculations */}
-      <div className="space-y-4 text-sm sm:text-base">
+      <div className="space-y-4 text-sm sm:text-base" aria-live="polite">
         <div className="flex items-center justify-between text-neutral-600">
           <span>Subtotal</span>
           <span className="font-bold text-black">{formatPrice(subtotal)}</span>
@@ -85,26 +85,27 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
       {/* Promo Code Form */}
       <div>
         {appliedPromo ? (
-          <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-3 flex items-center justify-between text-xs sm:text-sm">
+          <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-3 flex items-center justify-between text-sm">
             <div className="flex items-center gap-2 text-green-700 font-semibold">
-              <HugeiconsIcon icon={Tick02Icon} size={16} />
+              <HugeiconsIcon icon={Tick02Icon} size={16} aria-hidden="true" />
               <span>
                 Code <strong className="uppercase">{appliedPromo.code}</strong> applied ({appliedPromo.discountPercent}% OFF)
               </span>
             </div>
             <button
+              type="button"
               onClick={removePromoCode}
-              className="p-1 text-neutral-400 hover:text-black"
-              aria-label="Remove promo code"
+              className="p-1 text-neutral-600 hover:text-black"
+              aria-label={`Remove promo code ${appliedPromo.code}`}
             >
-              <HugeiconsIcon icon={Cancel01Icon} size={16} />
+              <HugeiconsIcon icon={Cancel01Icon} size={16} aria-hidden="true" />
             </button>
           </div>
         ) : (
           <form onSubmit={handleApplyPromo} className="space-y-2">
             <div className="flex items-center gap-3">
               <div className="relative flex-1">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" aria-hidden="true">
                   <HugeiconsIcon icon={Tag01Icon} size={20} />
                 </div>
                 <label htmlFor="promo-code" className="sr-only">Promo code</label>
@@ -118,21 +119,23 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
                     setPromoError('');
                   }}
                   placeholder="Add promo code"
-                  className="w-full bg-[#F0F0F0] text-black placeholder:text-neutral-400 text-xs sm:text-sm rounded-full pl-12 pr-4 py-3 sm:py-3.5 focus:outline-none focus:ring-2 focus:ring-black"
+                  aria-invalid={promoError ? true : undefined}
+                  aria-describedby={promoError ? 'promo-code-error' : undefined}
+                  className="w-full bg-[#F0F0F0] text-black placeholder:text-neutral-500 text-sm rounded-full pl-12 pr-4 py-3 sm:py-3.5 focus:outline-none focus:ring-2 focus:ring-black"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={isApplying}
-                className="bg-black text-white hover:bg-neutral-800 disabled:opacity-50 text-xs sm:text-sm font-semibold px-6 sm:px-8 py-3 sm:py-3.5 rounded-full transition-colors shrink-0"
+                className="bg-black text-white hover:bg-neutral-800 disabled:opacity-50 text-sm font-semibold px-6 sm:px-8 py-3 sm:py-3.5 rounded-full transition-colors shrink-0"
               >
-                {isApplying ? 'Applying...' : 'Apply'}
+                {isApplying ? 'Applying…' : 'Apply'}
               </button>
             </div>
 
             {promoError && (
-              <p role="alert" className="text-xs text-red-600 pl-4">{promoError}</p>
+              <p id="promo-code-error" role="alert" className="text-sm text-red-700 pl-4">{promoError}</p>
             )}
           </form>
         )}
@@ -140,14 +143,16 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
 
       {/* Checkout CTA */}
       <button
+        type="button"
         disabled={items.length === 0}
         onClick={onCheckout}
         className="w-full bg-black text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-black font-semibold py-4 rounded-full transition-all shadow-lg flex items-center justify-center gap-2 text-sm sm:text-base group"
       >
-        <span>Go to Checkout</span>
+        <span>Go to checkout</span>
         <HugeiconsIcon
           icon={ArrowRight01Icon}
           size={20}
+          aria-hidden="true"
           className="group-hover:translate-x-1 transition-transform"
         />
       </button>

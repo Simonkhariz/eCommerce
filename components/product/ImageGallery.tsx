@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
+import { Dialog } from '@/components/ui/Dialog';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { Search01Icon, Cancel01Icon } from '@hugeicons/core-free-icons';
+import { Search01Icon, Cancel01Icon, ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
 
 interface ImageGalleryProps {
   images: string[];
@@ -15,100 +16,141 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, productName 
   const [isZoomModalOpen, setIsZoomModalOpen] = useState(false);
   const [zoomPos, setZoomPos] = useState({ x: 50, y: 50 });
   const [isHovered, setIsHovered] = useState(false);
+  const count = images.length;
+  const hasMany = count > 1;
 
   useEffect(() => {
     setSelectedIndex(0);
   }, [images]);
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const altFor = (idx: number) => (count > 1 ? `${productName}, photo ${idx + 1} of ${count}` : productName);
+  const show = (idx: number) => setSelectedIndex(((idx % count) + count) % count);
+
+  // Arrow keys move through photos while the lightbox is open.
+  useEffect(() => {
+    if (!isZoomModalOpen || !hasMany) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setSelectedIndex((i) => (i + 1) % count);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setSelectedIndex((i) => (i - 1 + count) % count);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [isZoomModalOpen, hasMany, count]);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLButtonElement>) => {
     const { left, top, width, height } = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - left) / width) * 100;
-    const y = ((e.clientY - top) / height) * 100;
-    setZoomPos({ x, y });
+    setZoomPos({ x: ((e.clientX - left) / width) * 100, y: ((e.clientY - top) / height) * 100 });
   };
+
+  const current = images[selectedIndex] || images[0];
 
   return (
     <div className="flex flex-col-reverse lg:flex-row gap-4 sm:gap-6 w-full items-start">
-      {/* Thumbnail Strip: Horizontal with generous padding & breathing room on mobile, vertical on desktop */}
-      <div className="flex lg:flex-col gap-3 sm:gap-3.5 overflow-x-auto lg:overflow-visible no-scrollbar justify-start shrink-0 w-full lg:w-[140px] xl:w-[152px] py-2 sm:py-2.5 px-1 -mx-1">
-        {images.map((img, idx) => {
-          const isSelected = selectedIndex === idx;
-          return (
-            <button
-              key={idx}
-              onClick={() => setSelectedIndex(idx)}
-              className={`relative aspect-square w-[30%] min-w-[90px] max-w-[120px] sm:w-28 sm:min-w-0 sm:max-w-none lg:w-full lg:h-[160px] xl:lg:h-[167px] bg-[#F0EEED] rounded-2xl overflow-hidden shrink-0 transition-all ${
-                isSelected
-                  ? 'ring-2 ring-black ring-offset-2 shadow-sm'
-                  : 'hover:opacity-80 opacity-90'
-              }`}
-              aria-label={`Thumbnail view ${idx + 1}`}
-            >
-              <Image
-                src={img}
-                alt={`${productName} thumbnail ${idx + 1}`}
-                fill
-                sizes="(max-width: 640px) 33vw, 152px"
-                className="object-cover object-center"
-              />
-            </button>
-          );
-        })}
-      </div>
+      {/* Thumbnails: horizontal on mobile, vertical on desktop */}
+      {hasMany && (
+        <div
+          className="flex lg:flex-col gap-3 sm:gap-3.5 overflow-x-auto lg:overflow-visible no-scrollbar justify-start shrink-0 w-full lg:w-[140px] xl:w-[152px] py-2 sm:py-2.5 px-1 -mx-1"
+          role="group"
+          aria-label="Product photos"
+        >
+          {images.map((img, idx) => {
+            const isSelected = selectedIndex === idx;
+            return (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setSelectedIndex(idx)}
+                aria-label={`Show photo ${idx + 1} of ${count}`}
+                aria-current={isSelected ? 'true' : undefined}
+                className={`relative aspect-square w-[30%] min-w-[90px] max-w-[120px] sm:w-28 sm:min-w-0 sm:max-w-none lg:w-full lg:h-[160px] xl:lg:h-[167px] bg-[#F0EEED] rounded-2xl overflow-hidden shrink-0 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 ${
+                  isSelected ? 'ring-2 ring-black ring-offset-2 shadow-sm' : 'hover:opacity-80 opacity-90'
+                }`}
+              >
+                <Image src={img} alt="" fill sizes="(max-width: 640px) 33vw, 152px" className="object-cover object-center" />
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      {/* Main Product Preview Container with Guaranteed Separate Flex Column */}
-      <div
+      {/* Main photo: hover to magnify, click / Enter to open the full-screen view */}
+      <button
+        type="button"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onMouseMove={handleMouseMove}
         onClick={() => setIsZoomModalOpen(true)}
-        className="relative flex-1 min-w-0 w-full aspect-square lg:aspect-auto lg:h-[500px] xl:lg:h-[530px] bg-[#F0EEED] rounded-3xl overflow-hidden shadow-sm cursor-zoom-in group"
+        aria-label={`Open full-screen view of ${altFor(selectedIndex)}`}
+        className="relative flex-1 min-w-0 w-full aspect-square lg:aspect-auto lg:h-[500px] xl:lg:h-[530px] bg-[#F0EEED] rounded-3xl overflow-hidden shadow-sm cursor-zoom-in group focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2"
       >
         <Image
-          src={images[selectedIndex] || images[0]}
-          alt={productName}
+          src={current}
+          alt={altFor(selectedIndex)}
           fill
           priority
           sizes="(max-width: 1024px) 100vw, 550px"
           className="object-cover object-center transition-transform duration-200"
-          style={
-            isHovered
-              ? {
-                  transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`,
-                  transform: 'scale(1.4)',
-                }
-              : undefined
-          }
+          style={isHovered ? { transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`, transform: 'scale(1.4)' } : undefined}
         />
-
-        {/* Zoom Hint Indicator */}
-        <div className="absolute top-4 right-4 bg-white/80 backdrop-blur-sm p-2.5 rounded-full text-black opacity-0 group-hover:opacity-100 transition-opacity shadow-sm pointer-events-none">
+        <span
+          className="absolute top-4 right-4 bg-white/80 backdrop-blur-sm p-2.5 rounded-full text-black opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity shadow-sm pointer-events-none"
+          aria-hidden="true"
+        >
           <HugeiconsIcon icon={Search01Icon} size={18} />
+        </span>
+      </button>
+
+      {/* Full-screen lightbox */}
+      <Dialog
+        open={isZoomModalOpen}
+        onClose={() => setIsZoomModalOpen(false)}
+        title={`${productName} photos`}
+        placement="fullscreen"
+        backdropClassName="bg-black/90 backdrop-blur-md"
+        panelClassName="w-full max-w-5xl flex flex-col items-center gap-4"
+      >
+        <button
+          type="button"
+          onClick={() => setIsZoomModalOpen(false)}
+          className="fixed top-5 right-5 z-10 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          aria-label="Close full-screen view"
+        >
+          <HugeiconsIcon icon={Cancel01Icon} size={24} />
+        </button>
+
+        <div className="relative w-full h-[75vh]">
+          <Image src={current} alt={altFor(selectedIndex)} fill className="object-contain" sizes="100vw" />
         </div>
-      </div>
 
-      {/* Fullscreen Lightbox Modal */}
-      {isZoomModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in">
-          <button
-            onClick={() => setIsZoomModalOpen(false)}
-            className="absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-            aria-label="Close zoom preview"
-          >
-            <HugeiconsIcon icon={Cancel01Icon} size={24} />
-          </button>
-
-          <div className="relative max-w-4xl max-h-[85vh] w-full h-[80vh]">
-            <Image
-              src={images[selectedIndex] || images[0]}
-              alt={productName}
-              fill
-              className="object-contain"
-              sizes="100vw"
-            />
+        {hasMany && (
+          <div className="flex items-center gap-4 text-white">
+            <button
+              type="button"
+              onClick={() => show(selectedIndex - 1)}
+              className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              aria-label="Previous photo"
+            >
+              <HugeiconsIcon icon={ArrowLeft01Icon} size={22} />
+            </button>
+            <span className="text-sm tabular-nums" aria-live="polite">
+              {selectedIndex + 1} / {count}
+            </span>
+            <button
+              type="button"
+              onClick={() => show(selectedIndex + 1)}
+              className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              aria-label="Next photo"
+            >
+              <HugeiconsIcon icon={ArrowRight01Icon} size={22} />
+            </button>
           </div>
-        </div>
-      )}
+        )}
+      </Dialog>
     </div>
   );
 };

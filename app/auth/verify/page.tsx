@@ -46,7 +46,7 @@ function VerifyMagicLink() {
     <div className="bg-white rounded-3xl p-8 sm:p-12 text-center border border-neutral-100 shadow-sm space-y-4" role="status" aria-live="polite">
       {state === 'verifying' && (
         <>
-          <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin mx-auto" />
+          <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin mx-auto" aria-hidden="true" />
           <p className="text-sm text-neutral-600 font-medium">Signing you in…</p>
         </>
       )}
@@ -92,7 +92,7 @@ export default function VerifyMagicLinkPage() {
         <Suspense
           fallback={
             <div className="bg-white rounded-3xl p-12 text-center border border-neutral-100 shadow-sm">
-              <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin mx-auto" />
+              <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin mx-auto" aria-hidden="true" />
             </div>
           }
         >

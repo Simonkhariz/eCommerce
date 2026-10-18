@@ -4,14 +4,18 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Sparkle, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
-import { ApiBanner, ApiPromotion } from '@/lib/api-client';
+import { ApiBanner, ApiPromotion, HomepageData } from '@/lib/api-client';
 
 interface HeroBannerProps {
   banners?: ApiBanner[];
   promotions?: ApiPromotion[];
+  /** Real catalogue counts from the API; a stat is hidden when it is missing or zero. */
+  stats?: HomepageData['stats'];
 }
 
-export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions = [] }) => {
+const ALL_STATES_AND_FCT = 37;
+
+export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions = [], stats }) => {
   const activeBanners = banners && banners.length > 0 ? banners : [];
   const [currentIndex, setCurrentIndex] = useState(0);
 
@@ -34,6 +38,20 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
   const ctaText = currentBanner?.cta_text || 'Shop Now';
   const ctaUrl = currentBanner?.cta_url || '/category';
   const imageUrl = currentBanner?.image_url || '/images/hero/african_models_hero.webp';
+
+  const statItems = [
+    stats && stats.published_products > 0
+      ? { value: stats.published_products.toLocaleString(), label: stats.published_products === 1 ? 'Product in store' : 'Products in store' }
+      : null,
+    stats && stats.categories > 0
+      ? { value: stats.categories.toLocaleString(), label: stats.categories === 1 ? 'Category' : 'Categories' }
+      : null,
+    stats && stats.states_served > 0
+      ? stats.states_served >= ALL_STATES_AND_FCT
+        ? { value: '36 + FCT', label: 'Delivery to every state' }
+        : { value: stats.states_served.toLocaleString(), label: stats.states_served === 1 ? 'State we deliver to' : 'States we deliver to' }
+      : null,
+  ].filter((item): item is { value: string; label: string } => item !== null);
 
   const handlePrev = () => {
     if (activeBanners.length <= 1) return;
@@ -111,21 +129,23 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
               )}
             </div>
 
-            {/* Metrics Counter */}
-            <div className="flex flex-wrap items-center justify-between sm:justify-start sm:gap-8 pt-4 sm:pt-6 border-t border-neutral-300/40">
-              <div className="pr-4 sm:border-r sm:border-neutral-300">
-                <div className="font-bold text-2xl sm:text-4xl text-black">200+</div>
-                <div className="text-xs sm:text-sm text-neutral-500">International Brands</div>
-              </div>
-              <div className="px-4 sm:border-r sm:border-neutral-300">
-                <div className="font-bold text-2xl sm:text-4xl text-black">2,000+</div>
-                <div className="text-xs sm:text-sm text-neutral-500">High-Quality Products</div>
-              </div>
-              <div className="w-full sm:w-auto text-center sm:text-left mt-4 sm:mt-0 pl-0 sm:pl-4">
-                <div className="font-bold text-2xl sm:text-4xl text-black">30,000+</div>
-                <div className="text-xs sm:text-sm text-neutral-500">Happy Customers</div>
-              </div>
-            </div>
+            {/* Real store numbers (hidden when unknown) */}
+            {statItems.length > 0 && (
+              <dl className="flex flex-wrap items-center gap-y-4 pt-4 sm:pt-6 border-t border-neutral-300/40">
+                {statItems.map((item, idx) => (
+                  <div
+                    key={item.label}
+                    className={`pr-6 sm:pr-8 ${idx > 0 ? 'pl-6 sm:pl-8 border-l border-neutral-300' : ''}`}
+                  >
+                    <dt className="sr-only">{item.label}</dt>
+                    <dd className="font-bold text-2xl sm:text-4xl text-black">{item.value}</dd>
+                    <dd className="text-xs sm:text-sm text-neutral-600" aria-hidden="true">
+                      {item.label}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
           </div>
 
           {/* Right Column: Hero Visual with Graphic Sparkles */}

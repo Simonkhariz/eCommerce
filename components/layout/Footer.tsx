@@ -1,206 +1,253 @@
 'use client';
-import React, { useState } from 'react';
-import Link from 'next/link';
-import { Mail, Twitter, Facebook, Instagram, Github, CheckCircle2 } from 'lucide-react';
-import { apiSubscribeNewsletter } from '@/lib/api-client';
 
-export const Footer: React.FC = () => {
+import React, { useId, useState } from 'react';
+import Link from 'next/link';
+import { Mail, CheckCircle2 } from 'lucide-react';
+import { apiSubscribeNewsletter } from '@/lib/api-client';
+import { useStoreInfo, useStoreNav, whatsAppLink } from '@/lib/use-store-info';
+import { useStoreSupport } from '@/lib/use-store-support';
+
+const linkClass = 'transition-colors hover:text-black hover:underline';
+
+/** Payment options the store actually accepts (through Kora / Monnify, or manual bank transfer). */
+const PAYMENT_BADGES = [
+  { label: 'Visa', className: 'text-blue-800' },
+  { label: 'Mastercard', className: 'text-red-700' },
+  { label: 'Verve', className: 'text-emerald-800' },
+  { label: 'Bank transfer', className: 'text-neutral-800' },
+];
+
+function NewsletterForm() {
+  const inputId = useId();
+  const statusId = useId();
   const [email, setEmail] = useState('');
-  const [subscribed, setSubscribed] = useState(false);
+  const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
+  const [message, setMessage] = useState('');
 
   const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email.trim()) {
-      try {
-        await apiSubscribeNewsletter(email.trim());
-      } catch (err) {
-        console.error('Newsletter subscription error:', err);
-      }
-      setSubscribed(true);
+    const value = email.trim();
+    if (!value) return;
+    setState('sending');
+    setMessage('');
+    try {
+      await apiSubscribeNewsletter(value);
+      setState('done');
+      setMessage(`Subscribed. We'll send offers to ${value}; every email has an unsubscribe link.`);
       setEmail('');
-      setTimeout(() => setSubscribed(false), 5000);
+    } catch (err) {
+      setState('error');
+      setMessage(err instanceof Error && err.message ? err.message : 'We could not subscribe you right now. Please try again.');
     }
   };
 
+  if (state === 'done') {
+    return (
+      <div role="status" className="flex items-start gap-2 rounded-2xl bg-neutral-800 p-4 text-sm font-medium text-white">
+        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-400" aria-hidden="true" />
+        <span>{message}</span>
+      </div>
+    );
+  }
+
   return (
-    <footer className="bg-[#F0F0F0] pt-36 pb-12 relative mt-36">
-      {/* Floating Newsletter Card (Overhanging top of footer) */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 absolute -top-24 sm:-top-28 left-0 right-0 z-20">
-        <div className="bg-black text-white rounded-3xl p-6 sm:p-10 md:p-12 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 md:gap-10">
+    <form onSubmit={handleSubscribe} className="flex flex-col gap-3" noValidate>
+      <label htmlFor={inputId} className="sr-only">
+        Email address
+      </label>
+      <div className="relative">
+        <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-neutral-500" aria-hidden="true" />
+        <input
+          id={inputId}
+          type="email"
+          required
+          autoComplete="email"
+          value={email}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            if (state === 'error') setState('idle');
+          }}
+          aria-invalid={state === 'error' || undefined}
+          aria-describedby={state === 'error' ? statusId : undefined}
+          placeholder="Enter your email address"
+          className="w-full rounded-full bg-white py-3 pl-12 pr-4 text-sm text-black placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400 sm:py-3.5"
+        />
+      </div>
+      <button
+        type="submit"
+        disabled={state === 'sending' || !email.trim()}
+        className="w-full rounded-full bg-white py-3 text-sm font-semibold text-black shadow-md transition-colors hover:bg-neutral-100 disabled:opacity-60 sm:py-3.5"
+      >
+        {state === 'sending' ? 'Subscribing…' : 'Subscribe to newsletter'}
+      </button>
+      {state === 'error' && (
+        <p id={statusId} role="alert" className="text-sm text-red-300">
+          {message}
+        </p>
+      )}
+    </form>
+  );
+}
+
+export const Footer: React.FC = () => {
+  const { categories } = useStoreNav();
+  const { origin } = useStoreInfo();
+  const { supportPhone } = useStoreSupport();
+
+  const whatsappNumber = origin?.whatsapp_phone || supportPhone || '';
+  const waLink = whatsAppLink(whatsappNumber, 'Hello, I have a question about my order.');
+
+  return (
+    <footer className="relative mt-36 bg-[#F0F0F0] pb-12 pt-36">
+      {/* Newsletter card (overhangs the top of the footer) */}
+      <div className="absolute -top-24 left-0 right-0 z-20 mx-auto max-w-7xl px-4 sm:-top-28 sm:px-6 lg:px-8">
+        <div className="flex flex-col items-center justify-between gap-6 rounded-3xl bg-black p-6 text-white shadow-2xl sm:p-10 md:flex-row md:gap-10 md:p-12">
           <div className="max-w-md">
-            <h2 className="font-integral text-2xl sm:text-3xl md:text-4xl lg:text-[42px] leading-tight sm:leading-[1.05] uppercase text-white tracking-tight">
-              STAY UPTO DATE ABOUT OUR LATEST OFFERS
+            <h2 className="font-integral text-2xl uppercase leading-tight tracking-tight text-white sm:text-3xl sm:leading-[1.05] md:text-4xl lg:text-[42px]">
+              Stay up to date about our latest offers
             </h2>
           </div>
-
-          <div className="w-full md:w-auto flex-1 max-w-sm">
-            {subscribed ? (
-              <div className="bg-neutral-800 text-white p-4 rounded-full flex items-center justify-center gap-2 text-sm font-medium">
-                <CheckCircle2 className="w-5 h-5 text-green-400" />
-                Thank you for subscribing!
-              </div>
-            ) : (
-              <form onSubmit={handleSubscribe} className="flex flex-col gap-3">
-                <div className="relative">
-                  <Mail className="w-5 h-5 text-neutral-400 absolute left-4 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Enter your email address"
-                    className="w-full bg-white text-black text-sm placeholder:text-neutral-400 rounded-full pl-12 pr-4 py-3 sm:py-3.5 focus:outline-none focus:ring-2 focus:ring-neutral-400"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="w-full bg-white text-black hover:bg-neutral-100 font-semibold text-sm rounded-full py-3 sm:py-3.5 transition-colors shadow-md"
-                >
-                  Subscribe to Newsletter
-                </button>
-              </form>
-            )}
+          <div className="w-full max-w-sm flex-1 md:w-auto">
+            <NewsletterForm />
           </div>
         </div>
       </div>
 
-      {/* Main Footer Links */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-10 pb-12 border-b border-neutral-200">
-          {/* Brand Info & Socials */}
-          <div className="lg:col-span-2 space-y-4">
-            <Link href="/" className="font-integral text-2xl sm:text-3xl lg:text-4xl text-black block tracking-tighter">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 gap-10 border-b border-neutral-300 pb-12 sm:grid-cols-2 lg:grid-cols-5">
+          {/* Brand & contact */}
+          <div className="space-y-4 lg:col-span-2">
+            <Link href="/" className="block font-integral text-2xl tracking-tighter text-black sm:text-3xl lg:text-4xl">
               SHOP.CO
             </Link>
-            <p className="text-neutral-600 text-sm leading-relaxed max-w-sm">
-              We have clothes that suits your style and which you&apos;re proud to wear. From women to men.
+            <p className="max-w-sm text-sm leading-relaxed text-neutral-700">
+              Clothes that suit your style and that you&apos;re proud to wear, delivered across Nigeria.
             </p>
-            <div className="flex items-center gap-3 pt-2">
-              <a
-                href="https://twitter.com"
-                target="_blank"
-                rel="noreferrer"
-                className="w-9 h-9 bg-white hover:bg-black hover:text-white text-black rounded-full flex items-center justify-center transition-colors shadow-sm border border-neutral-200"
-                aria-label="Twitter"
-              >
-                <Twitter className="w-4 h-4 fill-current" />
-              </a>
-              <a
-                href="https://facebook.com"
-                target="_blank"
-                rel="noreferrer"
-                className="w-9 h-9 bg-black text-white hover:bg-neutral-800 rounded-full flex items-center justify-center transition-colors shadow-sm"
-                aria-label="Facebook"
-              >
-                <Facebook className="w-4 h-4 fill-current" />
-              </a>
-              <a
-                href="https://instagram.com"
-                target="_blank"
-                rel="noreferrer"
-                className="w-9 h-9 bg-white hover:bg-black hover:text-white text-black rounded-full flex items-center justify-center transition-colors shadow-sm border border-neutral-200"
-                aria-label="Instagram"
-              >
-                <Instagram className="w-4 h-4" />
-              </a>
-              <a
-                href="https://github.com"
-                target="_blank"
-                rel="noreferrer"
-                className="w-9 h-9 bg-white hover:bg-black hover:text-white text-black rounded-full flex items-center justify-center transition-colors shadow-sm border border-neutral-200"
-                aria-label="GitHub"
-              >
-                <Github className="w-4 h-4" />
-              </a>
-            </div>
-          </div>
-
-          {/* Column 1: COMPANY */}
-          <div>
-            <h4 className="text-xs font-bold uppercase tracking-widest text-black mb-4">
-              Company
-            </h4>
-            <ul className="space-y-3 text-sm text-neutral-600">
-              <li><Link href="/category" className="hover:text-black transition-colors">About</Link></li>
-              <li><Link href="/category" className="hover:text-black transition-colors">Features</Link></li>
-              <li><Link href="/category" className="hover:text-black transition-colors">Works</Link></li>
-              <li><Link href="/category" className="hover:text-black transition-colors">Career</Link></li>
+            <ul className="space-y-1.5 text-sm text-neutral-700">
+              {origin?.contact_email && (
+                <li>
+                  <a href={`mailto:${origin.contact_email}`} className={linkClass}>
+                    {origin.contact_email}
+                  </a>
+                </li>
+              )}
+              {waLink && (
+                <li>
+                  <a href={waLink} target="_blank" rel="noopener noreferrer" className={`font-medium text-emerald-800 ${linkClass}`}>
+                    WhatsApp {whatsappNumber}
+                    <span className="sr-only"> (opens WhatsApp)</span>
+                  </a>
+                </li>
+              )}
+              {origin?.contact_phone && (
+                <li>
+                  <a href={`tel:${origin.contact_phone.replace(/[^\d+]/g, '')}`} className={linkClass}>
+                    {origin.contact_phone}
+                  </a>
+                </li>
+              )}
             </ul>
           </div>
 
-          {/* Column 2: HELP */}
-          <div>
-            <h4 className="text-xs font-bold uppercase tracking-widest text-black mb-4">
-              Help & Support
-            </h4>
-            <ul className="space-y-3 text-sm text-neutral-600">
+          {/* Shop */}
+          <nav aria-label="Shop">
+            <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-black">Shop</h3>
+            <ul className="space-y-3 text-sm text-neutral-700">
               <li>
-                <Link href="/track-order" className="hover:text-black font-semibold text-emerald-800 transition-colors">
-                  Track Order (Live)
+                <Link href="/category" className={linkClass}>
+                  All products
+                </Link>
+              </li>
+              {categories.map((c) => (
+                <li key={c.slug}>
+                  <Link href={`/category?cat=${encodeURIComponent(c.slug)}`} className={linkClass}>
+                    {c.name}
+                  </Link>
+                </li>
+              ))}
+              <li>
+                <Link href="/category?onSale=true" className={linkClass}>
+                  On sale
+                </Link>
+              </li>
+            </ul>
+          </nav>
+
+          {/* Help */}
+          <nav aria-label="Help">
+            <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-black">Help</h3>
+            <ul className="space-y-3 text-sm text-neutral-700">
+              <li>
+                <Link href="/track-order" className={`font-semibold text-emerald-800 ${linkClass}`}>
+                  Track an order
                 </Link>
               </li>
               <li>
-                <a
-                  href="https://wa.me/2349066707079"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-black font-medium text-emerald-700 transition-colors"
-                >
-                  WhatsApp Support
-                </a>
+                <Link href="/orders" className={linkClass}>
+                  My orders
+                </Link>
               </li>
-              <li><Link href="/category" className="hover:text-black transition-colors">Delivery Details</Link></li>
-              <li><Link href="/category" className="hover:text-black transition-colors">Terms & Conditions</Link></li>
+              <li>
+                <Link href="/shipping" className={linkClass}>
+                  Shipping &amp; delivery
+                </Link>
+              </li>
+              <li>
+                <Link href="/returns" className={linkClass}>
+                  Returns &amp; refunds
+                </Link>
+              </li>
+              <li>
+                <Link href="/faq" className={linkClass}>
+                  FAQ
+                </Link>
+              </li>
+              <li>
+                <Link href="/contact" className={linkClass}>
+                  Contact us
+                </Link>
+              </li>
             </ul>
-          </div>
+          </nav>
 
-          {/* Column 3: FAQ */}
-          <div>
-            <h4 className="text-xs font-bold uppercase tracking-widest text-black mb-4">
-              Orders & FAQ
-            </h4>
-            <ul className="space-y-3 text-sm text-neutral-600">
-              <li><Link href="/track-order" className="hover:text-black transition-colors">Order Status Lookup</Link></li>
-              <li><Link href="/cart" className="hover:text-black transition-colors">My Cart</Link></li>
-              <li><Link href="/category" className="hover:text-black transition-colors">Manage Deliveries</Link></li>
-              <li><Link href="/admin" className="hover:text-black transition-colors">Admin Portal</Link></li>
+          {/* Company */}
+          <nav aria-label="Company">
+            <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-black">Company</h3>
+            <ul className="space-y-3 text-sm text-neutral-700">
+              <li>
+                <Link href="/about" className={linkClass}>
+                  About us
+                </Link>
+              </li>
+              <li>
+                <Link href="/terms" className={linkClass}>
+                  Terms &amp; conditions
+                </Link>
+              </li>
+              <li>
+                <Link href="/privacy" className={linkClass}>
+                  Privacy policy
+                </Link>
+              </li>
             </ul>
-          </div>
-
-          {/* Column 4: RESOURCES */}
-          <div>
-            <h4 className="text-xs font-bold uppercase tracking-widest text-black mb-4">
-              Resources
-            </h4>
-            <ul className="space-y-3 text-sm text-neutral-600">
-              <li><Link href="/category" className="hover:text-black transition-colors">Free eBook</Link></li>
-              <li><Link href="/category" className="hover:text-black transition-colors">Development Tutorial</Link></li>
-              <li><Link href="/category" className="hover:text-black transition-colors">How to - Blog</Link></li>
-              <li><Link href="/category" className="hover:text-black transition-colors">Youtube Playlist</Link></li>
-            </ul>
-          </div>
+          </nav>
         </div>
 
-        {/* Bottom Bar & Payment Badges */}
-        <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-500">
-          <p>Shop.co © 2000-2024, All Rights Reserved</p>
-          <div className="flex items-center gap-3">
-            <span className="px-3 py-1.5 bg-white rounded-md border border-neutral-200 font-bold text-blue-800 text-[10px] tracking-wider shadow-sm">
-              VISA
-            </span>
-            <span className="px-3 py-1.5 bg-white rounded-md border border-neutral-200 font-bold text-red-600 text-[10px] tracking-wider shadow-sm">
-              MasterCard
-            </span>
-            <span className="px-3 py-1.5 bg-white rounded-md border border-neutral-200 font-bold text-blue-600 text-[10px] tracking-wider shadow-sm">
-              PayPal
-            </span>
-            <span className="px-3 py-1.5 bg-white rounded-md border border-neutral-200 font-bold text-black text-[10px] tracking-wider shadow-sm">
-              Apple Pay
-            </span>
-            <span className="px-3 py-1.5 bg-white rounded-md border border-neutral-200 font-bold text-neutral-700 text-[10px] tracking-wider shadow-sm">
-              G Pay
-            </span>
-          </div>
+        {/* Bottom bar */}
+        <div className="flex flex-col items-center justify-between gap-4 pt-8 text-xs text-neutral-700 sm:flex-row">
+          <p>
+            © {new Date().getFullYear()} {origin?.store_name || 'SHOP.CO'}. All rights reserved.
+          </p>
+          <ul aria-label="Accepted payment methods" className="flex flex-wrap items-center justify-center gap-2">
+            {PAYMENT_BADGES.map((b) => (
+              <li
+                key={b.label}
+                className={`rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-xs font-bold tracking-wide shadow-sm ${b.className}`}
+              >
+                {b.label}
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
     </footer>

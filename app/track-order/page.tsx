@@ -27,6 +27,7 @@ import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, formatSupportPhone } 
 import { useStoreSupport } from '@/lib/use-store-support';
 import { getOrderStatusDisplay, STATUS_TONE_CLASSES } from '@/lib/order-status';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
+import { Dialog } from '@/components/ui/Dialog';
 
 /** Safari-safe parsing of MySQL "YYYY-MM-DD HH:MM:SS" timestamps. */
 function toDate(value: string): Date {
@@ -261,10 +262,10 @@ function TrackOrderContent() {
         <div className="flex items-center justify-between">
           <Link
             href="/"
-            className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-500 hover:text-black transition-colors"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-neutral-600 hover:text-black transition-colors"
           >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Return to Store</span>
+            <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+            <span>Back to the store</span>
           </Link>
 
           <a
@@ -273,8 +274,9 @@ function TrackOrderContent() {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-full hover:bg-emerald-100 transition-colors"
           >
-            <WhatsAppIcon className="w-3.5 h-3.5 text-emerald-600" />
+            <WhatsAppIcon className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
             <span>Help: {formatSupportPhone(supportPhone)}</span>
+            <span className="sr-only">on WhatsApp (opens in a new tab)</span>
           </a>
         </div>
 
@@ -290,22 +292,23 @@ function TrackOrderContent() {
 
         {/* Recent Order Quick-Track Chip */}
         {!order && recentOrderNumber && (
-          <div className="bg-white rounded-2xl p-4 border border-neutral-200 shadow-sm flex items-center justify-between gap-3 text-xs">
+          <div className="bg-white rounded-2xl p-4 border border-neutral-200 shadow-sm flex items-center justify-between gap-3 text-sm">
             <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-emerald-600 shrink-0" />
+              <Clock className="w-4 h-4 text-emerald-700 shrink-0" aria-hidden="true" />
               <span>
                 Recent order: <strong className="font-mono text-black">{recentOrderNumber}</strong>
               </span>
             </div>
             <button
+              type="button"
               onClick={() => {
                 setOrderNumber(recentOrderNumber);
                 performLookup(recentOrderNumber);
               }}
               className="bg-black hover:bg-neutral-800 text-white font-semibold px-4 py-1.5 rounded-full transition-colors shrink-0 flex items-center gap-1"
             >
-              <span>Track Now</span>
-              <ArrowRight className="w-3 h-3" />
+              <span>Track now</span>
+              <ArrowRight className="w-3 h-3" aria-hidden="true" />
             </button>
           </div>
         )}
@@ -315,19 +318,22 @@ function TrackOrderContent() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-600 mb-1.5">
-                  Order Number or Tracking Number *
+                <label htmlFor="track-order-number" className="block text-xs font-bold uppercase tracking-wider text-neutral-600 mb-1.5">
+                  Order number or tracking number <span aria-hidden="true">*</span>
                 </label>
                 <div className="relative">
                   <input
+                    id="track-order-number"
                     type="text"
                     required
+                    aria-invalid={lookupError ? true : undefined}
+                    aria-describedby={lookupError ? 'track-lookup-error' : undefined}
                     value={orderNumber}
                     onChange={(e) => setOrderNumber(e.target.value)}
                     placeholder="e.g. ORD-20261016-XXXXXX or GIG-LOS-XXXXXX"
                     className="w-full text-sm font-mono px-4 py-3 bg-neutral-50 border border-neutral-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-black uppercase placeholder:normal-case placeholder:font-sans"
                   />
-                  <Package className="w-4 h-4 text-neutral-400 absolute right-4 top-3.5" />
+                  <Package className="w-4 h-4 text-neutral-500 absolute right-4 top-3.5" aria-hidden="true" />
                 </div>
               </div>
 
@@ -336,10 +342,11 @@ function TrackOrderContent() {
                   <label htmlFor="track-verification" className="text-xs font-bold uppercase tracking-wider text-neutral-600">
                     Checkout Email
                   </label>
-                  <span className="text-[11px] text-neutral-500">Not needed on the device you ordered from</span>
+                  <span id="track-verification-hint" className="text-xs text-neutral-600">Not needed on the device you ordered from</span>
                 </div>
                 <input
                   id="track-verification"
+                  aria-describedby="track-verification-hint"
                   type="text"
                   autoComplete="email"
                   value={verificationInput}
@@ -351,8 +358,8 @@ function TrackOrderContent() {
             </div>
 
             {lookupError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-2 text-xs text-red-700">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+              <div id="track-lookup-error" role="alert" className="p-3 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-2 text-sm text-red-800">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-600" aria-hidden="true" />
                 <span>{lookupError}</span>
               </div>
             )}
@@ -364,13 +371,13 @@ function TrackOrderContent() {
             >
               {isLoading ? (
                 <>
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Checking Status...</span>
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" aria-hidden="true" />
+                  <span>Checking status…</span>
                 </>
               ) : (
                 <>
-                  <Search className="w-4 h-4" />
-                  <span>Track Order</span>
+                  <Search className="w-4 h-4" aria-hidden="true" />
+                  <span>Track order</span>
                 </>
               )}
             </button>
@@ -379,7 +386,7 @@ function TrackOrderContent() {
 
         {/* Order Details Display */}
         {order && (
-          <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="space-y-6 animate-in fade-in" aria-live="polite">
             {/* Top Status Banner */}
             <div className="bg-white rounded-3xl p-5 sm:p-7 border border-neutral-100 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="space-y-1">
@@ -406,12 +413,13 @@ function TrackOrderContent() {
                 {canPay ? (
                   <>
                     <button
+                      type="button"
                       onClick={() => setShowPaymentModal(true)}
                       disabled={Boolean(isInitializingPayment)}
                       className="flex-1 sm:flex-initial bg-black hover:bg-neutral-800 text-white font-bold px-5 py-2.5 rounded-full text-xs transition-all shadow flex items-center justify-center gap-1.5"
                     >
-                      <CreditCard className="w-3.5 h-3.5" />
-                      <span>{isInitializingPayment ? 'Connecting...' : `Pay Now (${formatPrice(order.grand_total)})`}</span>
+                      <CreditCard className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{isInitializingPayment ? 'Connecting…' : `Pay now (${formatPrice(order.grand_total)})`}</span>
                     </button>
 
                     <a
@@ -419,10 +427,10 @@ function TrackOrderContent() {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-2.5 bg-neutral-100 hover:bg-neutral-200 text-[#128C7E] rounded-full transition-colors relative group shrink-0"
-                      aria-label="Send invoice to WhatsApp"
+                      aria-label="Send the invoice on WhatsApp (opens in a new tab)"
                     >
-                      <WhatsAppIcon className="w-4 h-4" />
-                      <div className="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:block z-20 whitespace-nowrap bg-neutral-900 text-white text-[10px] rounded-lg px-2 py-1 shadow-md">
+                      <WhatsAppIcon className="w-4 h-4" aria-hidden="true" />
+                      <div aria-hidden="true" className="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:block group-focus-visible:block z-20 whitespace-nowrap bg-neutral-900 text-white text-xs rounded-lg px-2 py-1 shadow-md">
                         WhatsApp Invoice
                       </div>
                     </a>
@@ -434,8 +442,9 @@ function TrackOrderContent() {
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-semibold px-4 py-2 rounded-full text-xs transition-colors"
                   >
-                    <WhatsAppIcon className="w-3.5 h-3.5 text-[#25D366]" />
-                    <span>WhatsApp Help</span>
+                    <WhatsAppIcon className="w-3.5 h-3.5 text-[#128C7E]" aria-hidden="true" />
+                    <span>WhatsApp help</span>
+                    <span className="sr-only">(opens in a new tab)</span>
                   </a>
                 )}
               </div>
@@ -454,9 +463,9 @@ function TrackOrderContent() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-bold text-black">
-                    Delivery Progression
+                    Delivery progress
                   </h3>
-                  <p className="text-xs text-neutral-400">Step {currentStage + 1} of 5 &bull; {steps[currentStage]?.title}</p>
+                  <p className="text-xs text-neutral-600">Step {currentStage + 1} of {steps.length} &bull; {steps[currentStage]?.title}</p>
                 </div>
 
               </div>
@@ -464,41 +473,44 @@ function TrackOrderContent() {
               {/* Connected Visual Progression Bar */}
               <div className="relative pt-2 pb-1">
                 {/* Background Line */}
-                <div className="hidden sm:block absolute top-6 left-6 right-6 h-1 bg-neutral-100 -translate-y-1/2 z-0" />
+                <div aria-hidden="true" className="hidden sm:block absolute top-6 left-6 right-6 h-1 bg-neutral-100 -translate-y-1/2 z-0" />
                 {/* Active Filled Line */}
                 <div
+                  aria-hidden="true"
                   className="hidden sm:block absolute top-6 left-6 h-1 bg-black -translate-y-1/2 z-0 transition-all duration-500"
                   style={{ width: `calc(${(currentStage / (steps.length - 1)) * 100}% * 0.88)` }}
                 />
 
                 {/* Steps */}
-                <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 sm:gap-2 relative z-10">
+                <ol className="grid grid-cols-1 sm:grid-cols-5 gap-3 sm:gap-2 relative z-10" aria-label="Order progress">
                   {steps.map((step, idx) => {
                     const isDone = idx < currentStage;
                     const isCurrent = idx === currentStage;
                     return (
-                      <div
+                      <li
                         key={step.title}
+                        aria-current={isCurrent ? 'step' : undefined}
                         className="group relative flex sm:flex-col items-center sm:items-center gap-3 sm:gap-2"
                       >
                         {/* Tooltip on Hover */}
-                        <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-30 w-44 bg-neutral-900 text-white text-[10px] rounded-xl px-2.5 py-1.5 shadow-lg text-center">
+                        <div aria-hidden="true" className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-30 w-44 bg-neutral-900 text-white text-xs rounded-xl px-2.5 py-1.5 shadow-lg text-center">
                           {step.tooltip}
                           <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-neutral-900" />
                         </div>
 
                         {/* Node Circle */}
                         <div
+                          aria-hidden="true"
                           className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all shrink-0 ${
                             isCurrent
                               ? 'bg-black text-white ring-4 ring-neutral-200 shadow-sm'
                               : isDone
                               ? 'bg-black text-white'
-                              : 'bg-neutral-100 text-neutral-400'
+                              : 'bg-neutral-100 text-neutral-600'
                           }`}
                         >
                           {isDone ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" aria-hidden="true" />
                           ) : (
                             <span>{idx + 1}</span>
                           )}
@@ -506,17 +518,18 @@ function TrackOrderContent() {
 
                         {/* Label & Description */}
                         <div className="text-left sm:text-center min-w-0">
-                          <h4 className={`text-xs font-bold leading-tight truncate ${isCurrent ? 'text-black' : isDone ? 'text-neutral-800' : 'text-neutral-400'}`}>
+                          <p className={`text-xs font-bold leading-tight truncate ${isCurrent ? 'text-black' : isDone ? 'text-neutral-800' : 'text-neutral-600'}`}>
                             {step.title}
-                          </h4>
-                          <p className="text-[10px] text-neutral-400 truncate hidden sm:block">
-                            {isCurrent ? 'In Progress' : isDone ? 'Completed' : 'Pending'}
                           </p>
+                          <p className="text-xs text-neutral-600 truncate sm:block">
+                            {isCurrent ? 'In progress' : isDone ? 'Done' : 'Not yet'}
+                          </p>
+                          <p className="sr-only">{step.tooltip}</p>
                         </div>
-                      </div>
+                      </li>
                     );
                   })}
-                </div>
+                </ol>
               </div>
             </div>
 
@@ -527,13 +540,13 @@ function TrackOrderContent() {
               <div className="bg-white rounded-3xl p-6 sm:p-7 border border-blue-100 bg-gradient-to-br from-white via-white to-blue-50/20 shadow-sm space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-100">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                      <Truck className="w-5 h-5" />
+                    <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0" aria-hidden="true">
+                      <Truck className="w-5 h-5" aria-hidden="true" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Dispatched via Courier</span>
-                        <span className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 capitalize">
+                        <span className="text-xs font-bold uppercase tracking-wider text-blue-700">Dispatched by courier</span>
+                        <span className="inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 capitalize">
                           {order.shipment.status?.replace('_', ' ') || 'In Transit'}
                         </span>
                       </div>
@@ -550,16 +563,17 @@ function TrackOrderContent() {
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-full transition-colors shrink-0"
                     >
-                      <span>Track on Courier Site</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Track on the courier&apos;s site</span>
+                      <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span className="sr-only">(opens in a new tab)</span>
                     </a>
                   )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
                   <div className="bg-neutral-50 rounded-2xl p-3.5 border border-neutral-200">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400 block mb-1">
-                      Tracking Code
+                    <span className="text-xs font-semibold uppercase tracking-wider text-neutral-600 block mb-1">
+                      Tracking code
                     </span>
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono font-bold text-sm text-neutral-900 select-all truncate">
@@ -569,20 +583,22 @@ function TrackOrderContent() {
                         type="button"
                         onClick={() => handleCopyTracking(order.shipment.tracking_number)}
                         className="p-1.5 hover:bg-neutral-200 rounded-lg text-neutral-600 hover:text-black transition-colors shrink-0"
-                        title="Copy Tracking Number"
+                        title="Copy tracking number"
+                        aria-label={copiedTracking ? 'Tracking number copied' : 'Copy tracking number'}
                       >
                         {copiedTracking ? (
-                          <Check className="w-4 h-4 text-emerald-600" />
+                          <Check className="w-4 h-4 text-emerald-700" aria-hidden="true" />
                         ) : (
-                          <Copy className="w-4 h-4" />
+                          <Copy className="w-4 h-4" aria-hidden="true" />
                         )}
                       </button>
+                      <span className="sr-only" role="status">{copiedTracking ? 'Tracking number copied' : ''}</span>
                     </div>
                   </div>
 
                   <div className="bg-neutral-50 rounded-2xl p-3.5 border border-neutral-200">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400 block mb-1">
-                      Dispatched On
+                    <span className="text-xs font-semibold uppercase tracking-wider text-neutral-600 block mb-1">
+                      Dispatched on
                     </span>
                     <span className="text-xs font-bold text-neutral-800">
                       {order.shipment.shipped_at
@@ -592,8 +608,8 @@ function TrackOrderContent() {
                   </div>
 
                   <div className="bg-neutral-50 rounded-2xl p-3.5 border border-neutral-200">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400 block mb-1">
-                      Delivery Status
+                    <span className="text-xs font-semibold uppercase tracking-wider text-neutral-600 block mb-1">
+                      Delivery status
                     </span>
                     <span className="text-xs font-bold text-neutral-800">
                       {order.shipment.delivered_at
@@ -613,20 +629,20 @@ function TrackOrderContent() {
               <div className="md:col-span-2 bg-white rounded-3xl p-6 sm:p-7 border border-neutral-200 shadow-sm space-y-4">
                 <div className="flex items-center justify-between pb-3 border-b border-neutral-100">
                   <h3 className="font-bold text-sm text-black flex items-center gap-2">
-                    <Package className="w-4 h-4 text-neutral-500" />
-                    <span>Package Items ({order.items?.length || 0})</span>
+                    <Package className="w-4 h-4 text-neutral-500" aria-hidden="true" />
+                    <span>Items ({order.items?.length || 0})</span>
                   </h3>
-                  <span className="text-xs text-neutral-400 font-mono">
+                  <span className="text-xs text-neutral-600 font-mono">
                     {order.currency || 'NGN'}
                   </span>
                 </div>
 
                 <div className="divide-y divide-neutral-100">
                   {order.items?.map((item: any) => (
-                    <div key={item.id} className="py-3 flex items-center justify-between text-xs">
+                    <div key={item.id} className="py-3 flex items-center justify-between gap-3 text-sm">
                       <div>
                         <p className="font-bold text-neutral-900">{item.item_name}</p>
-                        <p className="text-neutral-500 font-mono text-[11px]">
+                        <p className="text-neutral-600 font-mono text-xs">
                           Qty: {item.quantity} &bull; SKU: {item.sku}
                         </p>
                       </div>
@@ -637,13 +653,13 @@ function TrackOrderContent() {
                   ))}
                 </div>
 
-                <div className="pt-3 border-t border-neutral-100 space-y-1.5 text-xs text-neutral-600">
+                <div className="pt-3 border-t border-neutral-100 space-y-1.5 text-sm text-neutral-600">
                   <div className="flex justify-between">
                     <span>Subtotal:</span>
                     <span className="font-semibold text-black">{formatPrice(order.subtotal)}</span>
                   </div>
                   {order.discount_amount > 0 && (
-                    <div className="flex justify-between text-emerald-600">
+                    <div className="flex justify-between text-emerald-800">
                       <span>Discount:</span>
                       <span className="font-semibold">-{formatPrice(order.discount_amount)}</span>
                     </div>
@@ -652,8 +668,8 @@ function TrackOrderContent() {
                     <span>Delivery{order.shipping_zone_snapshot?.name ? ` (${order.shipping_zone_snapshot.name})` : ''}:</span>
                     <span className="font-semibold text-black">{formatPrice(order.shipping_fee)}</span>
                   </div>
-                  <div className="flex justify-between text-sm font-extrabold text-black pt-2 border-t border-neutral-200">
-                    <span>Total Amount:</span>
+                  <div className="flex justify-between text-base font-extrabold text-black pt-2 border-t border-neutral-200">
+                    <span>Total:</span>
                     <span className="font-mono">{formatPrice(order.grand_total)}</span>
                   </div>
                 </div>
@@ -663,11 +679,11 @@ function TrackOrderContent() {
               <div className="space-y-6">
                 {/* Delivery Destination */}
                 <div className="bg-white rounded-3xl p-6 border border-neutral-200 shadow-sm space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5" />
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-600 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>Destination</span>
                   </h4>
-                  <div className="text-xs text-neutral-700 space-y-1">
+                  <div className="text-sm text-neutral-700 space-y-1">
                     <p className="font-bold text-neutral-900">
                       {order.shipping_address_snapshot?.full_name}
                     </p>
@@ -675,14 +691,14 @@ function TrackOrderContent() {
                     <p>
                       {order.shipping_address_snapshot?.city}, {order.shipping_address_snapshot?.state}
                     </p>
-                    <p className="text-neutral-500 pt-1">Phone: {order.shipping_address_snapshot?.phone}</p>
+                    <p className="text-neutral-600 pt-1">Phone: {order.shipping_address_snapshot?.phone}</p>
                   </div>
                 </div>
 
                 {/* Payment Status Card */}
                 <div className="bg-white rounded-3xl p-6 border border-neutral-200 shadow-sm space-y-3">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-600">
                       Payment
                     </h4>
                     <span
@@ -691,17 +707,17 @@ function TrackOrderContent() {
                       }`}
                     >
                       {isPaid ? (
-                        <svg className="w-3 h-3 text-emerald-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <svg aria-hidden="true" className="w-3 h-3 text-emerald-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M20 6L9 17l-5-5" />
                         </svg>
                       ) : (
-                        <Clock className="w-3 h-3 text-amber-700" />
+                        <Clock className="w-3 h-3 text-amber-700" aria-hidden="true" />
                       )}
                       <span>{isPaid ? 'Paid' : order.payment_status === 'cancelled' ? 'Cancelled' : 'Not paid'}</span>
                     </span>
                   </div>
 
-                  <div className="text-xs space-y-1.5 pt-1 text-neutral-600">
+                  <div className="text-sm space-y-1.5 pt-1 text-neutral-600">
                     <div className="flex justify-between">
                       <span>Gateway:</span>
                       <span className="font-medium text-black">
@@ -711,15 +727,15 @@ function TrackOrderContent() {
                     {order.payment?.provider_reference && (
                       <div className="flex justify-between">
                         <span>Ref:</span>
-                        <span className="font-mono text-[11px] text-neutral-700 select-all">
+                        <span className="font-mono text-xs text-neutral-700 select-all break-all text-right">
                           {order.payment.provider_reference}
                         </span>
                       </div>
                     )}
                     {order.payment?.verified_at && (
-                      <div className="flex justify-between text-[11px]">
+                      <div className="flex justify-between text-xs">
                         <span>Verified:</span>
-                        <span className="text-neutral-500">
+                        <span className="text-neutral-600">
                           {toDate(order.payment.verified_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </span>
                       </div>
@@ -733,19 +749,21 @@ function TrackOrderContent() {
         )}
 
         {/* Payment Options Modal */}
-        {showPaymentModal && order && canPay && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm animate-fade"
-              onClick={() => {
-                if (!isInitializingPayment) setShowPaymentModal(false);
-              }}
-            />
-            <div className="relative w-full max-w-md bg-white rounded-3xl p-6 sm:p-7 shadow-2xl z-10 space-y-5 animate-rise">
+        {order && canPay && (
+          <Dialog
+            open={showPaymentModal}
+            onClose={() => setShowPaymentModal(false)}
+            title="Choose a payment method"
+            busy={Boolean(isInitializingPayment)}
+            backdropClassName="bg-black/60 backdrop-blur-sm"
+            panelClassName="w-full max-w-md"
+            describedBy="track-pay-summary"
+          >
+            <div className="relative w-full bg-white rounded-t-3xl sm:rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 animate-rise">
               <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
                 <div>
-                  <h3 className="text-base font-bold text-black">Choose Payment Method</h3>
-                  <p className="text-xs text-neutral-400 font-mono">
+                  <p className="text-base font-bold text-black" aria-hidden="true">Choose a payment method</p>
+                  <p id="track-pay-summary" className="text-xs text-neutral-600 font-mono">
                     Order #{order.order_number} &bull; Total: {formatPrice(order.grand_total)}
                   </p>
                 </div>
@@ -753,22 +771,27 @@ function TrackOrderContent() {
                   type="button"
                   onClick={() => setShowPaymentModal(false)}
                   disabled={Boolean(isInitializingPayment)}
-                  className="p-1.5 hover:bg-neutral-100 rounded-full text-neutral-400 hover:text-black transition-colors"
+                  aria-label="Close payment options"
+                  className="p-1.5 hover:bg-neutral-100 rounded-full text-neutral-600 hover:text-black transition-colors disabled:opacity-50"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-5 h-5" aria-hidden="true" />
                 </button>
               </div>
 
               {paymentError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-2 text-xs text-red-700">
-                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                <div role="alert" className="p-3 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-2 text-sm text-red-800">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" aria-hidden="true" />
                   <span>{paymentError}</span>
                 </div>
               )}
 
               <fieldset className="space-y-3">
-                <legend className="sr-only">Payment method</legend>
-                {paymentMethods.length === 0 && <p className="text-sm text-neutral-700">Loading payment methods…</p>}
+                <legend className="text-xs font-bold uppercase tracking-wider text-neutral-700">Payment method</legend>
+                {paymentMethods.length === 0 && (
+                  <p className="text-sm text-neutral-700" role="status">
+                    Loading payment methods…
+                  </p>
+                )}
                 {paymentMethods.map((m) => (
                   <label
                     key={m.id}
@@ -777,13 +800,15 @@ function TrackOrderContent() {
                     <input
                       type="radio"
                       name="track-payment-method"
-                      className="mt-1"
+                      value={m.id}
+                      className="mt-1 accent-black"
+                      aria-describedby={`track-pm-${m.id}`}
                       checked={selectedGateway === m.id}
                       onChange={() => setSelectedGateway(m.id)}
                     />
                     <span className="flex-1 min-w-0">
                       <span className="block font-bold text-sm text-black">{m.name}</span>
-                      <span className="block text-xs text-neutral-700 mt-0.5">{m.description}</span>
+                      <span id={`track-pm-${m.id}`} className="block text-xs text-neutral-700 mt-0.5">{m.description}</span>
                     </span>
                   </label>
                 ))}
@@ -794,7 +819,7 @@ function TrackOrderContent() {
                   type="button"
                   onClick={() => handleInitiatePayment()}
                   disabled={Boolean(isInitializingPayment) || !selectedGateway}
-                  className={`w-full py-3.5 rounded-full text-white font-bold text-xs sm:text-sm transition-all shadow-md flex items-center justify-center gap-2 ${
+                  className={`w-full py-3.5 rounded-full text-white font-bold text-sm transition-all shadow-md flex items-center justify-center gap-2 ${
                     selectedGateway === 'kora'
                       ? 'bg-[#055B5C] hover:bg-[#044748]'
                       : selectedGateway === 'monnify'
@@ -804,8 +829,8 @@ function TrackOrderContent() {
                 >
                   {isInitializingPayment ? (
                     <>
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Opening Payment Gateway...</span>
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" aria-hidden="true" />
+                      <span>Opening secure payment…</span>
                     </>
                   ) : (
                     <>
@@ -816,13 +841,13 @@ function TrackOrderContent() {
                           ? `Pay with Monnify (${formatPrice(order.grand_total)})`
                           : `Continue to WhatsApp (${formatPrice(order.grand_total)})`}
                       </span>
-                      <ArrowRight className="w-4 h-4" />
+                      <ArrowRight className="w-4 h-4" aria-hidden="true" />
                     </>
                   )}
                 </button>
               </div>
             </div>
-          </div>
+          </Dialog>
         )}
       </div>
     </div>
@@ -833,8 +858,9 @@ export default function TrackOrderPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin" />
+        <div className="min-h-screen flex items-center justify-center" role="status">
+          <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin" aria-hidden="true" />
+          <span className="sr-only">Loading…</span>
         </div>
       }
     >

@@ -27,6 +27,8 @@ export interface ApiProductSummary {
   rating_count: number;
   is_featured: boolean;
   is_flash_deal: boolean;
+  /** When the flash deal ends (null = no end date set). */
+  flash_deal_ends_at?: string | null;
   dress_style: string | null;
   created_at: string;
   category_id: number;
@@ -128,6 +130,10 @@ export interface ApiReview {
 }
 
 export interface HomepageData {
+  /** Real counts for the hero (no marketing numbers). */
+  stats?: { published_products: number; categories: number; states_served: number };
+  /** Soonest real end time among the flash deals shown; null = no countdown. */
+  flash_deals_end_at?: string | null;
   featured_products: ApiProductSummary[];
   flash_deals: ApiProductSummary[];
   new_arrivals: ApiProductSummary[];
@@ -790,6 +796,7 @@ export interface AdminProduct {
   rating_count: number;
   is_featured: boolean;
   is_flash_deal: boolean;
+  flash_deal_ends_at?: string | null;
   dress_style: string | null;
   created_at: string;
   updated_at: string;
@@ -1187,8 +1194,8 @@ export async function apiVerifyPayment(
   );
 }
 
-export async function apiSubscribeNewsletter(email: string): Promise<any> {
-  return fetchFromApi<any>('/newsletter/subscribe', {
+export async function apiSubscribeNewsletter(email: string): Promise<{ email: string }> {
+  return fetchFromApi<{ email: string }>('/newsletter/subscribe', {
     method: 'POST',
     body: JSON.stringify({ email }),
   });
@@ -1200,4 +1207,19 @@ export async function apiUnsubscribeNewsletter(token: string): Promise<{ email: 
     method: 'POST',
     body: JSON.stringify({ token }),
   });
+}
+
+/**
+ * Submit a product review. It is held for moderation; "verified purchase" is decided by the
+ * server from paid orders for the given email (or the signed-in account).
+ */
+export async function apiSubmitReview(
+  productIdOrSlug: string | number,
+  review: { author_name: string; email: string; rating: number; title?: string; comment: string }
+): Promise<{ id: number; status: 'pending'; verified_purchase: boolean; message: string }> {
+  const res = await fetchFullFromApi<{ id: number; status: 'pending'; verified_purchase: boolean }>(
+    `/products/${encodeURIComponent(String(productIdOrSlug))}/reviews`,
+    { method: 'POST', body: JSON.stringify(review) }
+  );
+  return { ...res.data!, message: res.message || 'Thanks! Your review will appear once it has been checked.' };
 }

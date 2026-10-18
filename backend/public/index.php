@@ -28,6 +28,7 @@ use App\Controllers\CheckoutController;
 use App\Controllers\CustomerController;
 use App\Controllers\HealthController;
 use App\Controllers\PaymentWebhookController;
+use App\Controllers\ReviewController;
 use App\Controllers\SetupController;
 use App\Middleware\AdminAuthMiddleware;
 use App\Middleware\CorsMiddleware;
@@ -113,6 +114,7 @@ $router->post('/api/v1/auth/customer/verify', [AuthController::class, 'verifyMag
 // --- Public Storefront Catalogue Routes ---
 $router->get('/api/v1/products', [CatalogController::class, 'index']);
 $router->get('/api/v1/products/{idOrSlug}', [CatalogController::class, 'show']);
+$router->post('/api/v1/products/{idOrSlug}/reviews', [ReviewController::class, 'create']);
 $router->get('/api/v1/categories', [CatalogController::class, 'categories']);
 $router->get('/api/v1/catalog/facets', [CatalogController::class, 'facets']);
 $router->get('/api/v1/storefront/homepage', [CatalogController::class, 'homepage']);

@@ -51,6 +51,10 @@ class ProductValidator
             $errors['status'] = "Status must be 'draft', 'published', or 'archived'.";
         }
 
+        if (!empty($data['flash_deal_ends_at']) && strtotime(str_replace('T', ' ', (string) $data['flash_deal_ends_at'])) === false) {
+            $errors['flash_deal_ends_at'] = 'Enter a valid end date and time for the flash deal.';
+        }
+
         return $errors;
     }
 

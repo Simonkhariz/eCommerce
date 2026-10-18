@@ -1,11 +1,35 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { DRESS_STYLES } from '@/data/mockData';
+import { DRESS_STYLE_IMAGES } from '@/lib/dress-styles';
+import { getCatalogFacets } from '@/lib/api-client';
 
+/** Alternating tile widths (out of 12 columns) for the mosaic layout. */
+const SPANS = ['md:col-span-4', 'md:col-span-8', 'md:col-span-8', 'md:col-span-4'];
+
+/**
+ * Dress-style tiles, only for styles that actually exist in the published catalogue.
+ * Each tile links to the catalogue filtered by that style (?style=…).
+ */
 export const BrowseByDressStyle: React.FC = () => {
+  const [styles, setStyles] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCatalogFacets()
+      .then((facets) => !cancelled && setStyles(facets.dress_styles ?? []))
+      .catch(() => !cancelled && setStyles([]));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!styles || styles.length === 0) {
+    return null;
+  }
+
   return (
     <section className="py-8 sm:py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -15,89 +39,35 @@ export const BrowseByDressStyle: React.FC = () => {
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6">
-            {/* Casual - Desktop 4 cols */}
-            <Link
-              href="/category?style=casual"
-              className="md:col-span-4 relative h-52 sm:h-72 bg-neutral-900 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className="absolute inset-0 w-full h-full">
-                <Image
-                  src={DRESS_STYLES[0].image}
-                  alt="Casual dress style"
-                  fill
-                  unoptimized
-                  sizes="(max-width: 768px) 100vw, 33vw"
-                  className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
-              </div>
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-integral text-xl sm:text-3xl lg:text-4xl text-white drop-shadow-lg z-10 tracking-tight">
-                Casual
-              </span>
-            </Link>
-
-            {/* Formal - Desktop 8 cols */}
-            <Link
-              href="/category?style=formal"
-              className="md:col-span-8 relative h-52 sm:h-72 bg-neutral-900 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className="absolute inset-0 w-full h-full">
-                <Image
-                  src={DRESS_STYLES[1].image}
-                  alt="Formal dress style"
-                  fill
-                  unoptimized
-                  sizes="(max-width: 768px) 100vw, 66vw"
-                  className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
-              </div>
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-integral text-xl sm:text-3xl lg:text-4xl text-white drop-shadow-lg z-10 tracking-tight">
-                Formal
-              </span>
-            </Link>
-
-            {/* Party - Desktop 8 cols */}
-            <Link
-              href="/category?style=party"
-              className="md:col-span-8 relative h-52 sm:h-72 bg-neutral-900 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className="absolute inset-0 w-full h-full">
-                <Image
-                  src={DRESS_STYLES[2].image}
-                  alt="Party dress style"
-                  fill
-                  unoptimized
-                  sizes="(max-width: 768px) 100vw, 66vw"
-                  className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
-              </div>
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-integral text-xl sm:text-3xl lg:text-4xl text-white drop-shadow-lg z-10 tracking-tight">
-                Party
-              </span>
-            </Link>
-
-            {/* Gym - Desktop 4 cols */}
-            <Link
-              href="/category?style=gym"
-              className="md:col-span-4 relative h-52 sm:h-72 bg-neutral-900 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className="absolute inset-0 w-full h-full">
-                <Image
-                  src={DRESS_STYLES[3].image}
-                  alt="Gym dress style"
-                  fill
-                  unoptimized
-                  sizes="(max-width: 768px) 100vw, 33vw"
-                  className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
-              </div>
-              <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-integral text-xl sm:text-3xl lg:text-4xl text-white drop-shadow-lg z-10 tracking-tight">
-                Gym
-              </span>
-            </Link>
+            {styles.map((style, idx) => {
+              const slug = style.toLowerCase();
+              const image = DRESS_STYLE_IMAGES[slug];
+              const span = styles.length === 1 ? 'md:col-span-12' : SPANS[idx % SPANS.length];
+              return (
+                <Link
+                  key={style}
+                  href={`/category?style=${encodeURIComponent(slug)}`}
+                  className={`${span} relative h-52 sm:h-72 bg-neutral-900 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-shadow`}
+                >
+                  {image && (
+                    <div className="absolute inset-0 w-full h-full">
+                      <Image
+                        src={image}
+                        alt=""
+                        fill
+                        unoptimized
+                        sizes={span === 'md:col-span-4' ? '(max-width: 768px) 100vw, 33vw' : '(max-width: 768px) 100vw, 66vw'}
+                        className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />
+                    </div>
+                  )}
+                  <span className="absolute top-4 left-6 sm:top-6 sm:left-8 font-integral text-xl sm:text-3xl lg:text-4xl text-white drop-shadow-lg z-10 tracking-tight">
+                    {style}
+                  </span>
+                </Link>
+              );
+            })}
           </div>
         </div>
       </div>

@@ -25,11 +25,11 @@ export default function CartPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-      <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-xs sm:text-sm text-neutral-600 mb-6">
+      <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-sm text-neutral-600 mb-6">
         <Link href="/" className="hover:text-black transition-colors">
           Home
         </Link>
-        <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-400" />
+        <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-500" aria-hidden="true" />
         <span className="text-black font-medium" aria-current="page">Cart</span>
       </nav>
 

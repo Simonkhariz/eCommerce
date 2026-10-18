@@ -106,7 +106,7 @@ function CatalogContent() {
         <Link href="/" className="hover:text-black transition-colors">
           Home
         </Link>
-        <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-400" />
+        <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-500" aria-hidden="true" />
         <span className="text-black font-medium capitalize" aria-current="page">{activeTitle}</span>
       </nav>
 

@@ -33,6 +33,7 @@ import {
   savePendingOrder,
 } from '@/lib/pending-order';
 import { NIGERIAN_STATES } from '@/lib/nigeria';
+import { Dialog } from '@/components/ui/Dialog';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -182,17 +183,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  // Escape closes; focus moves into the dialog when it opens.
+  // The Dialog handles Escape, focus trapping and scroll locking. When the step changes,
+  // move focus to the first field of the new step (skipping the close button).
   useEffect(() => {
     if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose();
-    };
-    window.addEventListener('keydown', onKey);
-    const firstField = dialogRef.current?.querySelector<HTMLElement>('input, select, button:not([aria-label="Close checkout"])');
-    firstField?.focus();
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, step, handleClose]);
+    const firstField = dialogRef.current?.querySelector<HTMLElement>('input, select, button:not([data-close])');
+    firstField?.focus({ preventScroll: true });
+  }, [isOpen, step, order]);
 
   const checkoutItems = useCallback(
     () =>
@@ -395,41 +392,49 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} aria-hidden="true" />
-
+    <Dialog
+      open={isOpen}
+      onClose={handleClose}
+      title={step === 'details' ? 'Checkout: delivery details' : 'Checkout: complete your payment'}
+      busy={busy}
+      dismissOnBackdrop={!order}
+      backdropClassName="bg-black/60 backdrop-blur-sm"
+      panelClassName="w-full max-w-md sm:mx-0"
+    >
       <div
         ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="checkout-title"
-        className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 max-w-md w-full z-10 shadow-2xl relative max-h-[92vh] overflow-y-auto"
+        className="bg-white rounded-t-2xl sm:rounded-3xl p-5 sm:p-6 w-full shadow-2xl relative max-h-[92vh] overflow-y-auto"
+        aria-busy={busy || undefined}
       >
         <button
           type="button"
+          data-close
           onClick={handleClose}
           disabled={busy}
-          className="absolute top-4 right-4 p-2 rounded-full text-neutral-500 hover:text-black hover:bg-neutral-100 disabled:opacity-50"
+          className="absolute top-4 right-4 p-2 rounded-full text-neutral-600 hover:text-black hover:bg-neutral-100 disabled:opacity-50"
           aria-label="Close checkout"
         >
-          <HugeiconsIcon icon={Cancel01Icon} size={18} />
+          <HugeiconsIcon icon={Cancel01Icon} size={18} aria-hidden="true" />
         </button>
 
         {step === 'details' ? (
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <HugeiconsIcon icon={DeliveryTruck01Icon} size={20} className="text-black" />
-              <h2 id="checkout-title" className="font-bold text-lg text-black">Delivery details</h2>
+              <HugeiconsIcon icon={DeliveryTruck01Icon} size={20} className="text-black" aria-hidden="true" />
+              <p className="font-bold text-lg text-black" aria-hidden="true">Delivery details</p>
             </div>
 
             {submitError && (
               <div role="alert" className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2 text-sm text-red-800">
-                <HugeiconsIcon icon={AlertCircleIcon} size={16} className="shrink-0 mt-0.5 text-red-600" />
+                <HugeiconsIcon icon={AlertCircleIcon} size={16} className="shrink-0 mt-0.5 text-red-600" aria-hidden="true" />
                 <span>{submitError}</span>
               </div>
             )}
 
-            <form onSubmit={handleSubmitOrder} className="space-y-3" noValidate={false}>
+            <form onSubmit={handleSubmitOrder} className="space-y-3" noValidate={false} aria-describedby="co-required-note">
+              <p id="co-required-note" className="text-xs text-neutral-600">
+                All fields are required unless marked optional.
+              </p>
               <div>
                 <label htmlFor="co-name" className={labelClass}>Full name</label>
                 <input id="co-name" type="text" required autoComplete="name" value={formData.fullName}
@@ -461,6 +466,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
                   <select
                     id="co-state"
                     required
+                    aria-describedby="co-delivery-status"
                     value={formData.state}
                     onChange={(e) => setFormData((prev) => ({ ...prev, state: e.target.value, selectedZoneId: undefined }))}
                     className={`${fieldClass} cursor-pointer`}
@@ -485,7 +491,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
               </div>
 
               {/* Delivery zone & fee from the server */}
-              <div aria-live="polite">
+              <div id="co-delivery-status" aria-live="polite">
                 {!formData.state ? (
                   <p className="text-xs text-neutral-600">Choose your state to see the delivery fee.</p>
                 ) : isQuoting && !quote ? (
@@ -503,6 +509,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
                           <input
                             type="radio"
                             name="zone"
+                            className="accent-black"
                             checked={(formData.selectedZoneId ?? quote?.shipping_zone?.id) === z.id}
                             onChange={() => setFormData((prev) => ({ ...prev, selectedZoneId: z.id }))}
                           />
@@ -522,7 +529,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
               {quote?.applied_coupon && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-sm text-emerald-900 font-medium">
                   <div className="flex items-center gap-1.5">
-                    <HugeiconsIcon icon={Ticket02Icon} size={14} className="text-emerald-700" />
+                    <HugeiconsIcon icon={Ticket02Icon} size={14} className="text-emerald-700" aria-hidden="true" />
                     <span>Coupon <strong>{quote.applied_coupon.code}</strong></span>
                   </div>
                   <span className="font-bold">-{quote.applied_coupon.discount_percent}%</span>
@@ -558,6 +565,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
                 <button
                   type="submit"
                   disabled={isSubmitting || isQuoting || !quote?.shipping_zone}
+                  aria-describedby={!quote?.shipping_zone ? 'co-delivery-status' : undefined}
                   className="w-full bg-black text-white hover:bg-neutral-800 disabled:opacity-50 font-bold py-3.5 rounded-full text-sm transition-all shadow-md mt-2 flex items-center justify-center gap-2"
                 >
                   {isSubmitting ? (
@@ -565,7 +573,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
                   ) : (
                     <>
                       <span>Continue to payment</span>
-                      <HugeiconsIcon icon={ArrowRight01Icon} size={15} />
+                      <HugeiconsIcon icon={ArrowRight01Icon} size={15} aria-hidden="true" />
                     </>
                   )}
                 </button>
@@ -578,10 +586,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
         ) : order ? (
           <div className="space-y-4">
             <div className="text-center">
-              <div className="w-12 h-12 bg-emerald-50 text-emerald-700 rounded-full flex items-center justify-center mx-auto border border-emerald-200">
+              <div className="w-12 h-12 bg-emerald-50 text-emerald-700 rounded-full flex items-center justify-center mx-auto border border-emerald-200" aria-hidden="true">
                 <HugeiconsIcon icon={CheckmarkBadge01Icon} size={28} />
               </div>
-              <h2 id="checkout-title" className="font-extrabold text-xl text-black mt-2">Complete your payment</h2>
+              <p className="font-extrabold text-xl text-black mt-2" aria-hidden="true">Complete your payment</p>
               <p className="text-sm text-neutral-700 mt-0.5">
                 Order <strong className="font-mono">{order.order_number}</strong> is reserved
                 {expiresLabel ? <> until <strong>{expiresLabel}</strong></> : null}.
@@ -623,15 +631,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
                   this order elsewhere, or use your order number and email.
                 </p>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 truncate rounded-lg bg-neutral-100 px-2 py-1 font-mono text-[11px]">{order.guest_access_token}</code>
+                  <code className="flex-1 truncate rounded-lg bg-neutral-100 px-2 py-1 font-mono text-xs">{order.guest_access_token}</code>
                   <button
                     type="button"
                     onClick={handleCopyGuestToken}
                     className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-neutral-900 px-2.5 py-1 text-white"
                     aria-label="Copy order access key"
                   >
-                    <HugeiconsIcon icon={copiedToken ? Tick02Icon : Copy01Icon} size={12} />
-                    {copiedToken ? 'Copied' : 'Copy'}
+                    <HugeiconsIcon icon={copiedToken ? Tick02Icon : Copy01Icon} size={12} aria-hidden="true" />
+                    <span aria-live="polite">{copiedToken ? 'Copied' : 'Copy'}</span>
                   </button>
                 </div>
               </div>
@@ -640,7 +648,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
             <fieldset className="space-y-2">
               <legend className="text-xs font-bold uppercase tracking-wider text-neutral-700 mb-1">Payment method</legend>
               {paymentMethods.length === 0 && (
-                <p className="text-sm text-neutral-600">Loading payment methods…</p>
+                <p className="text-sm text-neutral-600" role="status">Loading payment methods…</p>
               )}
               {paymentMethods.map((m) => (
                 <label
@@ -650,13 +658,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
                   <input
                     type="radio"
                     name="payment-method"
-                    className="mt-1"
+                    value={m.id}
+                    className="mt-1 accent-black"
+                    aria-describedby={`pm-desc-${m.id}`}
                     checked={selectedMethod === m.id}
                     onChange={() => setSelectedMethod(m.id as PaymentMethodId)}
                   />
                   <span className="min-w-0">
                     <span className="block text-sm font-semibold text-black">{m.name}</span>
-                    <span className="block text-xs text-neutral-600">{m.description}</span>
+                    <span id={`pm-desc-${m.id}`} className="block text-xs text-neutral-600">{m.description}</span>
                   </span>
                 </label>
               ))}
@@ -683,7 +693,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
               ) : (
                 <>
                   <span>Pay {formatPrice(order.grand_total)}</span>
-                  <HugeiconsIcon icon={ArrowRight01Icon} size={15} />
+                  <HugeiconsIcon icon={ArrowRight01Icon} size={15} aria-hidden="true" />
                 </>
               )}
             </button>
@@ -701,6 +711,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
           <div className="py-10 text-center text-sm text-neutral-600" role="status">Loading your order…</div>
         )}
       </div>
-    </div>
+    </Dialog>
   );
 };

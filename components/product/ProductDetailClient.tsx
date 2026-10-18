@@ -1,0 +1,387 @@
+'use client';
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useCart, MAX_QUANTITY_PER_LINE } from '@/context/CartContext';
+import { useWishlist } from '@/context/WishlistContext';
+import { ImageGallery } from '@/components/product/ImageGallery';
+import { VariantSelector, OptionState } from '@/components/product/VariantSelector';
+import { StickyMobileBar } from '@/components/product/StickyMobileBar';
+import { ProductTabs } from '@/components/product/ProductTabs';
+import { ProductCard } from '@/components/ui/ProductCard';
+import { formatPrice } from '@/lib/currency';
+import {
+  getProductDetail,
+  getProducts,
+  mapApiProductToStorefront,
+} from '@/lib/api-client';
+import { Product, ProductColor, ProductVariant } from '@/types';
+import { HugeiconsIcon } from '@hugeicons/react';
+import {
+  StarIcon,
+  ArrowRight01Icon,
+  Alert02Icon,
+  RefreshIcon,
+} from '@hugeicons/core-free-icons';
+
+/**
+ * Product page (client). The server page.tsx provides the metadata and passes the id/slug.
+ */
+export function ProductDetailClient({ id }: { id: string }) {
+  const router = useRouter();
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<{ notFound?: boolean; message: string } | null>(null);
+  const [product, setProduct] = useState<Product | null>(null);
+  const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
+
+  const [selectedColor, setSelectedColor] = useState<ProductColor | null>(null);
+  const [selectedSize, setSelectedSize] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState(1);
+
+  const { addToCart } = useCart();
+  const { toggleWishlist, isInWishlist } = useWishlist();
+
+  // Load product detail from API
+  const loadProduct = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const apiData = await getProductDetail(id);
+      const mapped = mapApiProductToStorefront(apiData);
+      setProduct(mapped);
+      setQuantity(1);
+
+      // Start on the first option that is actually in stock (else the first option).
+      const variants = mapped.variants ?? [];
+      const initial = variants.find((v) => v.stock > 0) ?? variants[0];
+      setSelectedColor(initial ? initial.color : null);
+      setSelectedSize(initial ? initial.size : null);
+
+      // Fetch related products in same category
+      try {
+        const relatedRes = await getProducts({
+          category: mapped.category,
+          per_page: 5,
+        });
+        const mappedRelated = relatedRes.items
+          .filter((item) => String(item.id) !== mapped.id && item.slug !== mapped.slug)
+          .slice(0, 4)
+          .map(mapApiProductToStorefront);
+        setRelatedProducts(mappedRelated);
+      } catch (e) {
+        // Non-blocking for related products
+      }
+    } catch (err: any) {
+      const is404 = err.statusCode === 404 || err.errorCode === 'RESOURCE_NOT_FOUND';
+      setError({
+        notFound: is404,
+        message: is404
+          ? `Product "${id}" was not found or is no longer available.`
+          : err.message || 'We could not load this product.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    loadProduct();
+  }, [loadProduct]);
+
+  useEffect(() => {
+    router.prefetch('/cart');
+  }, [router]);
+
+  const variants: ProductVariant[] = useMemo(() => product?.variants ?? [], [product]);
+
+  const selectedVariant = useMemo(
+    () => variants.find((v) => v.color.name === selectedColor?.name && v.size === selectedSize) ?? null,
+    [variants, selectedColor, selectedSize]
+  );
+
+  // Which sizes exist (and are in stock) for the selected colour.
+  const sizeStates = useMemo(() => {
+    const states: Record<string, OptionState> = {};
+    for (const size of product?.sizes ?? []) {
+      const v = variants.find((x) => x.size === size && x.color.name === selectedColor?.name);
+      states[size] = !v ? 'unavailable' : v.stock > 0 ? 'available' : 'sold-out';
+    }
+    return states;
+  }, [product, variants, selectedColor]);
+
+  const colorInStock = useMemo(() => {
+    const map: Record<string, boolean> = {};
+    for (const v of variants) {
+      map[v.color.name] = (map[v.color.name] ?? false) || v.stock > 0;
+    }
+    return map;
+  }, [variants]);
+
+  const handleSelectColor = (color: ProductColor) => {
+    setSelectedColor(color);
+    setQuantity(1);
+    // Keep the size if it exists in the new colour, otherwise move to its best available size.
+    const forColor = variants.filter((v) => v.color.name === color.name);
+    if (!forColor.some((v) => v.size === selectedSize)) {
+      const best = forColor.find((v) => v.stock > 0) ?? forColor[0];
+      setSelectedSize(best ? best.size : null);
+    }
+  };
+
+  const handleSelectSize = (size: string) => {
+    setSelectedSize(size);
+    setQuantity(1);
+  };
+
+  const stock = selectedVariant?.stock ?? 0;
+  const maxQuantity = Math.max(1, Math.min(MAX_QUANTITY_PER_LINE, stock));
+  const canPurchase = !!selectedVariant && stock > 0;
+  const displayPrice = selectedVariant?.price ?? product?.price ?? 0;
+  const stockMessage = !selectedVariant
+    ? variants.length === 0
+      ? 'This product is not available to order right now.'
+      : 'Choose an available colour and size.'
+    : stock === 0
+      ? 'Sold out in this colour and size.'
+      : stock <= 5
+        ? `Only ${stock} left in this size.`
+        : null;
+
+  const handleAddToCart = () => {
+    if (!product || !selectedVariant || !canPurchase) return;
+    addToCart(product, selectedVariant, quantity);
+  };
+
+  const handleBuyNow = () => {
+    if (!product || !selectedVariant || !canPurchase) return;
+    addToCart(product, selectedVariant, quantity);
+    router.push('/cart');
+  };
+
+  const isWishlisted = product ? isInWishlist(product.id) : false;
+  const handleToggleWishlist = () => {
+    if (product) toggleWishlist(product);
+  };
+
+  // 1. Loading State Skeleton
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-pulse">
+        <div className="h-4 bg-neutral-200 rounded w-48 mb-8" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
+          <div className="lg:col-span-6 aspect-square bg-neutral-200 rounded-2xl" />
+          <div className="lg:col-span-6 space-y-4">
+            <div className="h-8 bg-neutral-200 rounded w-3/4" />
+            <div className="h-5 bg-neutral-200 rounded w-1/4" />
+            <div className="h-8 bg-neutral-200 rounded w-1/3" />
+            <div className="h-20 bg-neutral-200 rounded w-full" />
+            <div className="h-12 bg-neutral-200 rounded-full w-full" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Missing Product / 404 State
+  if (error?.notFound) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-20 text-center">
+        <div className="w-16 h-16 bg-neutral-100 text-neutral-500 rounded-full flex items-center justify-center mx-auto mb-4" aria-hidden="true">
+          <HugeiconsIcon icon={Alert02Icon} size={32} />
+        </div>
+        <h1 className="font-integral text-2xl sm:text-3xl text-black mb-3">PRODUCT NOT FOUND</h1>
+        <p className="text-neutral-600 text-sm sm:text-base max-w-md mx-auto mb-8">
+          The item you are looking for does not exist, has been removed, or is currently unpublished.
+        </p>
+        <Link
+          href="/category"
+          className="inline-flex items-center gap-2 bg-black text-white hover:bg-neutral-800 font-semibold px-8 py-3.5 rounded-full text-sm transition-all shadow-md"
+        >
+          <span>Explore All Products</span>
+          <HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+        </Link>
+      </div>
+    );
+  }
+
+  // 3. Connection / API Error State (Never silently fall back to fake prices)
+  if (error) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-20 text-center">
+        <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4" aria-hidden="true">
+          <HugeiconsIcon icon={Alert02Icon} size={32} />
+        </div>
+        <h1 className="font-integral text-2xl sm:text-3xl text-red-900 mb-3">CANNOT LOAD PRODUCT</h1>
+        <p className="text-red-700 text-sm sm:text-base max-w-md mx-auto mb-8">
+          {error.message} Please check your connection and try again.
+        </p>
+        <button
+          onClick={loadProduct}
+          className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold px-8 py-3.5 rounded-full text-sm transition-all shadow-md"
+        >
+          <HugeiconsIcon icon={RefreshIcon} size={16} />
+          <span>Try again</span>
+        </button>
+      </div>
+    );
+  }
+
+  if (!product) return null;
+
+  const inStock = variants.some((v) => v.stock > 0);
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24 md:pb-12">
+      {/* Breadcrumbs */}
+      <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-xs sm:text-sm text-neutral-600 mb-8 overflow-x-auto no-scrollbar whitespace-nowrap">
+        <Link href="/" className="hover:text-black transition-colors">
+          Home
+        </Link>
+        <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-500 shrink-0" aria-hidden="true" />
+        <Link href="/category" className="hover:text-black transition-colors">
+          Shop
+        </Link>
+        <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-500 shrink-0" aria-hidden="true" />
+        <Link
+          href={`/category?cat=${encodeURIComponent(String(product.category))}`}
+          className="hover:text-black transition-colors capitalize"
+        >
+          {product.categoryName || product.category}
+        </Link>
+        <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-500 shrink-0" aria-hidden="true" />
+        <span className="text-black font-medium truncate" aria-current="page">{product.name}</span>
+      </nav>
+
+      {/* Main Grid: Gallery on Left + Info & Buying Actions on Right */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+        {/* Left Gallery (6 cols on desktop) */}
+        <div className="lg:col-span-6 w-full">
+          <ImageGallery
+            images={product.images}
+            productName={product.name}
+          />
+        </div>
+
+        {/* Right Info & Buying Actions (6 cols on desktop) */}
+        <div className="lg:col-span-6 space-y-6">
+          <div>
+            {/* Stock status */}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              {!inStock && (
+                <span className="inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600">
+                  Out of Stock
+                </span>
+              )}
+            </div>
+
+            <h1 className="font-integral text-2xl sm:text-4xl text-black leading-tight uppercase font-black">
+              {product.name}
+            </h1>
+
+            {/* Star Rating (only from approved reviews) */}
+            {product.reviewCount > 0 ? (
+              <div className="flex items-center gap-2 mt-3" aria-label={`Rated ${product.rating.toFixed(1)} out of 5 from ${product.reviewCount} reviews`}>
+                <div className="flex items-center text-[#FFC633]" aria-hidden="true">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <span key={i} className={i < Math.round(product.rating) ? 'text-[#FFC633]' : 'text-neutral-300'}>
+                      <HugeiconsIcon
+                        icon={StarIcon}
+                        size={16}
+                        className={i < Math.round(product.rating) ? 'fill-current' : ''}
+                      />
+                    </span>
+                  ))}
+                </div>
+                <span className="text-sm font-medium text-black">
+                  {product.rating.toFixed(1)}/<span className="text-neutral-500">5</span>
+                </span>
+                <span className="text-xs text-neutral-500">
+                  ({product.reviewCount} {product.reviewCount === 1 ? 'review' : 'reviews'})
+                </span>
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-neutral-500">No reviews yet</p>
+            )}
+
+            {/* Price Row (NGN) */}
+            <div className="flex items-center gap-3 mt-3">
+              <span className="font-bold text-2xl sm:text-3xl text-black">
+                {formatPrice(displayPrice)}
+              </span>
+              {product.originalPrice && product.originalPrice > displayPrice && (
+                <>
+                  <span className="font-bold text-2xl sm:text-3xl text-neutral-500 line-through">
+                    <span className="sr-only">Was </span>
+                    {formatPrice(product.originalPrice)}
+                  </span>
+                  {product.discountPercent && (
+                    <span className="bg-[#FF3333]/10 text-[#FF3333] text-sm font-bold px-3 py-1 rounded-full">
+                      -{product.discountPercent}%
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Description */}
+            <p className="text-neutral-600 text-sm sm:text-base leading-relaxed mt-4 pb-6 border-b border-neutral-200">
+              {product.description}
+            </p>
+          </div>
+
+          {/* Modular Variant Selector Component */}
+          <VariantSelector
+            colors={product.colors}
+            sizes={product.sizes as string[]}
+            selectedColor={selectedColor}
+            onSelectColor={handleSelectColor}
+            selectedSize={selectedSize}
+            onSelectSize={handleSelectSize}
+            sizeStates={sizeStates}
+            colorInStock={colorInStock}
+            quantity={quantity}
+            maxQuantity={maxQuantity}
+            onQuantityChange={setQuantity}
+            canPurchase={canPurchase}
+            stockMessage={stockMessage}
+            onAddToCart={handleAddToCart}
+            onBuyNow={handleBuyNow}
+            isWishlisted={isWishlisted}
+            onToggleWishlist={handleToggleWishlist}
+          />
+        </div>
+      </div>
+
+      {/* Tabs: details, approved reviews (with the review form) and FAQs */}
+      <ProductTabs product={product} />
+
+      {/* You Might Also Like Section */}
+      {relatedProducts.length > 0 && (
+        <section className="mt-20 pt-10 border-t border-neutral-200">
+          <h2 className="font-integral text-2xl sm:text-4xl text-center text-black mb-10">
+            YOU MIGHT ALSO LIKE
+          </h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+            {relatedProducts.map((p) => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Sticky Mobile Purchase Bar */}
+      <StickyMobileBar
+        product={product}
+        price={displayPrice}
+        selectionLabel={selectedVariant ? `${selectedVariant.size} • ${selectedVariant.color.name}` : 'Choose colour & size'}
+        canPurchase={canPurchase}
+        onAddToCart={handleAddToCart}
+        onBuyNow={handleBuyNow}
+      />
+    </div>
+  );
+}

@@ -84,8 +84,21 @@ interface ProductForm {
   status: ProductStatus;
   is_featured: boolean;
   is_flash_deal: boolean;
+  /** datetime-local value ('YYYY-MM-DDTHH:MM'); empty = no end date. */
+  flash_deal_ends_at: string;
   images: ImageForm[];
   variants: VariantForm[];
+}
+
+/** 'YYYY-MM-DD HH:MM:SS' (server) → 'YYYY-MM-DDTHH:MM' (datetime-local input). */
+function toDateTimeLocal(value: string | null | undefined): string {
+  return value ? value.replace(' ', 'T').slice(0, 16) : '';
+}
+
+function flashDealEnd(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 const NEW_VARIANT: VariantForm = {
@@ -110,6 +123,7 @@ const EMPTY_FORM: ProductForm = {
   status: 'draft',
   is_featured: false,
   is_flash_deal: false,
+  flash_deal_ends_at: '',
   images: [],
   variants: [{ ...NEW_VARIANT }],
 };
@@ -135,6 +149,7 @@ function productToForm(p: AdminProduct): ProductForm {
     status: p.status,
     is_featured: Boolean(p.is_featured),
     is_flash_deal: Boolean(p.is_flash_deal),
+    flash_deal_ends_at: toDateTimeLocal(p.flash_deal_ends_at),
     images,
     variants: (p.variants ?? []).map((v) => ({
       id: v.id,
@@ -334,6 +349,8 @@ export function ProductManagement() {
       description: form.description.trim(),
       is_featured: form.is_featured ? 1 : 0,
       is_flash_deal: form.is_flash_deal ? 1 : 0,
+      // Empty clears the end date; the server ignores it when the product is not a flash deal.
+      flash_deal_ends_at: form.is_flash_deal ? form.flash_deal_ends_at : '',
       images: form.images.map((img, idx) => ({
         image_url: img.image_url,
         alt_text: img.alt_text.trim() || form.name.trim(),
@@ -502,7 +519,14 @@ export function ProductManagement() {
                             <span className="font-mono">{p.sku}</span>
                             {p.variants_count > 0 && ` · ${p.variants_count} variant${p.variants_count === 1 ? '' : 's'}`}
                             {Boolean(p.is_featured) && ' · Featured'}
-                            {Boolean(p.is_flash_deal) && ' · Flash deal'}
+                            {Boolean(p.is_flash_deal) &&
+                              (() => {
+                                const end = flashDealEnd(p.flash_deal_ends_at);
+                                if (!end) return ' · Flash deal';
+                                return end.getTime() <= Date.now()
+                                  ? ' · Flash deal ended'
+                                  : ` · Flash deal until ${end.toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`;
+                              })()}
                           </p>
                         </div>
                       </div>
@@ -670,6 +694,23 @@ export function ProductManagement() {
               <Checkbox label="Featured on the home page" checked={form.is_featured} onChange={(v) => update('is_featured', v)} />
               <Checkbox label="Show in flash deals" checked={form.is_flash_deal} onChange={(v) => update('is_flash_deal', v)} />
             </div>
+            {form.is_flash_deal && (
+              <Field
+                label="Flash deal ends"
+                error={errors.flash_deal_ends_at}
+                hint="Leave empty for no countdown. After this time the product stops showing as a flash deal."
+                className="sm:col-span-2"
+              >
+                {(p) => (
+                  <TextInput
+                    {...p}
+                    type="datetime-local"
+                    value={form.flash_deal_ends_at}
+                    onChange={(e) => update('flash_deal_ends_at', e.target.value)}
+                  />
+                )}
+              </Field>
+            )}
           </fieldset>
 
           <fieldset className="space-y-3">

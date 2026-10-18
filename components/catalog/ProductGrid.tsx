@@ -51,7 +51,7 @@ function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
       aria-label={`Remove filter: ${label}`}
     >
       <span>{label}</span>
-      <HugeiconsIcon icon={Cancel01Icon} size={12} />
+      <HugeiconsIcon icon={Cancel01Icon} size={12} aria-hidden="true" />
     </button>
   );
 }
@@ -95,11 +95,11 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             className="lg:hidden p-2.5 bg-[#F0F0F0] rounded-full text-black hover:bg-neutral-200 transition-colors flex items-center justify-center"
             aria-label="Open filters"
           >
-            <HugeiconsIcon icon={SlidersHorizontalIcon} size={20} />
+            <HugeiconsIcon icon={SlidersHorizontalIcon} size={20} aria-hidden="true" />
           </button>
 
           <div className="relative flex items-center text-sm text-neutral-700">
-            <label htmlFor="catalog-sort" className="hidden sm:inline mr-1">Sort by:</label>
+            <label htmlFor="catalog-sort" className="sr-only sm:not-sr-only sm:mr-1">Sort by:</label>
             <div className="relative inline-block">
               <select
                 id="catalog-sort"
@@ -145,7 +145,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
 
       {error && (
         <div role="alert" className="bg-red-50 border border-red-200 rounded-3xl p-8 text-center my-6">
-          <div className="w-12 h-12 bg-red-100 text-red-700 rounded-full flex items-center justify-center mx-auto mb-3">
+          <div className="w-12 h-12 bg-red-100 text-red-700 rounded-full flex items-center justify-center mx-auto mb-3" aria-hidden="true">
             <HugeiconsIcon icon={Alert02Icon} size={24} />
           </div>
           <h2 className="font-bold text-lg text-red-900 mb-1">We couldn&apos;t load products</h2>
@@ -155,7 +155,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             onClick={onRetry}
             className="inline-flex items-center gap-2 bg-red-700 hover:bg-red-800 text-white px-6 py-2.5 rounded-full text-sm font-semibold"
           >
-            <HugeiconsIcon icon={RefreshIcon} size={16} />
+            <HugeiconsIcon icon={RefreshIcon} size={16} aria-hidden="true" />
             <span>Try again</span>
           </button>
         </div>
@@ -202,9 +202,10 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             type="button"
             disabled={currentPage === 1}
             onClick={() => onPageChange(currentPage - 1)}
+            aria-label="Previous page"
             className="flex items-center gap-2 px-3 sm:px-4 py-2 border border-neutral-200 rounded-lg hover:bg-neutral-50 disabled:opacity-40"
           >
-            <HugeiconsIcon icon={ArrowLeft01Icon} size={16} />
+            <HugeiconsIcon icon={ArrowLeft01Icon} size={16} aria-hidden="true" />
             <span className="hidden sm:inline">Previous</span>
           </button>
 
@@ -234,10 +235,11 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             type="button"
             disabled={currentPage === totalPages}
             onClick={() => onPageChange(currentPage + 1)}
+            aria-label="Next page"
             className="flex items-center gap-2 px-3 sm:px-4 py-2 border border-neutral-200 rounded-lg hover:bg-neutral-50 disabled:opacity-40"
           >
             <span className="hidden sm:inline">Next</span>
-            <HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+            <HugeiconsIcon icon={ArrowRight01Icon} size={16} aria-hidden="true" />
           </button>
         </nav>
       )}

@@ -210,6 +210,58 @@ input[type="range"]::-webkit-slider-thumb {
   animation: pop 0.26s var(--ease-out-expo) both;
 }
 
+/* Enter animations used by the storefront (animate-in + fade-in / zoom-in / slide-in-from-*),
+   the same composable pattern as tailwindcss-animate without the extra dependency. */
+@keyframes enter {
+  from {
+    opacity: var(--enter-opacity, 1);
+    transform: translate3d(var(--enter-x, 0), var(--enter-y, 0), 0) scale(var(--enter-scale, 1));
+  }
+}
+
+.animate-in {
+  animation: enter 0.2s ease-out both;
+}
+
+.fade-in {
+  --enter-opacity: 0;
+}
+
+.zoom-in {
+  --enter-scale: 0.95;
+}
+
+.zoom-in-95 {
+  --enter-scale: 0.95;
+}
+
+.slide-in-from-top-2 {
+  --enter-y: -0.5rem;
+}
+
+.slide-in-from-bottom-2 {
+  --enter-y: 0.5rem;
+}
+
+.slide-in-from-left {
+  --enter-x: -100%;
+}
+
+.slide-in-from-right {
+  --enter-x: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ==========================================================================
    Clean Dedicated Receipt Print Styles - Strictly Single Page
    When printing, hides header, footer, page background, and all storefront chrome;

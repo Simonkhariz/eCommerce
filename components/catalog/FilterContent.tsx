@@ -30,7 +30,7 @@ function Section({ title, children, defaultOpen = true }: { title: string; child
         className="w-full flex items-center justify-between font-bold text-base mb-4"
       >
         <span>{title}</span>
-        <HugeiconsIcon icon={ArrowUp01Icon} size={16} className={`transition-transform duration-200 ${open ? '' : 'rotate-180'}`} />
+        <HugeiconsIcon icon={ArrowUp01Icon} size={16} aria-hidden="true" className={`transition-transform duration-200 ${open ? '' : 'rotate-180'}`} />
       </button>
       {open && <div id={id}>{children}</div>}
     </div>
@@ -94,7 +94,8 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
       {!facets && <p className="text-sm text-neutral-600" role="status">Loading filters…</p>}
 
       {categories.length > 0 && (
-        <div className="space-y-1 pb-6 border-b border-neutral-200" role="group" aria-label="Category">
+        <fieldset className="space-y-1 pb-6 border-b border-neutral-200">
+          <legend className="sr-only">Category</legend>
           {categories.map((cat) => {
             const isActive = filters.category?.toLowerCase() === cat.slug.toLowerCase();
             return (
@@ -111,15 +112,15 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                   {cat.name}
                   {typeof cat.product_count === 'number' && <span className="text-neutral-500 font-normal"> ({cat.product_count})</span>}
                 </span>
-                <HugeiconsIcon icon={ArrowRight01Icon} size={16} className={isActive ? 'text-black' : 'text-neutral-400'} />
+                <HugeiconsIcon icon={ArrowRight01Icon} size={16} className={isActive ? 'text-black' : 'text-neutral-500'} aria-hidden="true" />
               </button>
             );
           })}
-        </div>
+        </fieldset>
       )}
 
       <Section title="Price">
-        <form onSubmit={applyPrice} className="space-y-3">
+        <form onSubmit={applyPrice} className="space-y-3" aria-label="Price range">
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label htmlFor={`min-price-${isMobile ? 'm' : 'd'}`} className="block text-xs font-semibold text-neutral-700 mb-1">Min (₦)</label>
@@ -162,7 +163,8 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
 
       {colors.length > 0 && (
         <Section title="Colors">
-          <div className="grid grid-cols-5 gap-3" role="group" aria-label="Colours">
+          <fieldset className="grid grid-cols-5 gap-3">
+            <legend className="sr-only">Colours</legend>
             {colors.map((col) => {
               const isSelected = filters.selectedColors.some((c) => c.toLowerCase() === col.name.toLowerCase());
               const hex = col.hex || '#cccccc';
@@ -179,17 +181,18 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                   title={col.name}
                   aria-label={`${col.name} (${col.product_count})`}
                 >
-                  {isSelected && <HugeiconsIcon icon={Tick02Icon} size={16} className={isLight(hex) ? 'text-black' : 'text-white'} />}
+                  {isSelected && <HugeiconsIcon icon={Tick02Icon} size={16} className={isLight(hex) ? 'text-black' : 'text-white'} aria-hidden="true" />}
                 </button>
               );
             })}
-          </div>
+          </fieldset>
         </Section>
       )}
 
       {sizes.length > 0 && (
         <Section title="Size">
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Sizes">
+          <fieldset className="flex flex-wrap gap-2">
+            <legend className="sr-only">Sizes</legend>
             {sizes.map((size) => {
               const isSelected = filters.selectedSizes.some((s) => s.toLowerCase() === size.toLowerCase());
               return (
@@ -206,13 +209,14 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                 </button>
               );
             })}
-          </div>
+          </fieldset>
         </Section>
       )}
 
       {styles.length > 0 && (
         <Section title="Dress Style">
-          <div className="space-y-1" role="group" aria-label="Dress style">
+          <fieldset className="space-y-1">
+            <legend className="sr-only">Dress style</legend>
             {styles.map((style) => {
               const isActive = filters.dressStyle?.toLowerCase() === style.toLowerCase();
               return (
@@ -226,24 +230,25 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                   }`}
                 >
                   <span>{style}</span>
-                  <HugeiconsIcon icon={ArrowRight01Icon} size={16} className={isActive ? 'text-black' : 'text-neutral-400'} />
+                  <HugeiconsIcon icon={ArrowRight01Icon} size={16} className={isActive ? 'text-black' : 'text-neutral-500'} aria-hidden="true" />
                 </button>
               );
             })}
-          </div>
+          </fieldset>
         </Section>
       )}
 
-      <div className="space-y-2" role="group" aria-label="Offers">
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-bold text-black mb-1">Offers</legend>
         <label className="flex items-center gap-2 text-sm text-neutral-800">
-          <input type="checkbox" checked={filters.onSale} onChange={(e) => onFilterChange({ onSale: e.target.checked })} />
+          <input type="checkbox" className="size-4 accent-black" checked={filters.onSale} onChange={(e) => onFilterChange({ onSale: e.target.checked })} />
           On sale
         </label>
         <label className="flex items-center gap-2 text-sm text-neutral-800">
-          <input type="checkbox" checked={filters.flashDeals} onChange={(e) => onFilterChange({ flashDeals: e.target.checked })} />
+          <input type="checkbox" className="size-4 accent-black" checked={filters.flashDeals} onChange={(e) => onFilterChange({ flashDeals: e.target.checked })} />
           Flash deals
         </label>
-      </div>
+      </fieldset>
 
       {isMobile && onDone && (
         <button

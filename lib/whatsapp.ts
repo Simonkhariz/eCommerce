@@ -9,7 +9,7 @@ export const SUPPORT_PHONE_FORMATTED = '+234 906 670 7079';
 
 /** Normalise a configured phone number ("+234 906 ...", "0906...") to wa.me digits. */
 export function toWhatsAppDigits(phone?: string | null): string {
-  const digits = (phone || '').replace(/D/g, '');
+  const digits = (phone || '').replace(/\D/g, '');
   if (!digits) return SUPPORT_WHATSAPP_NUMBER;
   if (digits.startsWith('0') && digits.length === 11) return `234${digits.slice(1)}`;
   return digits;

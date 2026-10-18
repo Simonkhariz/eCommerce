@@ -230,9 +230,14 @@ function CheckoutCallbackContent() {
       <p className="text-xs text-neutral-700">Your order and items are still reserved. Choose how you&apos;d like to pay.</p>
       <fieldset className="space-y-1.5">
         <legend className="sr-only">Payment method</legend>
+        {paymentMethods.length === 0 && (
+          <p className="text-sm text-neutral-700" role="status">
+            Loading payment methods…
+          </p>
+        )}
         {paymentMethods.map((m) => (
           <label key={m.id} className="flex items-center gap-2 rounded-xl border border-neutral-200 px-3 py-2 text-sm cursor-pointer has-[:checked]:border-black">
-            <input type="radio" name="retry-method" checked={retryMethod === m.id} onChange={() => setRetryMethod(m.id)} />
+            <input type="radio" name="retry-method" value={m.id} className="accent-black" checked={retryMethod === m.id} onChange={() => setRetryMethod(m.id)} />
             <span>{m.name}</span>
           </label>
         ))}
@@ -254,7 +259,7 @@ function CheckoutCallbackContent() {
       <div className="bg-white rounded-3xl p-6 sm:p-10 max-w-lg w-full border border-neutral-200 shadow-xl text-center space-y-6" aria-live="polite">
         {view === 'checking' && (
           <div className="py-12 space-y-4" role="status">
-            <div className="w-14 h-14 border-4 border-black/10 border-t-black rounded-full animate-spin mx-auto" />
+            <div className="w-14 h-14 border-4 border-black/10 border-t-black rounded-full animate-spin mx-auto" aria-hidden="true" />
             <h1 className="text-xl font-bold text-black">Checking your payment…</h1>
             <p className="text-sm text-neutral-700 max-w-sm mx-auto">We confirm every payment directly with the payment provider.</p>
           </div>
@@ -263,7 +268,7 @@ function CheckoutCallbackContent() {
         {view === 'error' && (
           <div className="py-6 space-y-4">
             <div className="w-16 h-16 bg-red-100 text-red-700 rounded-full flex items-center justify-center mx-auto">
-              <HugeiconsIcon icon={AlertCircleIcon} size={36} />
+              <HugeiconsIcon icon={AlertCircleIcon} size={36} aria-hidden="true" />
             </div>
             <h1 className="text-2xl font-extrabold text-black">We couldn&apos;t check this payment</h1>
             <p className="text-sm text-neutral-700 max-w-sm mx-auto">{message}</p>
@@ -314,7 +319,7 @@ function CheckoutCallbackContent() {
               </div>
 
               <div className="w-14 h-14 bg-emerald-50 text-emerald-700 rounded-full flex items-center justify-center mx-auto border border-emerald-200">
-                <HugeiconsIcon icon={CheckmarkBadge01Icon} size={36} />
+                <HugeiconsIcon icon={CheckmarkBadge01Icon} size={36} aria-hidden="true" />
               </div>
               <div>
                 <h1 className="text-2xl font-extrabold text-black">Payment confirmed</h1>
@@ -390,7 +395,7 @@ function CheckoutCallbackContent() {
                 className="w-full bg-black text-white hover:bg-neutral-800 font-bold py-3.5 rounded-full text-sm shadow-md flex items-center justify-center gap-2"
               >
                 <span>Track your order</span>
-                <HugeiconsIcon icon={ArrowRight01Icon} size={15} />
+                <HugeiconsIcon icon={ArrowRight01Icon} size={15} aria-hidden="true" />
               </Link>
 
               <div className="flex items-center justify-center gap-3">
@@ -432,7 +437,7 @@ function CheckoutCallbackContent() {
         {view === 'pending' && (
           <div className="py-4 space-y-5">
             <div className="w-16 h-16 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
-              <HugeiconsIcon icon={Clock01Icon} size={36} />
+              <HugeiconsIcon icon={Clock01Icon} size={36} aria-hidden="true" />
             </div>
             <div>
               <h1 className="text-2xl font-extrabold text-black">
@@ -481,7 +486,7 @@ function CheckoutCallbackContent() {
         {view === 'failed' && (
           <div className="py-4 space-y-5">
             <div className="w-16 h-16 bg-red-100 text-red-700 rounded-full flex items-center justify-center mx-auto">
-              <HugeiconsIcon icon={AlertCircleIcon} size={36} />
+              <HugeiconsIcon icon={AlertCircleIcon} size={36} aria-hidden="true" />
             </div>
             <div>
               <h1 className="text-2xl font-extrabold text-black">Payment didn&apos;t go through</h1>
@@ -500,7 +505,7 @@ function CheckoutCallbackContent() {
         {view === 'cancelled' && (
           <div className="py-4 space-y-5">
             <div className="w-16 h-16 bg-neutral-100 text-neutral-700 rounded-full flex items-center justify-center mx-auto">
-              <HugeiconsIcon icon={Clock01Icon} size={36} />
+              <HugeiconsIcon icon={Clock01Icon} size={36} aria-hidden="true" />
             </div>
             <h1 className="text-2xl font-extrabold text-black">This order has expired</h1>
             <p className="text-sm text-neutral-700 max-w-sm mx-auto">
@@ -520,7 +525,7 @@ function CheckoutCallbackContent() {
         {view === 'late' && (
           <div className="py-4 space-y-5">
             <div className="w-16 h-16 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
-              <HugeiconsIcon icon={AlertCircleIcon} size={36} />
+              <HugeiconsIcon icon={AlertCircleIcon} size={36} aria-hidden="true" />
             </div>
             <h1 className="text-2xl font-extrabold text-black">Payment received after the order expired</h1>
             <p className="text-sm text-neutral-700 max-w-sm mx-auto">
@@ -548,7 +553,8 @@ export default function CheckoutCallbackPage() {
     <Suspense
       fallback={
         <div className="min-h-[70vh] flex items-center justify-center">
-          <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin" />
+          <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin" aria-hidden="true" />
+          <span className="sr-only">Loading…</span>
         </div>
       }
     >

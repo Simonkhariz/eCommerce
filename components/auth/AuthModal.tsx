@@ -1,32 +1,82 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Cancel01Icon, Mail01Icon, LockPasswordIcon, UserIcon, CallIcon, CheckmarkCircle02Icon } from '@hugeicons/core-free-icons';
+import { Dialog } from '@/components/ui/Dialog';
+
+type Tab = 'login' | 'register' | 'magic';
+
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: 'login', label: 'Sign in' },
+  { id: 'register', label: 'Register' },
+  { id: 'magic', label: 'Email link' },
+];
+
+const inputClass =
+  'w-full pl-10 pr-4 py-3 rounded-full bg-neutral-50 border border-neutral-300 text-sm text-black placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-black';
+const labelClass = 'block text-xs font-semibold text-neutral-700 mb-1.5';
+
+/** An input with a leading decorative icon and a properly linked label. */
+function IconField({
+  id,
+  label,
+  icon,
+  hint,
+  ...input
+}: React.InputHTMLAttributes<HTMLInputElement> & { id: string; label: string; icon: typeof Mail01Icon; hint?: string }) {
+  const hintId = hint ? `${id}-hint` : undefined;
+  return (
+    <div>
+      <label htmlFor={id} className={labelClass}>
+        {label}
+      </label>
+      <div className="relative">
+        <input id={id} aria-describedby={hintId} className={inputClass} {...input} />
+        <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500" aria-hidden="true">
+          <HugeiconsIcon icon={icon} size={18} />
+        </span>
+      </div>
+      {hint && (
+        <p id={hintId} className="mt-1 text-xs text-neutral-600">
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export const AuthModal: React.FC = () => {
-  const {
-    isAuthModalOpen,
-    authModalTab,
-    openAuthModal,
-    closeAuthModal,
-    login,
-    register,
-    requestMagicLink,
-  } = useAuth();
+  const { isAuthModalOpen, authModalTab, openAuthModal, closeAuthModal, login, register, requestMagicLink } = useAuth();
+  const uid = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ login: null, register: null, magic: null });
 
-  // Form states
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [magicSent, setMagicSent] = useState(false);
-
-  // Status states
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const tab: Tab = authModalTab as Tab;
+
+  // When the tab changes, move focus to its first field (the Dialog focuses on open).
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (!isAuthModalOpen) {
+      firstRender.current = true;
+      return;
+    }
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    panelRef.current?.querySelector<HTMLElement>('[role="tabpanel"] input')?.focus({ preventScroll: true });
+  }, [tab, isAuthModalOpen]);
 
   if (!isAuthModalOpen) return null;
 
@@ -40,9 +90,25 @@ export const AuthModal: React.FC = () => {
     setSuccessMessage(null);
   };
 
-  const switchTab = (tab: 'login' | 'register' | 'magic') => {
+  const switchTab = (next: Tab) => {
     resetForm();
-    openAuthModal(tab);
+    openAuthModal(next);
+  };
+
+  // Arrow keys move between tabs (WAI-ARIA tabs pattern).
+  const onTabKeyDown = (e: React.KeyboardEvent) => {
+    const order = TABS.map((t) => t.id);
+    const i = order.indexOf(tab);
+    let next: Tab | null = null;
+    if (e.key === 'ArrowRight') next = order[(i + 1) % order.length];
+    if (e.key === 'ArrowLeft') next = order[(i - 1 + order.length) % order.length];
+    if (e.key === 'Home') next = order[0];
+    if (e.key === 'End') next = order[order.length - 1];
+    if (next) {
+      e.preventDefault();
+      switchTab(next);
+      tabRefs.current[next]?.focus();
+    }
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -53,7 +119,7 @@ export const AuthModal: React.FC = () => {
       await login(email, password);
       resetForm();
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to sign in. Please check your credentials.');
+      setErrorMessage(err?.message || 'Sign in failed. Please check your email and password.');
     } finally {
       setIsSubmitting(false);
     }
@@ -67,297 +133,245 @@ export const AuthModal: React.FC = () => {
       await register({ full_name: fullName, email, password, phone: phone || undefined });
       resetForm();
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to create account. Please check your inputs.');
+      setErrorMessage(err?.message || 'We could not create your account. Please check your details.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleMagicRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleMagicRequest = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
       await requestMagicLink(email);
       setMagicSent(true);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to request magic link.');
+      setErrorMessage(err?.message || 'We could not send a sign-in link. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const panelId = `${uid}-panel`;
+  const tabId = (t: Tab) => `${uid}-tab-${t}`;
+  const title = tab === 'register' ? 'Create an account' : tab === 'magic' ? 'Sign in with an email link' : 'Sign in';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm animate-fade"
-        onClick={closeAuthModal}
-      />
-
-      {/* Modal Dialog */}
-      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 animate-in zoom-in-95 duration-200">
-        {/* Header */}
+    <Dialog
+      open={isAuthModalOpen}
+      onClose={closeAuthModal}
+      title={title}
+      busy={isSubmitting}
+      panelClassName="w-full max-w-md"
+    >
+      <div ref={panelRef} className="relative w-full bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 sm:p-8 animate-in zoom-in-95 max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-4 border-b border-neutral-100 mb-6">
-          <span className="font-integral text-xl font-bold tracking-tight text-black">SHOP.CO</span>
+          <span className="font-integral text-xl font-bold tracking-tight text-black" aria-hidden="true">
+            SHOP.CO
+          </span>
           <button
+            type="button"
             onClick={closeAuthModal}
-            className="p-1 text-neutral-400 hover:text-black transition-colors rounded-full"
-            aria-label="Close dialog"
+            disabled={isSubmitting}
+            className="p-1 text-neutral-600 hover:text-black transition-colors rounded-full disabled:opacity-50"
+            aria-label="Close sign-in"
           >
-            <HugeiconsIcon icon={Cancel01Icon} size={20} />
+            <HugeiconsIcon icon={Cancel01Icon} size={20} aria-hidden="true" />
           </button>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex rounded-full bg-neutral-100 p-1 mb-6 text-xs sm:text-sm font-medium">
-          <button
-            type="button"
-            onClick={() => switchTab('login')}
-            className={`flex-1 py-2 text-center rounded-full transition-all ${
-              authModalTab === 'login' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'
-            }`}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            onClick={() => switchTab('register')}
-            className={`flex-1 py-2 text-center rounded-full transition-all ${
-              authModalTab === 'register' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'
-            }`}
-          >
-            Register
-          </button>
-          <button
-            type="button"
-            onClick={() => switchTab('magic')}
-            className={`flex-1 py-2 text-center rounded-full transition-all ${
-              authModalTab === 'magic' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'
-            }`}
-          >
-            Magic Link
-          </button>
+        <div role="tablist" aria-label="How do you want to sign in?" className="flex rounded-full bg-neutral-100 p-1 mb-6 text-sm font-medium" onKeyDown={onTabKeyDown}>
+          {TABS.map((t) => {
+            const selected = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                ref={(el) => {
+                  tabRefs.current[t.id] = el;
+                }}
+                id={tabId(t.id)}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={panelId}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => switchTab(t.id)}
+                className={`flex-1 py-2 text-center rounded-full transition-all ${
+                  selected ? 'bg-white text-black shadow-sm' : 'text-neutral-600 hover:text-black'
+                }`}
+              >
+                {t.label}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Alert Messages */}
         {errorMessage && (
-          <div className="mb-4 p-3.5 rounded-2xl bg-red-50 text-red-700 text-xs sm:text-sm font-medium border border-red-100">
+          <div role="alert" className="mb-4 p-3.5 rounded-2xl bg-red-50 text-red-800 text-sm font-medium border border-red-200">
             {errorMessage}
           </div>
         )}
         {successMessage && (
-          <div className="mb-4 p-3.5 rounded-2xl bg-emerald-50 text-emerald-800 text-xs sm:text-sm font-medium border border-emerald-100 flex items-center gap-2">
-            <HugeiconsIcon icon={CheckmarkCircle02Icon} size={18} />
+          <div role="status" className="mb-4 p-3.5 rounded-2xl bg-emerald-50 text-emerald-800 text-sm font-medium border border-emerald-100 flex items-center gap-2">
+            <HugeiconsIcon icon={CheckmarkCircle02Icon} size={18} aria-hidden="true" />
             <span>{successMessage}</span>
           </div>
         )}
 
-        {/* --- 1. SIGN IN FORM --- */}
-        {authModalTab === 'login' && (
-          <form onSubmit={handleLoginSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-neutral-700 mb-1.5">Email Address</label>
-              <div className="relative">
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full pl-10 pr-4 py-3 rounded-full bg-neutral-50 border border-neutral-200 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                />
-                <span className="absolute left-3.5 top-3.5 text-neutral-400">
-                  <HugeiconsIcon icon={Mail01Icon} size={18} />
-                </span>
-              </div>
-            </div>
+        <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)}>
+          {tab === 'login' && (
+            <form onSubmit={handleLoginSubmit} className="space-y-4">
+              <IconField
+                id={`${uid}-login-email`}
+                label="Email address"
+                icon={Mail01Icon}
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com"
+              />
+              <IconField
+                id={`${uid}-login-password`}
+                label="Password"
+                icon={LockPasswordIcon}
+                type="password"
+                required
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-700 mb-1.5">Password</label>
-              <div className="relative">
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full pl-10 pr-4 py-3 rounded-full bg-neutral-50 border border-neutral-200 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                />
-                <span className="absolute left-3.5 top-3.5 text-neutral-400">
-                  <HugeiconsIcon icon={LockPasswordIcon} size={18} />
-                </span>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full py-3.5 px-6 rounded-full bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50 mt-2"
-            >
-              {isSubmitting ? 'Signing in...' : 'Sign In'}
-            </button>
-
-            <div className="text-center pt-2">
               <button
-                type="button"
-                onClick={() => switchTab('magic')}
-                className="text-xs text-neutral-500 hover:text-black hover:underline"
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full py-3.5 px-6 rounded-full bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50 mt-2"
               >
-                Prefer passwordless? Use a Magic Sign-In Link
+                {isSubmitting ? 'Signing in…' : 'Sign in'}
               </button>
-            </div>
-          </form>
-        )}
 
-        {/* --- 2. REGISTER FORM --- */}
-        {authModalTab === 'register' && (
-          <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
-            <div>
-              <label className="block text-xs font-semibold text-neutral-700 mb-1">Full Name</label>
-              <div className="relative">
-                <input
-                  type="text"
-                  required
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Jane Doe"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-full bg-neutral-50 border border-neutral-200 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                />
-                <span className="absolute left-3.5 top-3 text-neutral-400">
-                  <HugeiconsIcon icon={UserIcon} size={18} />
-                </span>
+              <div className="text-center pt-2">
+                <button type="button" onClick={() => switchTab('magic')} className="text-sm text-neutral-600 hover:text-black underline">
+                  No password? Get a sign-in link by email
+                </button>
               </div>
-            </div>
+            </form>
+          )}
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-700 mb-1">Email Address</label>
-              <div className="relative">
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-full bg-neutral-50 border border-neutral-200 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                />
-                <span className="absolute left-3.5 top-3 text-neutral-400">
-                  <HugeiconsIcon icon={Mail01Icon} size={18} />
-                </span>
-              </div>
-            </div>
+          {tab === 'register' && (
+            <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
+              <IconField
+                id={`${uid}-reg-name`}
+                label="Full name"
+                icon={UserIcon}
+                type="text"
+                required
+                autoComplete="name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+              />
+              <IconField
+                id={`${uid}-reg-email`}
+                label="Email address"
+                icon={Mail01Icon}
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com"
+              />
+              <IconField
+                id={`${uid}-reg-phone`}
+                label="Phone number (optional)"
+                icon={CallIcon}
+                type="tel"
+                autoComplete="tel"
+                inputMode="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+              <IconField
+                id={`${uid}-reg-password`}
+                label="Password"
+                icon={LockPasswordIcon}
+                type="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                hint="At least 8 characters."
+              />
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-700 mb-1">Phone Number (Optional)</label>
-              <div className="relative">
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+234 800 000 0000"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-full bg-neutral-50 border border-neutral-200 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                />
-                <span className="absolute left-3.5 top-3 text-neutral-400">
-                  <HugeiconsIcon icon={CallIcon} size={18} />
-                </span>
-              </div>
-            </div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full py-3.5 px-6 rounded-full bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50 mt-2"
+              >
+                {isSubmitting ? 'Creating account…' : 'Create account'}
+              </button>
+            </form>
+          )}
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-700 mb-1">Password (min 8 chars)</label>
-              <div className="relative">
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-full bg-neutral-50 border border-neutral-200 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                />
-                <span className="absolute left-3.5 top-3 text-neutral-400">
-                  <HugeiconsIcon icon={LockPasswordIcon} size={18} />
-                </span>
-              </div>
-            </div>
+          {tab === 'magic' && (
+            <div className="space-y-4">
+              {!magicSent ? (
+                <form onSubmit={handleMagicRequest} className="space-y-4">
+                  <p className="text-sm text-neutral-600">We&apos;ll email you a one-time link to sign in. No password needed.</p>
+                  <IconField
+                    id={`${uid}-magic-email`}
+                    label="Email address"
+                    icon={Mail01Icon}
+                    type="email"
+                    required
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3.5 px-6 rounded-full bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50"
+                  >
+                    {isSubmitting ? 'Sending link…' : 'Send sign-in link'}
+                  </button>
+                </form>
+              ) : (
+                <div className="space-y-4" role="status" aria-live="polite">
+                  <div className="p-4 bg-neutral-50 rounded-2xl text-sm text-neutral-700 border border-neutral-200">
+                    <p className="font-semibold text-neutral-900 mb-1">Check your inbox</p>
+                    <p>
+                      If <strong className="text-black">{email}</strong> can receive sign-in links, we&apos;ve just sent one. Open it on this
+                      device to sign in. The link works once and expires in 15 minutes.
+                    </p>
+                  </div>
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full py-3.5 px-6 rounded-full bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50 mt-2"
-            >
-              {isSubmitting ? 'Creating account...' : 'Create Account'}
-            </button>
-          </form>
-        )}
-
-        {/* --- 3. MAGIC LINK FORM --- */}
-        {authModalTab === 'magic' && (
-          <div className="space-y-4">
-            {!magicSent ? (
-              <form onSubmit={handleMagicRequest} className="space-y-4">
-                <p className="text-xs text-neutral-600">
-                  Enter your email address to receive a secure, one-click sign-in link. No password required.
-                </p>
-
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 mb-1.5">Email Address</label>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="name@example.com"
-                      className="w-full pl-10 pr-4 py-3 rounded-full bg-neutral-50 border border-neutral-200 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                    />
-                    <span className="absolute left-3.5 top-3.5 text-neutral-400">
-                      <HugeiconsIcon icon={Mail01Icon} size={18} />
+                  <div className="flex items-center justify-center gap-4">
+                    <button type="button" onClick={() => setMagicSent(false)} className="text-sm text-neutral-600 hover:text-black underline">
+                      Use a different email
+                    </button>
+                    <span className="text-neutral-400" aria-hidden="true">
+                      |
                     </span>
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => handleMagicRequest()}
+                      className="text-sm text-neutral-600 hover:text-black underline disabled:opacity-50"
+                    >
+                      {isSubmitting ? 'Sending…' : 'Send another link'}
+                    </button>
                   </div>
                 </div>
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-3.5 px-6 rounded-full bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50"
-                >
-                  {isSubmitting ? 'Sending link...' : 'Send Magic Link'}
-                </button>
-              </form>
-            ) : (
-              <div className="space-y-4" role="status" aria-live="polite">
-                <div className="p-4 bg-neutral-50 rounded-2xl text-sm text-neutral-700 border border-neutral-200">
-                  <p className="font-semibold text-neutral-900 mb-1">Check your inbox</p>
-                  <p>
-                    If <strong className="text-black">{email}</strong> can receive sign-in links, we&apos;ve just sent one.
-                    Open it on this device to sign in. The link works once and expires in 15 minutes.
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-center gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setMagicSent(false)}
-                    className="text-xs text-neutral-600 hover:text-black hover:underline"
-                  >
-                    Use a different email
-                  </button>
-                  <span className="text-neutral-300" aria-hidden="true">|</span>
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={(e) => handleMagicRequest(e as unknown as React.FormEvent)}
-                    className="text-xs text-neutral-600 hover:text-black hover:underline disabled:opacity-50"
-                  >
-                    {isSubmitting ? 'Sending...' : 'Send another link'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </Dialog>
   );
 };

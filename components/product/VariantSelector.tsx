@@ -38,6 +38,28 @@ interface VariantSelectorProps {
   onToggleWishlist?: () => void;
 }
 
+
+/** Next radio index for arrow / Home / End keys, skipping options that cannot be chosen. */
+function nextIndex(e: React.KeyboardEvent, index: number, length: number, selectable: (i: number) => boolean): number | null {
+  const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+  if (e.key === 'Home' || e.key === 'End') {
+    const order = Array.from({ length }, (_, i) => (e.key === 'Home' ? i : length - 1 - i));
+    return order.find(selectable) ?? null;
+  }
+  if (step === 0) return null;
+  for (let n = 1; n <= length; n++) {
+    const i = (index + step * n + length * n) % length;
+    if (selectable(i)) return i;
+  }
+  return null;
+}
+
+/** Move focus to the radio at position `index` within the same group. */
+function focusSibling(current: HTMLElement, index: number) {
+  const radios = current.parentElement?.querySelectorAll<HTMLElement>('[role="radio"]');
+  radios?.[index]?.focus();
+}
+
 export const VariantSelector: React.FC<VariantSelectorProps> = ({
   colors,
   sizes,
@@ -59,33 +81,42 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
 }) => {
   return (
     <div className="space-y-6">
-      {/* 1. Color Swatches */}
+      {/* 1. Colour (radio group: arrow keys move and select) */}
       {colors.length > 0 && (
-        <fieldset className="pb-6 border-b border-neutral-200">
-          <legend className="text-xs font-bold text-neutral-500 uppercase tracking-wider block mb-3">
-            Select Color:{' '}
-            <span className="text-black font-bold normal-case">{selectedColor?.name ?? '—'}</span>
-          </legend>
-          <div className="flex flex-wrap items-center gap-3">
-            {colors.map((color) => {
+        <div className="pb-6 border-b border-neutral-200">
+          <p id="variant-color-label" className="text-xs font-bold text-neutral-600 uppercase tracking-wider block mb-3">
+            Select Color: <span className="text-black font-bold normal-case">{selectedColor?.name ?? '—'}</span>
+          </p>
+          <div role="radiogroup" aria-labelledby="variant-color-label" className="flex flex-wrap items-center gap-3">
+            {colors.map((color, index) => {
               const isSelected = selectedColor?.name === color.name;
               const isLight = ['#ffffff', '#fff', '#fafafa', '#f5f5f5'].includes(color.hex.toLowerCase());
               const inStock = colorInStock[color.name] !== false;
+              const focusable = isSelected || (!selectedColor && index === 0);
               return (
                 <button
                   key={color.name}
                   type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  tabIndex={focusable ? 0 : -1}
                   onClick={() => onSelectColor(color)}
+                  onKeyDown={(e) => {
+                    const next = nextIndex(e, index, colors.length, () => true);
+                    if (next === null) return;
+                    e.preventDefault();
+                    onSelectColor(colors[next]);
+                    focusSibling(e.currentTarget, next);
+                  }}
                   style={{ backgroundColor: color.hex }}
-                  className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-transform hover:scale-105 shadow-sm ${
+                  className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-transform hover:scale-105 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 ${
                     isLight ? 'border border-neutral-300' : ''
                   } ${isSelected ? 'ring-2 ring-black ring-offset-2' : ''} ${inStock ? '' : 'opacity-50'}`}
                   title={inStock ? color.name : `${color.name} (sold out)`}
                   aria-label={`${color.name}${inStock ? '' : ', sold out'}`}
-                  aria-pressed={isSelected}
                 >
                   {isSelected && (
-                    <HugeiconsIcon icon={Tick02Icon} size={16} className={isLight ? 'text-black' : 'text-white'} />
+                    <HugeiconsIcon icon={Tick02Icon} size={16} className={isLight ? 'text-black' : 'text-white'} aria-hidden="true" />
                   )}
                   {!inStock && (
                     <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center">
@@ -96,43 +127,57 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
               );
             })}
           </div>
-        </fieldset>
+        </div>
       )}
 
-      {/* 2. Size Selector */}
+      {/* 2. Size (radio group; sizes not made in this colour are skipped) */}
       {sizes.length > 0 && (
-        <fieldset className="pb-6 border-b border-neutral-200">
-          <legend className="text-xs font-bold text-neutral-500 uppercase tracking-wider block mb-3">
+        <div className="pb-6 border-b border-neutral-200">
+          <p id="variant-size-label" className="text-xs font-bold text-neutral-600 uppercase tracking-wider block mb-3">
             Choose Size: <span className="text-black font-bold normal-case">{selectedSize ?? '—'}</span>
-          </legend>
-          <div className="flex flex-wrap gap-2.5 sm:gap-3">
-            {sizes.map((size) => {
+          </p>
+          <div role="radiogroup" aria-labelledby="variant-size-label" className="flex flex-wrap gap-2.5 sm:gap-3">
+            {sizes.map((size, index) => {
               const state = sizeStates[size] ?? 'unavailable';
               const isSelected = selectedSize === size;
-              const disabled = state === 'unavailable';
+              const unavailable = state === 'unavailable';
+              const firstSelectable = sizes.findIndex((x) => (sizeStates[x] ?? 'unavailable') !== 'unavailable');
+              const focusable = isSelected || (!sizes.some((x) => x === selectedSize) && index === firstSelectable);
               return (
                 <button
                   key={size}
                   type="button"
-                  onClick={() => onSelectSize(size)}
-                  disabled={disabled}
-                  aria-pressed={isSelected}
-                  aria-label={`${size}${state === 'sold-out' ? ', sold out' : state === 'unavailable' ? ', not available in this colour' : ''}`}
-                  title={state === 'sold-out' ? 'Sold out' : state === 'unavailable' ? 'Not available in this colour' : undefined}
-                  className={`px-6 py-3 rounded-full text-xs sm:text-sm font-semibold transition-colors ${
+                  role="radio"
+                  aria-checked={isSelected}
+                  aria-disabled={unavailable || undefined}
+                  tabIndex={focusable && !unavailable ? 0 : -1}
+                  onClick={() => {
+                    if (!unavailable) onSelectSize(size);
+                  }}
+                  onKeyDown={(e) => {
+                    const next = nextIndex(e, index, sizes.length, (i) => (sizeStates[sizes[i]] ?? 'unavailable') !== 'unavailable');
+                    if (next === null) return;
+                    e.preventDefault();
+                    onSelectSize(sizes[next]);
+                    focusSibling(e.currentTarget, next);
+                  }}
+                  title={state === 'sold-out' ? 'Sold out' : unavailable ? 'Not available in this colour' : undefined}
+                  className={`px-6 py-3 rounded-full text-xs sm:text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 ${
                     isSelected
                       ? 'bg-black text-white shadow-sm'
-                      : disabled
-                        ? 'bg-[#F0F0F0] text-neutral-400 cursor-not-allowed'
+                      : unavailable
+                        ? 'bg-[#F0F0F0] text-neutral-500 cursor-not-allowed'
                         : 'bg-[#F0F0F0] text-neutral-700 hover:bg-neutral-200'
-                  } ${state === 'sold-out' || disabled ? 'line-through decoration-1' : ''}`}
+                  } ${state === 'sold-out' || unavailable ? 'line-through decoration-1' : ''}`}
                 >
                   {size}
+                  {state === 'sold-out' && <span className="sr-only"> (sold out)</span>}
+                  {unavailable && <span className="sr-only"> (unavailable in this colour)</span>}
                 </button>
               );
             })}
           </div>
-        </fieldset>
+        </div>
       )}
 
       {stockMessage && (
@@ -175,7 +220,7 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
             type="button"
             onClick={onAddToCart}
             disabled={!canPurchase}
-            className="flex-1 bg-black text-white hover:bg-neutral-800 font-semibold py-4 rounded-full transition-all shadow-lg flex items-center justify-center gap-2 text-sm sm:text-base disabled:bg-neutral-300 disabled:text-neutral-500 disabled:shadow-none disabled:cursor-not-allowed"
+            className="flex-1 bg-black text-white hover:bg-neutral-800 font-semibold py-4 rounded-full transition-all shadow-lg flex items-center justify-center gap-2 text-sm sm:text-base disabled:bg-neutral-300 disabled:text-neutral-700 disabled:shadow-none disabled:cursor-not-allowed"
           >
             <HugeiconsIcon icon={ShoppingBag01Icon} size={20} />
             <span>{canPurchase ? 'Add to Cart' : 'Unavailable'}</span>
@@ -188,7 +233,7 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
               className={`p-4 rounded-full border transition-all shrink-0 ${
                 isWishlisted
                   ? 'border-red-200 bg-red-50 text-red-500 shadow-sm'
-                  : 'border-neutral-200 hover:bg-neutral-50 text-neutral-500 hover:text-black'
+                  : 'border-neutral-300 hover:bg-neutral-50 text-neutral-600 hover:text-black'
               }`}
               title={isWishlisted ? 'Remove from wishlist' : 'Save to wishlist'}
               aria-label={isWishlisted ? 'Remove from wishlist' : 'Save to wishlist'}

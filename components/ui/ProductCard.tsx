@@ -53,7 +53,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           aria-label={isFavorited ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}
           aria-pressed={isFavorited}
         >
-          <HugeiconsIcon icon={FavouriteIcon} size={16} className={isFavorited ? 'fill-current text-red-500' : ''} />
+          <HugeiconsIcon icon={FavouriteIcon} size={16} className={isFavorited ? 'fill-current text-red-500' : ''} aria-hidden="true" />
         </button>
       </div>
 
@@ -64,7 +64,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       </h3>
 
       {product.reviewCount > 0 ? (
-        <div className="flex items-center gap-1.5 my-1.5" aria-label={`Rated ${product.rating.toFixed(1)} out of 5`}>
+        <div className="flex items-center gap-1.5 my-1.5" role="img" aria-label={`Rated ${product.rating.toFixed(1)} out of 5 from ${product.reviewCount} ${product.reviewCount === 1 ? 'review' : 'reviews'}`}>
           <div className="flex items-center" aria-hidden="true">
             {Array.from({ length: 5 }).map((_, i) => {
               const isFilled = i + 1 <= Math.round(product.rating);
@@ -75,8 +75,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
               );
             })}
           </div>
-          <span className="text-xs text-neutral-700 font-medium">
-            {product.rating.toFixed(1)}/<span className="text-neutral-500">5</span>
+          <span className="text-xs text-neutral-700 font-medium" aria-hidden="true">
+            {product.rating.toFixed(1)}/<span className="text-neutral-600">5</span>
           </span>
         </div>
       ) : (
@@ -87,7 +87,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         <div className="flex items-baseline sm:items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
           <span className="font-bold text-base sm:text-xl text-black">{formatPrice(product.price)}</span>
           {product.originalPrice && product.originalPrice > product.price && (
-            <span className="font-semibold text-xs sm:text-sm text-neutral-500 line-through">
+            <span className="font-semibold text-xs sm:text-sm text-neutral-600 line-through">
+              <span className="sr-only">Was </span>
               {formatPrice(product.originalPrice)}
             </span>
           )}
@@ -98,7 +99,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           className="bg-black hover:bg-neutral-800 text-white rounded-full p-2 sm:px-3.5 sm:py-1.5 flex items-center justify-center gap-1 text-xs font-semibold shadow-sm hover:shadow-md transition-all shrink-0"
           aria-label={soldOut ? `View ${product.name}` : `Choose options for ${product.name}`}
         >
-          <HugeiconsIcon icon={ShoppingBag01Icon} size={15} />
+          <HugeiconsIcon icon={ShoppingBag01Icon} size={15} aria-hidden="true" />
           <span className="hidden sm:inline">{soldOut ? 'View' : 'Options'}</span>
         </Link>
       </div>

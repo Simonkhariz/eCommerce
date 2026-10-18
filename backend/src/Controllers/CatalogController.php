@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Database\Database;
 use App\Repositories\CategoryRepository;
 use App\Repositories\ProductRepository;
+use App\Services\CheckoutService;
 use App\Support\Response;
 
 /**
@@ -150,7 +151,28 @@ class CatalogController
              ORDER BY r.created_at DESC LIMIT 10"
         );
 
+        // Real counts only (shown on the homepage instead of invented marketing numbers).
+        $zones = $db->fetchAll("SELECT `states_covered` FROM `shipping_zones` WHERE `is_active` = 1");
+        $served = [];
+        foreach ($zones as $z) {
+            foreach ((array) json_decode((string) $z['states_covered'], true) as $state) {
+                $served[$state === '*' ? '*' : (CheckoutService::canonicalState((string) $state) ?? '')] = true;
+            }
+        }
+        unset($served['']);
+        $stats = [
+            'published_products' => (int) ($db->fetchOne("SELECT COUNT(*) AS c FROM `products` WHERE `status` = 'published' AND `product_type` = 'physical'")['c'] ?? 0),
+            'categories' => count($categories),
+            'states_served' => isset($served['*']) ? count(CheckoutService::NIGERIAN_STATES) : count($served),
+        ];
+
+        // The soonest real end time among the flash deals shown (null = no countdown).
+        $flashEnds = array_filter(array_column($flashDeals, 'flash_deal_ends_at'));
+        sort($flashEnds);
+
         $payload = [
+            'stats' => $stats,
+            'flash_deals_end_at' => $flashEnds[0] ?? null,
             'featured_products' => $featured,
             'flash_deals' => $flashDeals,
             'new_arrivals' => $newArrivals,

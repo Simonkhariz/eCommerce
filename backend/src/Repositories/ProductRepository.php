@@ -159,7 +159,8 @@ class ProductRepository
 
         // Flash deals or featured
         if (!empty($filters['is_flash_deal'])) {
-            $conditions[] = "p.is_flash_deal = 1";
+            // An expired deal is not a flash deal any more.
+            $conditions[] = "p.is_flash_deal = 1 AND (p.flash_deal_ends_at IS NULL OR p.flash_deal_ends_at > NOW())";
         }
         if (!empty($filters['is_featured'])) {
             $conditions[] = "p.is_featured = 1";
@@ -210,7 +211,7 @@ class ProductRepository
         // 2. Paginated rows with category & primary image
         $itemsSql = "SELECT p.id, p.uuid, p.name, p.slug, p.description, p.product_type,
                             p.base_price, p.original_price, p.currency, p.sku,
-                            p.rating_avg, p.rating_count, p.is_featured, p.is_flash_deal, p.dress_style,
+                            p.rating_avg, p.rating_count, p.is_featured, p.is_flash_deal, p.flash_deal_ends_at, p.dress_style,
                             p.created_at,
                             c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
                             (SELECT pi.image_url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.is_primary DESC, pi.display_order ASC LIMIT 1) AS primary_image,
@@ -397,6 +398,24 @@ class ProductRepository
     public function getFeatured(int $limit = 4): array
     {
         return $this->listPublished(['is_featured' => 1], 1, $limit)['items'];
+    }
+
+    /**
+     * Normalised flash-deal end time from admin input ("YYYY-MM-DDTHH:MM" or "YYYY-MM-DD HH:MM:SS").
+     * Missing key keeps the current value; empty clears it; not a flash deal clears it.
+     */
+    private static function flashEnd(array $data, ?array $existing): ?string
+    {
+        $isFlash = isset($data['is_flash_deal']) ? (bool) $data['is_flash_deal'] : (bool) ($existing['is_flash_deal'] ?? false);
+        if (!$isFlash) {
+            return null;
+        }
+        if (!array_key_exists('flash_deal_ends_at', $data)) {
+            return $existing['flash_deal_ends_at'] ?? null;
+        }
+        $value = trim((string) $data['flash_deal_ends_at']);
+        $ts = $value === '' ? false : strtotime(str_replace('T', ' ', $value));
+        return $ts === false ? null : date('Y-m-d H:i:s', $ts);
     }
 
     /**
@@ -613,7 +632,7 @@ class ProductRepository
         // 2. Paginated rows
         $itemsSql = "SELECT p.id, p.uuid, p.name, p.slug, p.description, p.product_type,
                             p.status, p.base_price, p.original_price, p.currency, p.sku,
-                            p.rating_avg, p.rating_count, p.is_featured, p.is_flash_deal, p.dress_style,
+                            p.rating_avg, p.rating_count, p.is_featured, p.is_flash_deal, p.flash_deal_ends_at, p.dress_style,
                             p.created_at, p.updated_at,
                             c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
                             (SELECT pi.image_url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.is_primary DESC, pi.display_order ASC LIMIT 1) AS primary_image,
@@ -867,12 +886,12 @@ class ProductRepository
             // Auto-generate SKU if omitted or empty
             $masterSku = !empty($data['sku']) ? trim((string) $data['sku']) : self::generateSku($data);
 
-            $sql = "INSERT INTO products (uuid, category_id, name, slug, description, product_type, status, base_price, original_price, currency, sku, dress_style, is_featured, is_flash_deal)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO products (uuid, category_id, name, slug, description, product_type, status, base_price, original_price, currency, sku, dress_style, is_featured, is_flash_deal, flash_deal_ends_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
             $productId = (int) $db->insert(
                 $sql,
-                "sisssssddsssii",
+                "sisssssddsssiis",
                 [
                     $uuid,
                     $data['category_id'] ?? null,
@@ -888,6 +907,7 @@ class ProductRepository
                     $data['dress_style'] ?? 'Casual',
                     $data['is_featured'] ?? 0,
                     $data['is_flash_deal'] ?? 0,
+                    self::flashEnd($data, null),
                 ]
             );
 
@@ -969,12 +989,12 @@ class ProductRepository
             $sql = "UPDATE products
                     SET category_id = ?, name = ?, slug = ?, description = ?, status = ?,
                         product_type = ?, base_price = ?, original_price = ?, dress_style = ?,
-                        is_featured = ?, is_flash_deal = ?
+                        is_featured = ?, is_flash_deal = ?, flash_deal_ends_at = ?
                     WHERE id = ?";
 
             $db->execute(
                 $sql,
-                "isssssddsiii",
+                "isssssddsiisi",
                 [
                     $data['category_id'] ?? $existing['category_id'],
                     $data['name'] ?? $existing['name'],
@@ -987,6 +1007,7 @@ class ProductRepository
                     $data['dress_style'] ?? $existing['dress_style'],
                     isset($data['is_featured']) ? (int) $data['is_featured'] : (int) $existing['is_featured'],
                     isset($data['is_flash_deal']) ? (int) $data['is_flash_deal'] : (int) $existing['is_flash_deal'],
+                    self::flashEnd($data, $existing),
                     $id,
                 ]
             );

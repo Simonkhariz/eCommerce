@@ -55,7 +55,7 @@ export default function CustomerOrdersPage() {
 
         {isLoading || authLoading ? (
           <div className="bg-white rounded-3xl p-12 text-center border border-neutral-100 shadow-sm space-y-3" role="status">
-            <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin mx-auto" />
+            <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin mx-auto" aria-hidden="true" />
             <p className="text-sm text-neutral-700">Loading your orders…</p>
           </div>
         ) : !user ? (
@@ -94,7 +94,7 @@ export default function CustomerOrdersPage() {
           </div>
         ) : orders.length === 0 ? (
           <div className="bg-white rounded-3xl p-12 text-center border border-neutral-100 shadow-sm space-y-4">
-            <div className="w-14 h-14 bg-neutral-100 text-neutral-500 rounded-full flex items-center justify-center mx-auto">
+            <div className="w-14 h-14 bg-neutral-100 text-neutral-600 rounded-full flex items-center justify-center mx-auto" aria-hidden="true">
               <Package className="w-6 h-6" aria-hidden="true" />
             </div>
             <div>
