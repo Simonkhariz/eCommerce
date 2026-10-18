@@ -4,6 +4,7 @@
  */
 
 import { Product, ProductColor, ProductVariant, Review } from '@/types';
+import { optimizeImageForUpload } from '@/lib/image-optimize';
 
 // Same-origin by default: next.config.mjs proxies /api/v1/* to the PHP backend so the
 // HTTP-only session cookies work without exposing session tokens to JavaScript.
@@ -897,13 +898,14 @@ export async function apiDeleteAdminProduct(id: number): Promise<any> {
 }
 
 /**
- * Upload an image file for product photography.
+ * Upload an image (products, categories, banners). The photo is resized and converted to
+ * WebP in the browser first, so customers download small files.
  */
 export async function apiUploadProductImage(
   file: File
 ): Promise<{ image_url: string; file_name: string; size_bytes: number }> {
   const formData = new FormData();
-  formData.append('image', file);
+  formData.append('image', await optimizeImageForUpload(file));
 
   return fetchFromApi<{ image_url: string; file_name: string; size_bytes: number }>('/admin/upload-image', {
     method: 'POST',
