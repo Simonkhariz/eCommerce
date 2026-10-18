@@ -132,12 +132,12 @@ class AuthService
                 );
             }
 
-            $db->execute(
-                "INSERT INTO `admin_audit_logs` (`admin_id`, `action`, `entity_type`, `entity_id`, `after_state`)
-                 VALUES (?, 'admin_onboarding_completed', 'system', 'setup', ?)",
-                'is',
-                [$createdAdminId, json_encode(['email' => $email, 'origin_city' => $originCity, 'origin_state' => $originState])]
-            );
+            AuditService::record($createdAdminId, 'store.setup', 'store', 'setup', null, [
+                'email' => $email,
+                'store_name' => $storeName,
+                'origin_city' => $originCity,
+                'origin_state' => $originState,
+            ]);
         });
 
         $user = $this->userRepo->findById($createdAdminId);
@@ -223,7 +223,11 @@ class AuthService
         RateLimiter::clear('login_ip_email', $ipKey);
 
         $scope = SessionCookie::scopeForRole((string) $user['role']);
-        return $this->startSession($user, SessionCookie::read($scope));
+        $result = $this->startSession($user, SessionCookie::read($scope));
+        if ($scope === SessionCookie::SCOPE_ADMIN) {
+            AuditService::record((int) $user['id'], 'admin.login', 'admin', (string) $user['id'], null, null);
+        }
+        return $result;
     }
 
     /**
@@ -298,6 +302,12 @@ class AuthService
     {
         $token = SessionCookie::read($scope);
         if ($token !== null) {
+            if ($scope === SessionCookie::SCOPE_ADMIN) {
+                $session = $this->db->fetchOne("SELECT `user_id` FROM `sessions` WHERE `id` = ?", 's', [hash('sha256', $token)]);
+                if (!empty($session['user_id'])) {
+                    AuditService::record((int) $session['user_id'], 'admin.logout', 'admin', (string) $session['user_id'], null, null);
+                }
+            }
             $this->sessionRepo->destroy($token);
         }
         SessionCookie::clear($scope);

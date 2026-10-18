@@ -59,7 +59,12 @@ export function OrderManagement() {
   const exportCsv = async () => {
     setExporting(true);
     try {
-      await adminDownloadExport('/admin/orders/export', `orders-${new Date().toISOString().slice(0, 10)}.csv`);
+      // Same filters as the list (all dates).
+      const q = new URLSearchParams();
+      if (filters.status !== 'all') q.set('status', filters.status);
+      if (filters.search) q.set('search', filters.search);
+      const query = q.toString();
+      await adminDownloadExport(`/admin/orders/export${query ? `?${query}` : ''}`, `orders-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The export could not be generated.'));
     } finally {

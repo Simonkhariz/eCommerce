@@ -591,7 +591,7 @@ class FulfillmentService
         $payment = $db->fetchOne("SELECT * FROM `payments` WHERE `id` = ? FOR UPDATE", 'i', [(int) $refund['payment_id']]);
 
         $db->executeUpdate(
-            "UPDATE `refunds` SET `status` = 'completed', `processed_by_user_id` = ?, `updated_at` = NOW() WHERE `id` = ?",
+            "UPDATE `refunds` SET `status` = 'completed', `processed_by_user_id` = ?, `completed_at` = NOW(), `updated_at` = NOW() WHERE `id` = ?",
             'ii',
             [$adminId, $refundId]
         );
@@ -650,9 +650,14 @@ class FulfillmentService
         ]);
 
         $mailOrder = array_merge($order, ['order_status' => $newOrderStatus, 'payment_status' => $refundStatus]);
-        $reason = (string) $refund['reason'];
-        $db->afterCommit(static function () use ($mailOrder, $reason): void {
-            MailService::getInstance()->sendCancellationOrRefund($mailOrder, 'refund', ['reason' => $reason]);
+        $mailExtra = [
+            'reason' => (string) $refund['reason'],
+            'amount' => (float) $refund['amount'],
+            'refund_id' => $refundId,
+            'reference' => $refund['provider_refund_reference'] ?? null,
+        ];
+        $db->afterCommit(static function () use ($mailOrder, $mailExtra): void {
+            MailService::getInstance()->sendCancellationOrRefund($mailOrder, 'refund', $mailExtra);
         });
     }
 

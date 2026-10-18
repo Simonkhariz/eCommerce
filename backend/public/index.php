@@ -218,6 +218,7 @@ $router->get('/api/v1/admin/storefront/reviews', [AdminOperationsController::cla
 $router->patch('/api/v1/admin/storefront/reviews/{id}/status', [AdminOperationsController::class, 'updateReviewStatus'], $adminGuard);
 
 $router->get('/api/v1/admin/notifications/outbox', [AdminOperationsController::class, 'listOutbox'], $adminGuard);
+$router->post('/api/v1/admin/notifications/outbox/process', [AdminOperationsController::class, 'processOutbox'], $adminGuard);
 $router->post('/api/v1/admin/notifications/outbox/{id}/retry', [AdminOperationsController::class, 'retryOutbox'], $adminGuard);
 
 $router->get('/api/v1/admin/audit-logs', [AdminOperationsController::class, 'listAuditLogs'], $adminGuard);

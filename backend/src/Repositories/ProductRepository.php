@@ -731,11 +731,9 @@ class ProductRepository
                 [$variantId, $productId, $currentStock, $newStock, $adjustment, mb_substr($reason . ($notes ? " ({$notes})" : ''), 0, 255), $adminId]
             );
 
-            // Log immutable audit record
-            $auditRepo = new AuditLogRepository();
-            $auditRepo->record(
+            \App\Services\AuditService::record(
                 $adminId,
-                'inventory_adjusted',
+                'inventory.adjust',
                 'product_variant',
                 (string) $variantId,
                 [
@@ -790,15 +788,6 @@ class ProductRepository
         $oldStatus = $existing['status'];
         $this->db->execute("UPDATE products SET status = ? WHERE id = ?", "si", [$status, $productId]);
 
-        $auditRepo = new AuditLogRepository();
-        $auditRepo->record(
-            $adminId,
-            'product_status_changed',
-            'product',
-            (string) $productId,
-            ['status' => $oldStatus],
-            ['status' => $status]
-        );
 
         return [
             'id' => $productId,
@@ -961,15 +950,6 @@ class ProductRepository
                 }
             }
 
-            $auditRepo = new AuditLogRepository();
-            $auditRepo->record(
-                null,
-                'product_created',
-                'product',
-                (string) $productId,
-                null,
-                ['name' => $data['name'], 'sku' => $masterSku, 'status' => $data['status'] ?? 'published']
-            );
 
             return $productId;
         });
@@ -1036,15 +1016,6 @@ class ProductRepository
                 }
             }
 
-            $auditRepo = new AuditLogRepository();
-            $auditRepo->record(
-                null,
-                'product_updated',
-                'product',
-                (string) $id,
-                ['name' => $existing['name'], 'status' => $existing['status'], 'base_price' => $existing['base_price']],
-                ['name' => $data['name'] ?? $existing['name'], 'status' => $data['status'] ?? $existing['status']]
-            );
 
             return true;
         });
@@ -1171,15 +1142,6 @@ class ProductRepository
         $existing = $this->db->fetchOne("SELECT id, name, status FROM products WHERE id = ?", "i", [$id]);
         $this->db->execute("UPDATE products SET status = 'archived' WHERE id = ?", "i", [$id]);
 
-        $auditRepo = new AuditLogRepository();
-        $auditRepo->record(
-            null,
-            'product_archived',
-            'product',
-            (string) $id,
-            ['status' => $existing['status'] ?? 'unknown'],
-            ['status' => 'archived']
-        );
 
         return true;
     }

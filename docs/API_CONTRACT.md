@@ -540,3 +540,23 @@ Public:
 | `POST` | `/api/v1/newsletter/unsubscribe` | `{token}` from the unsubscribe link (`/unsubscribe?token=…` on the storefront). |
 
 `GET /api/v1/checkout/payment-methods` now returns `support_phone` from the `store_whatsapp_phone` setting, falling back to `STORE_WHATSAPP_PHONE` in `backend/.env`.
+
+---
+
+## 12. Email, Analytics & Audit (Phase 5)
+
+**Email outbox.** Every email is a row in `email_outbox` (`status` pending / sent / failed, `transport` smtp / log, `attempt_count`, `last_error`, `next_attempt_at`). `sent` with transport `log` means it was only written to `storage/logs/mail.log`.
+
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| `POST` | `/admin/notifications/outbox/process` | Deliver one batch of due emails now; returns `{processed, sent, retrying, failed, still_pending}`. |
+| `POST` | `/admin/notifications/outbox/{id}/retry` | Re-render and re-send the same row. Refused (422) for sign-in links and for rows created before payloads were versioned. |
+
+**Analytics.** `GET /admin/analytics/report` and `/admin/analytics/export` (CSV) share one calculation:
+- `range` = `today`, `yesterday`, `7days`, `30days`, `90days`, `year`, `all`, or `start_date` + `end_date` (YYYY-MM-DD, inclusive).
+- Sales are verified payments by `verified_at`; refunds are completed refunds by `completed_at`; `owed_refunds` lists orders paid and later cancelled that still have money to return, and is subtracted from `net_sales`.
+- Also returned: `daily_breakdown` (orders placed, payments received, sales, refunds per day), `category_breakdown`, `top_products`, `gateway_breakdown` (attempts, successful, failed, received) and `formulas`.
+
+`GET /admin/orders/export` exports all dates by default and accepts the order list's `status` (including `attention`) and `search`.
+
+**Audit log.** Actions are `entity.verb`, e.g. `product.create`, `inventory.adjust`, `order.status_update`, `refund.complete`, `admin.login`, `admin.logout`, `store.setup`, `email.retry`, `marketing.broadcast`. Every entry records the acting admin.

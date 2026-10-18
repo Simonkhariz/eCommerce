@@ -229,9 +229,37 @@ export function adminGetOverview(period: 7 | 30 | 90) {
   return apiRequest<DashboardOverview>(`/admin/dashboard/overview?period=${period}`);
 }
 
+export interface AnalyticsReport {
+  filters: { range: string; start_date: string; end_date: string };
+  summary: {
+    currency: string;
+    gross_sales: number;
+    total_refunded: number;
+    refund_count: number;
+    /** Paid then cancelled, not yet refunded: money the store owes back. */
+    owed_refunds: number;
+    owed_refund_count: number;
+    net_sales: number;
+    paid_orders: number;
+    aov: number;
+    total_orders: number;
+    conversion_rate: number;
+    repeat_customer_rate: number;
+    paying_customers: number;
+    total_units_sold: number;
+    pending_fulfillment: number;
+  };
+  daily_breakdown: Array<{ date: string; orders_count: number; paid_count: number; sales: number; refunds: number }>;
+  category_breakdown: Array<{ category_name: string; order_count: number | string; units_sold: number | string; revenue: number | string }>;
+  top_products: Array<{ product_id: number | null; name: string; units_sold: number | string; revenue: number | string }>;
+  gateway_breakdown: Array<{ provider_name: string; total_attempts: number; successful_count: number; failed_count: number; total_volume: number }>;
+  owed_refunds: Array<{ order_number: string; cancelled_at: string; payment_status: string; paid: number | string; refunded: number | string; owed: number | string }>;
+  formulas: Record<string, string>;
+}
+
+/** Sales are counted when money is verified; refunds when completed. */
 export function adminGetAnalyticsReport(params: { range?: string; start_date?: string; end_date?: string }) {
-  // Shape is documented in AdminDashboardController::analyticsReport (reworked in Phase 5).
-  return apiRequest<Record<string, any>>(`/admin/analytics/report${qs(params)}`);
+  return apiRequest<AnalyticsReport>(`/admin/analytics/report${qs(params)}`);
 }
 
 /** Download a CSV export with the admin session. */
@@ -598,8 +626,12 @@ export interface OutboxRow {
   subject: string;
   template: string;
   status: 'pending' | 'sent' | 'failed';
+  /** How it went out: 'smtp' = delivered to the mail server, 'log' = written to the mail log only. */
+  transport: 'smtp' | 'log' | null;
   attempt_count: number;
   last_error: string | null;
+  /** For pending emails: when the next delivery attempt is due. */
+  next_attempt_at: string | null;
   created_at: string;
   sent_at: string | null;
 }
@@ -608,8 +640,17 @@ export function adminGetOutbox(params: { status?: string; page?: number; per_pag
   return apiRequest<Paginated<OutboxRow>>(`/admin/notifications/outbox${qs(params)}`);
 }
 
+/** Re-send one email; the server message says whether it was delivered or only logged. */
 export function adminRetryOutbox(id: number) {
-  return send<{ id: number }>(`/admin/notifications/outbox/${id}/retry`, 'POST');
+  return apiRequestFull<{ id: number }>(`/admin/notifications/outbox/${id}/retry`, { method: 'POST' });
+}
+
+/** Deliver one batch of queued emails now (same as scripts/process_outbox.php). */
+export function adminProcessOutbox() {
+  return apiRequestFull<{ processed: number; sent: number; retrying: number; failed: number; still_pending: number }>(
+    '/admin/notifications/outbox/process',
+    { method: 'POST' }
+  );
 }
 
 export interface AuditLogRow {
@@ -665,7 +706,8 @@ export interface SystemStatus {
   migrations: { applied: number; latest: string | null };
   storage: { uploads_writable: boolean };
   payments: { kora: string; monnify: string };
-  mail: { mode: 'smtp' | 'log_only'; outbox_pending: number; outbox_failed: number };
+  /** oldest_due_minutes: age of the oldest email waiting to be sent (null when none); large values mean the outbox worker is not running. */
+  mail: { mode: 'smtp' | 'log_only'; outbox_pending: number; outbox_failed: number; oldest_due_minutes: number | null };
   orders: { needs_attention: number; unpaid_overdue: number; awaiting_fulfilment: number };
 }
 

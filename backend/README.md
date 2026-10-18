@@ -156,6 +156,22 @@ schtasks /Create /SC MINUTE /MO 10 /TN "ShopCo Expire Orders" /TR "C:\xampp\php\
 Optional `.env` settings: `ORDER_PAYMENT_WINDOW_MINUTES` (default 60) and
 `ORDER_MANUAL_PAYMENT_WINDOW_HOURS` (default 24).
 
+### Sending email (outbox)
+Every email is written to `email_outbox` first. Order emails (received, paid, shipped, cancelled,
+refunded) get one delivery attempt as soon as the order change is saved; newsletters, and any email
+whose attempt failed, are sent by the outbox worker with retries after 1, 5, 15 and 60 minutes (failed
+after 5 attempts). Sign-in links are sent immediately and never stored, so they cannot be re-sent.
+```bash
+php backend/scripts/process_outbox.php              # one batch of up to 100
+php backend/scripts/process_outbox.php --limit=500
+```
+```powershell
+schtasks /Create /SC MINUTE /MO 5 /TN "ShopCo Send Email" /TR "C:
+mpp\php\php.exe C:\path	o\E-commerce\backend\scripts\process_outbox.php"
+```
+With `MAIL_MAILER=log` (the default) emails go to `backend/storage/logs/mail.log` and the admin outbox
+shows them as "Logged only". The admin Email outbox page also has "Send queued now".
+
 ### Admin panel
 The admin lives at `/admin` on the storefront (one route per screen, e.g. `/admin/orders`, `/admin/shipping/zones`).
 On a brand-new database `/admin` sends you to `/admin/setup` to create the first administrator and the store

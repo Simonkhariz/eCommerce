@@ -212,7 +212,8 @@ class AdminDashboardController
             [$start, $end]
         );
         $refunded = (float) ($this->db->fetchOne(
-            "SELECT COALESCE(SUM(amount), 0) AS total FROM `refunds` WHERE status = 'completed' AND updated_at >= ? AND updated_at < ?",
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM `refunds`
+             WHERE status = 'completed' AND COALESCE(completed_at, updated_at) >= ? AND COALESCE(completed_at, updated_at) < ?",
             'ss',
             [$start, $end]
         )['total'] ?? 0);
@@ -242,339 +243,345 @@ class AdminDashboardController
     }
 
     /**
-     * Resolve date range from query parameters.
-     * Supports: 'today', 'yesterday', '7days', '30days', '90days', 'year', 'all', or custom start/end.
+     * Resolve the report window from ?range= (today, yesterday, 7days, 30days, 90days, year, all)
+     * or ?start_date=&end_date= (YYYY-MM-DD, inclusive). Returns [label, start, end) bounds.
+     *
+     * @return array{0: string, 1: string, 2: string}
      */
     private function resolveDateRange(): array
     {
-        $range = $_GET['range'] ?? '30days';
-        $startDate = $_GET['start_date'] ?? null;
-        $endDate = $_GET['end_date'] ?? null;
+        $range = (string) ($_GET['range'] ?? '30days');
+        $startDate = trim((string) ($_GET['start_date'] ?? ''));
+        $endDate = trim((string) ($_GET['end_date'] ?? ''));
+        $today = date('Y-m-d');
 
-        if (!$startDate || !$endDate) {
-            switch ($range) {
-                case 'today':
-                    $startDate = date('Y-m-d 00:00:00');
-                    $endDate = date('Y-m-d 23:59:59');
-                    break;
-                case 'yesterday':
-                    $startDate = date('Y-m-d 00:00:00', strtotime('-1 day'));
-                    $endDate = date('Y-m-d 23:59:59', strtotime('-1 day'));
-                    break;
-                case '7days':
-                    $startDate = date('Y-m-d 00:00:00', strtotime('-7 days'));
-                    $endDate = date('Y-m-d 23:59:59');
-                    break;
-                case '90days':
-                    $startDate = date('Y-m-d 00:00:00', strtotime('-90 days'));
-                    $endDate = date('Y-m-d 23:59:59');
-                    break;
-                case 'year':
-                    $startDate = date('Y-01-01 00:00:00');
-                    $endDate = date('Y-m-d 23:59:59');
-                    break;
-                case 'all':
-                    $startDate = '2020-01-01 00:00:00';
-                    $endDate = date('Y-m-d 23:59:59');
-                    break;
-                case '30days':
-                default:
-                    $startDate = date('Y-m-d 00:00:00', strtotime('-30 days'));
-                    $endDate = date('Y-m-d 23:59:59');
-                    break;
+        if ($startDate !== '' || $endDate !== '') {
+            $valid = static fn (string $d): bool => (bool) preg_match('/^\d{4}-\d{2}-\d{2}$/', $d) && strtotime($d) !== false;
+            if (!$valid($startDate) || !$valid($endDate)) {
+                Response::error('Use dates in the form YYYY-MM-DD.', 422, 'VALIDATION_ERROR');
             }
-        } else {
-            // Ensure full day boundary if time omitted
-            if (strlen($startDate) === 10) {
-                $startDate .= ' 00:00:00';
+            if ($startDate > $endDate) {
+                Response::error('The start date must be on or before the end date.', 422, 'VALIDATION_ERROR');
             }
-            if (strlen($endDate) === 10) {
-                $endDate .= ' 23:59:59';
-            }
+            return ['custom', "{$startDate} 00:00:00", date('Y-m-d 00:00:00', strtotime("{$endDate} +1 day"))];
         }
 
-        return [$range, $startDate, $endDate];
+        $tomorrow = date('Y-m-d 00:00:00', strtotime('+1 day'));
+        $daysBack = static fn (int $days): string => date('Y-m-d 00:00:00', strtotime('-' . ($days - 1) . ' days'));
+
+        return match ($range) {
+            'today' => ['today', "{$today} 00:00:00", $tomorrow],
+            'yesterday' => ['yesterday', date('Y-m-d 00:00:00', strtotime('-1 day')), "{$today} 00:00:00"],
+            '7days' => ['7days', $daysBack(7), $tomorrow],
+            '90days' => ['90days', $daysBack(90), $tomorrow],
+            'year' => ['year', date('Y-01-01 00:00:00'), $tomorrow],
+            'all' => ['all', $this->firstActivityDate(), $tomorrow],
+            default => ['30days', $daysBack(30), $tomorrow],
+        };
+    }
+
+    private function firstActivityDate(): string
+    {
+        // Earliest of any order, verified payment or completed refund, so 'all' really is everything.
+        $row = $this->db->fetchOne(
+            "SELECT LEAST(
+                 COALESCE((SELECT MIN(created_at) FROM `orders`), NOW()),
+                 COALESCE((SELECT MIN(verified_at) FROM `payments`), NOW()),
+                 COALESCE((SELECT MIN(COALESCE(completed_at, updated_at)) FROM `refunds` WHERE status = 'completed'), NOW())
+             ) AS first"
+        );
+        return $row && $row['first'] ? date('Y-m-d 00:00:00', strtotime((string) $row['first'])) : date('Y-m-d 00:00:00');
     }
 
     /**
-     * GET /api/v1/admin/analytics/report
-     * Returns detailed analytics report with configurable date filter, documented formulas,
-     * category breakdown, and gateway breakdown.
+     * Every figure in the report and the CSV, for the window [start, end).
+     *
+     * Money is counted when it moves: sales on the payment's verification time, refunds on their
+     * completion time. Orders paid and later cancelled without a refund are money the store owes
+     * back; they are listed and subtracted from net sales.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildReport(string $start, string $end): array
+    {
+        $received = self::RECEIVED_PAYMENT_STATUSES;
+        $paidInWindow = "SELECT DISTINCT order_id FROM `payments` WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ?";
+        $w = [$start, $end];
+
+        $sales = $this->db->fetchOne(
+            "SELECT COALESCE(SUM(amount), 0) AS gross, COUNT(DISTINCT order_id) AS paid_orders
+             FROM `payments` WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ?",
+            'ss',
+            $w
+        );
+        $refunds = $this->db->fetchOne(
+            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt FROM `refunds`
+             WHERE status = 'completed' AND COALESCE(completed_at, updated_at) >= ? AND COALESCE(completed_at, updated_at) < ?",
+            'ss',
+            $w
+        );
+
+        // Paid, then cancelled, with money still not returned (paid minus completed refunds).
+        $owed = $this->db->fetchAll(
+            "SELECT o.order_number, o.updated_at AS cancelled_at, o.payment_status,
+                    p.paid, COALESCE(r.refunded, 0) AS refunded, p.paid - COALESCE(r.refunded, 0) AS owed
+             FROM `orders` o
+             JOIN (SELECT order_id, SUM(amount) AS paid FROM `payments`
+                   WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ? GROUP BY order_id) p ON p.order_id = o.id
+             LEFT JOIN (SELECT order_id, SUM(amount) AS refunded FROM `refunds` WHERE status = 'completed' GROUP BY order_id) r ON r.order_id = o.id
+             WHERE o.order_status = 'cancelled' AND p.paid - COALESCE(r.refunded, 0) > 0.009
+             ORDER BY o.updated_at DESC",
+            'ss',
+            $w
+        );
+        $owedTotal = array_sum(array_map(static fn ($r) => (float) $r['owed'], $owed));
+
+        $orders = $this->db->fetchOne(
+            "SELECT COUNT(*) AS placed,
+                    COALESCE(SUM(payment_status IN ({$received})), 0) AS placed_and_paid
+             FROM `orders` WHERE created_at >= ? AND created_at < ?",
+            'ss',
+            $w
+        );
+
+        $units = (int) ($this->db->fetchOne(
+            "SELECT COALESCE(SUM(quantity), 0) AS units FROM `order_items` WHERE order_id IN ({$paidInWindow})",
+            'ss',
+            $w
+        )['units'] ?? 0);
+
+        $customers = $this->db->fetchOne(
+            "SELECT COUNT(*) AS paying, COALESCE(SUM(cnt >= 2), 0) AS repeat_customers FROM (
+                 SELECT COALESCE(CAST(o.user_id AS CHAR), LOWER(o.guest_email)) AS customer_key, COUNT(*) AS cnt
+                 FROM `orders` o WHERE o.id IN ({$paidInWindow})
+                 GROUP BY customer_key
+             ) t",
+            'ss',
+            $w
+        );
+
+        $gross = round((float) $sales['gross'], 2);
+        $refunded = round((float) $refunds['total'], 2);
+        $paidOrders = (int) $sales['paid_orders'];
+        $placed = (int) $orders['placed'];
+        $paying = (int) $customers['paying'];
+
+        // Daily series (every day in the window, so charts have no gaps).
+        $salesByDay = array_column($this->db->fetchAll(
+            "SELECT DATE(verified_at) AS d, SUM(amount) AS sales, COUNT(DISTINCT order_id) AS paid
+             FROM `payments` WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ? GROUP BY DATE(verified_at)",
+            'ss',
+            $w
+        ), null, 'd');
+        $ordersByDay = array_column($this->db->fetchAll(
+            "SELECT DATE(created_at) AS d, COUNT(*) AS placed FROM `orders` WHERE created_at >= ? AND created_at < ? GROUP BY DATE(created_at)",
+            'ss',
+            $w
+        ), 'placed', 'd');
+        $refundsByDay = array_column($this->db->fetchAll(
+            "SELECT DATE(COALESCE(completed_at, updated_at)) AS d, SUM(amount) AS refunded FROM `refunds`
+             WHERE status = 'completed' AND COALESCE(completed_at, updated_at) >= ? AND COALESCE(completed_at, updated_at) < ?
+             GROUP BY DATE(COALESCE(completed_at, updated_at))",
+            'ss',
+            $w
+        ), 'refunded', 'd');
+
+        $daily = [];
+        for ($day = strtotime($start), $stop = strtotime($end); $day < $stop && count($daily) < 1000; $day = strtotime('+1 day', $day)) {
+            $d = date('Y-m-d', $day);
+            $daily[] = [
+                'date' => $d,
+                'orders_count' => (int) ($ordersByDay[$d] ?? 0),
+                'paid_count' => (int) ($salesByDay[$d]['paid'] ?? 0),
+                'sales' => round((float) ($salesByDay[$d]['sales'] ?? 0), 2),
+                'refunds' => round((float) ($refundsByDay[$d] ?? 0), 2),
+            ];
+        }
+
+        $categories = $this->db->fetchAll(
+            "SELECT COALESCE(c.name, 'Uncategorised') AS category_name,
+                    COUNT(DISTINCT oi.order_id) AS order_count,
+                    SUM(oi.quantity) AS units_sold,
+                    SUM(oi.line_total) AS revenue
+             FROM `order_items` oi
+             LEFT JOIN `products` p ON p.id = oi.product_id
+             LEFT JOIN `categories` c ON c.id = p.category_id
+             WHERE oi.order_id IN ({$paidInWindow})
+             GROUP BY c.id, c.name
+             ORDER BY revenue DESC",
+            'ss',
+            $w
+        );
+
+        $topProducts = $this->db->fetchAll(
+            "SELECT oi.product_id, MAX(oi.item_name) AS name, SUM(oi.quantity) AS units_sold, SUM(oi.line_total) AS revenue
+             FROM `order_items` oi
+             WHERE oi.order_id IN ({$paidInWindow})
+             GROUP BY oi.product_id
+             ORDER BY units_sold DESC, revenue DESC
+             LIMIT 10",
+            'ss',
+            $w
+        );
+
+        // Gateways: attempts started in the window, and money received in the window, per gateway.
+        $attempts = array_column($this->db->fetchAll(
+            "SELECT provider, COUNT(*) AS attempts,
+                    COALESCE(SUM(status IN ({$received})), 0) AS successful,
+                    COALESCE(SUM(status = 'failed'), 0) AS failed
+             FROM `payments` WHERE created_at >= ? AND created_at < ? GROUP BY provider",
+            'ss',
+            $w
+        ), null, 'provider');
+        $volume = array_column($this->db->fetchAll(
+            "SELECT provider, SUM(amount) AS volume FROM `payments`
+             WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ? GROUP BY provider",
+            'ss',
+            $w
+        ), 'volume', 'provider');
+
+        $gateways = [];
+        foreach (array_unique(array_merge(array_keys($attempts), array_keys($volume))) as $provider) {
+            $a = $attempts[$provider] ?? ['attempts' => 0, 'successful' => 0, 'failed' => 0];
+            $gateways[] = [
+                'provider_name' => $provider,
+                'total_attempts' => (int) $a['attempts'],
+                'successful_count' => (int) $a['successful'],
+                'failed_count' => (int) $a['failed'],
+                'total_volume' => round((float) ($volume[$provider] ?? 0), 2),
+            ];
+        }
+        usort($gateways, static fn ($x, $y) => $y['total_volume'] <=> $x['total_volume']);
+
+        return [
+            'summary' => [
+                'currency' => 'NGN',
+                'gross_sales' => $gross,
+                'total_refunded' => $refunded,
+                'refund_count' => (int) $refunds['cnt'],
+                'owed_refunds' => round($owedTotal, 2),
+                'owed_refund_count' => count($owed),
+                'net_sales' => round(max(0, $gross - $refunded - $owedTotal), 2),
+                'paid_orders' => $paidOrders,
+                'aov' => $paidOrders > 0 ? round($gross / $paidOrders, 2) : 0.0,
+                'total_orders' => $placed,
+                'conversion_rate' => $placed > 0 ? round(((int) $orders['placed_and_paid'] / $placed) * 100, 1) : 0.0,
+                'repeat_customer_rate' => $paying > 0 ? round(((int) $customers['repeat_customers'] / $paying) * 100, 1) : 0.0,
+                'paying_customers' => $paying,
+                'total_units_sold' => $units,
+                'pending_fulfillment' => (int) ($this->db->fetchOne("SELECT COUNT(*) AS c FROM `orders` WHERE order_status IN ('paid', 'processing')")['c'] ?? 0),
+            ],
+            'daily_breakdown' => $daily,
+            'category_breakdown' => $categories,
+            'top_products' => $topProducts,
+            'gateway_breakdown' => $gateways,
+            'owed_refunds' => $owed,
+            'formulas' => [
+                'gross_sales' => 'Sum of payments verified in the period (Kora, Monnify and confirmed bank transfers), by verification time.',
+                'total_refunded' => 'Sum of refunds marked completed in the period, by completion time.',
+                'owed_refunds' => 'Orders paid in the period and later cancelled, minus anything already refunded: money the store still has to return.',
+                'net_sales' => 'Gross sales − refunds completed − refunds owed on cancelled orders.',
+                'aov' => 'Gross sales ÷ paid orders.',
+                'conversion_rate' => 'Orders placed in the period that were paid ÷ orders placed in the period.',
+                'repeat_customer_rate' => 'Customers with 2+ paid orders in the period ÷ customers who paid in the period.',
+                'total_units_sold' => 'Units on orders paid in the period.',
+                'gateway_breakdown' => 'Attempts and success counts are payment attempts started in the period; volume is money received in the period.',
+                'pending_fulfillment' => 'Paid or processing orders right now (not limited to the period).',
+            ],
+        ];
+    }
+
+    /**
+     * GET /api/v1/admin/analytics/report?range=…|start_date=&end_date=
      */
     public function analyticsReport(): void
     {
-        [$range, $startDate, $endDate] = $this->resolveDateRange();
+        [$range, $start, $end] = $this->resolveDateRange();
+        $report = $this->buildReport($start, $end);
 
-        // 1. Summary metrics within date range
-        $summary = $this->db->fetchOne("
-            SELECT 
-                COALESCE(SUM(CASE WHEN payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN grand_total ELSE 0 END), 0) AS gross_sales,
-                COUNT(CASE WHEN payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN 1 END) AS paid_orders,
-                COUNT(id) AS total_orders
-            FROM `orders`
-            WHERE created_at BETWEEN ? AND ?
-        ", 'ss', [$startDate, $endDate]) ?? ['gross_sales' => 0, 'paid_orders' => 0, 'total_orders' => 0];
-
-        $grossSales = (float) $summary['gross_sales'];
-        $paidOrders = (int) $summary['paid_orders'];
-        $totalOrders = (int) $summary['total_orders'];
-
-        // 2. Refunds in date range
-        $refundRow = $this->db->fetchOne("
-            SELECT COALESCE(SUM(amount), 0) AS total_refunded, COUNT(id) AS refund_count
-            FROM `refunds`
-            WHERE status = 'completed' AND created_at BETWEEN ? AND ?
-        ", 'ss', [$startDate, $endDate]) ?? ['total_refunded' => 0, 'refund_count' => 0];
-        $totalRefunded = (float) $refundRow['total_refunded'];
-        $refundCount = (int) $refundRow['refund_count'];
-
-        // 3. Units Sold in date range
-        $unitsRow = $this->db->fetchOne("
-            SELECT COALESCE(SUM(oi.quantity), 0) AS total_units
-            FROM `order_items` oi
-            JOIN `orders` o ON o.id = oi.order_id
-            WHERE (o.payment_status = 'successful' OR o.order_status IN ('paid', 'processing', 'shipped', 'delivered'))
-              AND o.created_at BETWEEN ? AND ?
-        ", 'ss', [$startDate, $endDate]) ?? ['total_units' => 0];
-        $totalUnits = (int) $unitsRow['total_units'];
-
-        // 4. Pending Fulfillment
-        $pendingRow = $this->db->fetchOne("
-            SELECT COUNT(*) AS total
-            FROM `orders`
-            WHERE `order_status` IN ('paid', 'processing')
-              AND created_at BETWEEN ? AND ?
-        ", 'ss', [$startDate, $endDate]) ?? ['total' => 0];
-        $pendingFulfillment = (int) $pendingRow['total'];
-
-        // Derived financial KPIs
-        $aov = $paidOrders > 0 ? round($grossSales / $paidOrders, 2) : 0.0;
-        $netSales = max(0, $grossSales - $totalRefunded);
-        $conversionRate = $totalOrders > 0 ? round(($paidOrders / $totalOrders) * 100, 2) : 0.0;
-
-        // 5. Repeat Customer Rate within range
-        $repeatRow = $this->db->fetchOne("
-            SELECT 
-                COUNT(CASE WHEN paid_count >= 2 THEN 1 END) AS repeat_customers,
-                COUNT(*) AS total_paying_customers
-            FROM (
-                SELECT COALESCE(user_id, guest_email) AS customer_key, COUNT(id) AS paid_count
-                FROM `orders`
-                WHERE (payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered'))
-                  AND created_at BETWEEN ? AND ?
-                GROUP BY customer_key
-            ) customer_stats
-        ", 'ss', [$startDate, $endDate]) ?? ['repeat_customers' => 0, 'total_paying_customers' => 0];
-
-        $repeatCustomers = (int) ($repeatRow['repeat_customers'] ?? 0);
-        $totalPayingCustomers = (int) ($repeatRow['total_paying_customers'] ?? 0);
-        $repeatCustomerRate = $totalPayingCustomers > 0 ? round(($repeatCustomers / $totalPayingCustomers) * 100, 2) : 0.0;
-
-        // 6. Daily breakdown within range
-        $dailyRows = $this->db->fetchAll("
-            SELECT 
-                DATE(created_at) AS date,
-                COUNT(id) AS orders_count,
-                COUNT(CASE WHEN payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN 1 END) AS paid_count,
-                COALESCE(SUM(CASE WHEN payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN grand_total ELSE 0 END), 0) AS sales
-            FROM `orders`
-            WHERE created_at BETWEEN ? AND ?
-            GROUP BY DATE(created_at)
-            ORDER BY DATE(created_at) ASC
-        ", 'ss', [$startDate, $endDate]);
-
-        // 7. Category breakdown
-        $categoryBreakdown = $this->db->fetchAll("
-            SELECT 
-                COALESCE(c.name, 'Uncategorized') AS category_name,
-                COUNT(DISTINCT o.id) AS order_count,
-                COALESCE(SUM(oi.quantity), 0) AS units_sold,
-                COALESCE(SUM(oi.line_total), 0) AS revenue
-            FROM `order_items` oi
-            JOIN `orders` o ON o.id = oi.order_id
-            JOIN `products` p ON p.id = oi.product_id
-            LEFT JOIN `categories` c ON c.id = p.category_id
-            WHERE (o.payment_status = 'successful' OR o.order_status IN ('paid', 'processing', 'shipped', 'delivered'))
-              AND o.created_at BETWEEN ? AND ?
-            GROUP BY c.id, c.name
-            ORDER BY revenue DESC
-        ", 'ss', [$startDate, $endDate]);
-
-        // 8. Gateway breakdown
-        $gatewayBreakdown = $this->db->fetchAll("
-            SELECT 
-                COALESCE(p.provider, 'Pending') AS provider_name,
-                COUNT(DISTINCT o.id) AS total_attempts,
-                COUNT(DISTINCT CASE WHEN o.payment_status = 'successful' OR o.order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN o.id END) AS successful_count,
-                COALESCE(SUM(CASE WHEN o.payment_status = 'successful' OR o.order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN o.grand_total ELSE 0 END), 0) AS total_volume
-            FROM `orders` o
-            LEFT JOIN `payments` p ON p.order_id = o.id
-            WHERE o.created_at BETWEEN ? AND ?
-            GROUP BY p.provider
-        ", 'ss', [$startDate, $endDate]);
-
-        // Documented Operational Formulas for Auditability
-        $formulas = [
-            'gross_sales' => 'SUM(grand_total) for all orders where payment_status = "successful" OR order_status IN ("paid", "processing", "shipped", "delivered"). Pending payments strictly excluded.',
-            'net_sales' => 'MAX(0, gross_sales - total_refunded). Reflects actual retained revenue.',
-            'total_refunded' => 'SUM(amount) from completed refunds records within the date filter.',
-            'aov' => 'gross_sales / paid_orders (Average revenue generated per paid transaction).',
-            'conversion_rate' => '(paid_orders / total_orders) * 100 (Percentage of placed checkout orders that cleared payment).',
-            'repeat_customer_rate' => '(customers_with_2+_paid_orders / total_paying_customers) * 100 within date window.',
-            'total_units_sold' => 'SUM(order_items.quantity) from physical items in verified paid orders.',
-            'pending_fulfillment' => 'COUNT(orders) where order_status IN ("paid", "processing") requiring physical packaging and dispatch.',
-            'reconciliation_rule' => 'All dashboard and analytics figures are derived directly from transactional MySQL records. No mock or static figures are presented as live.'
-        ];
-
-        Response::success([
+        Response::success(array_merge([
             'filters' => [
                 'range' => $range,
-                'start_date' => $startDate,
-                'end_date' => $endDate
+                'start_date' => $start,
+                'end_date' => date('Y-m-d H:i:s', strtotime($end) - 1),
             ],
-            'summary' => [
-                'gross_sales' => $grossSales,
-                'net_sales' => $netSales,
-                'total_refunded' => $totalRefunded,
-                'refund_count' => $refundCount,
-                'aov' => $aov,
-                'total_orders' => $totalOrders,
-                'paid_orders' => $paidOrders,
-                'conversion_rate' => $conversionRate,
-                'repeat_customer_rate' => $repeatCustomerRate,
-                'total_units_sold' => $totalUnits,
-                'pending_fulfillment' => $pendingFulfillment,
-                'currency' => 'NGN'
-            ],
-            'daily_breakdown' => $dailyRows,
-            'category_breakdown' => $categoryBreakdown,
-            'gateway_breakdown' => $gatewayBreakdown,
-            'formulas' => $formulas
-        ], 'Analytics report generated successfully.');
+        ], $report), 'Analytics report generated.');
     }
 
     /**
-     * GET /api/v1/admin/analytics/export
-     * Stream authenticated CSV export of analytics report (KPI summary, daily sales, category breakdown).
-     * Protected by AdminAuthMiddleware. Enforces anti-CSV injection sanitization.
+     * GET /api/v1/admin/analytics/export — the same figures as the report, as CSV.
      */
     public function exportCsv(): void
     {
-        [$range, $startDate, $endDate] = $this->resolveDateRange();
+        [$range, $start, $end] = $this->resolveDateRange();
+        $r = $this->buildReport($start, $end);
+        $s = $r['summary'];
+        $money = static fn ($v): string => number_format((float) $v, 2, '.', '');
 
-        $summary = $this->db->fetchOne("
-            SELECT 
-                COALESCE(SUM(CASE WHEN payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN grand_total ELSE 0 END), 0) AS gross_sales,
-                COUNT(CASE WHEN payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN 1 END) AS paid_orders,
-                COUNT(id) AS total_orders
-            FROM `orders`
-            WHERE created_at BETWEEN ? AND ?
-        ", 'ss', [$startDate, $endDate]) ?? ['gross_sales' => 0, 'paid_orders' => 0, 'total_orders' => 0];
+        $out = $this->beginCsv('shopco-analytics-' . $range . '-' . date('Ymd-His') . '.csv');
 
-        $refundRow = $this->db->fetchOne("
-            SELECT COALESCE(SUM(amount), 0) AS total_refunded, COUNT(id) AS refund_count
-            FROM `refunds`
-            WHERE status = 'completed' AND created_at BETWEEN ? AND ?
-        ", 'ss', [$startDate, $endDate]) ?? ['total_refunded' => 0, 'refund_count' => 0];
-
-        $unitsRow = $this->db->fetchOne("
-            SELECT COALESCE(SUM(oi.quantity), 0) AS total_units
-            FROM `order_items` oi
-            JOIN `orders` o ON o.id = oi.order_id
-            WHERE (o.payment_status = 'successful' OR o.order_status IN ('paid', 'processing', 'shipped', 'delivered'))
-              AND o.created_at BETWEEN ? AND ?
-        ", 'ss', [$startDate, $endDate]) ?? ['total_units' => 0];
-
-        $dailyRows = $this->db->fetchAll("
-            SELECT 
-                DATE(created_at) AS date,
-                COUNT(id) AS orders_count,
-                COUNT(CASE WHEN payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN 1 END) AS paid_count,
-                COALESCE(SUM(CASE WHEN payment_status = 'successful' OR order_status IN ('paid', 'processing', 'shipped', 'delivered') THEN grand_total ELSE 0 END), 0) AS sales
-            FROM `orders`
-            WHERE created_at BETWEEN ? AND ?
-            GROUP BY DATE(created_at)
-            ORDER BY DATE(created_at) ASC
-        ", 'ss', [$startDate, $endDate]);
-
-        $categoryBreakdown = $this->db->fetchAll("
-            SELECT 
-                COALESCE(c.name, 'Uncategorized') AS category_name,
-                COUNT(DISTINCT o.id) AS order_count,
-                COALESCE(SUM(oi.quantity), 0) AS units_sold,
-                COALESCE(SUM(oi.line_total), 0) AS revenue
-            FROM `order_items` oi
-            JOIN `orders` o ON o.id = oi.order_id
-            JOIN `products` p ON p.id = oi.product_id
-            LEFT JOIN `categories` c ON c.id = p.category_id
-            WHERE (o.payment_status = 'successful' OR o.order_status IN ('paid', 'processing', 'shipped', 'delivered'))
-              AND o.created_at BETWEEN ? AND ?
-            GROUP BY c.id, c.name
-            ORDER BY revenue DESC
-        ", 'ss', [$startDate, $endDate]);
-
-        $gross = (float) $summary['gross_sales'];
-        $paid = (int) $summary['paid_orders'];
-        $total = (int) $summary['total_orders'];
-        $refund = (float) $refundRow['total_refunded'];
-        $net = max(0, $gross - $refund);
-        $aov = $paid > 0 ? round($gross / $paid, 2) : 0.0;
-        $units = (int) $unitsRow['total_units'];
-
-        // Output CSV
-        $filename = 'shopco-analytics-' . $range . '-' . date('Ymd-His') . '.csv';
-        header('Content-Type: text/csv; charset=UTF-8');
-        header('Content-Disposition: attachment; filename="' . $filename . '"');
-        header('Pragma: no-cache');
-        header('Expires: 0');
-
-        $out = fopen('php://output', 'w');
-        // Add UTF-8 BOM for Excel compatibility
-        fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF));
-
-        fputcsv($out, ['SHOP.CO FINANCIAL & OPERATIONAL ANALYTICS REPORT']);
-        fputcsv($out, ['Generated At', date('Y-m-d H:i:s')]);
-        fputcsv($out, ['Filter Range', $range]);
-        fputcsv($out, ['Date From', $startDate]);
-        fputcsv($out, ['Date To', $endDate]);
+        fputcsv($out, ['Report period', substr($start, 0, 10), date('Y-m-d', strtotime($end) - 1)]);
+        fputcsv($out, ['Generated', date('Y-m-d H:i:s')]);
         fputcsv($out, []);
 
-        fputcsv($out, ['KEY FINANCIAL METRICS', 'VALUE (NGN / COUNT)']);
-        fputcsv($out, ['Gross Sales (Verified Paid)', number_format($gross, 2)]);
-        fputcsv($out, ['Completed Refunds', number_format($refund, 2)]);
-        fputcsv($out, ['Net Retained Sales', number_format($net, 2)]);
-        fputcsv($out, ['Total Orders Initiated', (string) $total]);
-        fputcsv($out, ['Paid Settled Orders', (string) $paid]);
-        fputcsv($out, ['Average Order Value (AOV)', number_format($aov, 2)]);
-        fputcsv($out, ['Total Physical Units Sold', (string) $units]);
-        fputcsv($out, ['Order Payment Conversion Rate', ($total > 0 ? round(($paid / $total) * 100, 2) : 0) . '%']);
-        fputcsv($out, []);
-
-        fputcsv($out, ['DAILY SETTLEMENT BREAKDOWN']);
-        fputcsv($out, ['Date', 'Total Orders', 'Paid Orders', 'Sales Volume (NGN)']);
-        foreach ($dailyRows as $d) {
-            fputcsv($out, [
-                $this->sanitizeCsvCell($d['date']),
-                (string) $d['orders_count'],
-                (string) $d['paid_count'],
-                number_format((float) $d['sales'], 2)
-            ]);
+        fputcsv($out, ['Metric', 'Value']);
+        foreach ([
+            ['Gross sales (NGN)', $money($s['gross_sales'])],
+            ['Refunds completed (NGN)', $money($s['total_refunded'])],
+            ['Refunds owed on cancelled orders (NGN)', $money($s['owed_refunds'])],
+            ['Net sales (NGN)', $money($s['net_sales'])],
+            ['Paid orders', (string) $s['paid_orders']],
+            ['Average order value (NGN)', $money($s['aov'])],
+            ['Orders placed', (string) $s['total_orders']],
+            ['Placed orders that were paid (%)', (string) $s['conversion_rate']],
+            ['Repeat customers (%)', (string) $s['repeat_customer_rate']],
+            ['Units sold', (string) $s['total_units_sold']],
+        ] as $row) {
+            fputcsv($out, $row);
         }
         fputcsv($out, []);
 
-        fputcsv($out, ['CATEGORY PERFORMANCE BREAKDOWN']);
-        fputcsv($out, ['Category Name', 'Order Count', 'Units Sold', 'Revenue (NGN)']);
-        foreach ($categoryBreakdown as $c) {
-            fputcsv($out, [
-                $this->sanitizeCsvCell($c['category_name']),
-                (string) $c['order_count'],
-                (string) $c['units_sold'],
-                number_format((float) $c['revenue'], 2)
-            ]);
+        fputcsv($out, ['Date', 'Orders placed', 'Paid orders', 'Sales (NGN)', 'Refunds (NGN)']);
+        foreach ($r['daily_breakdown'] as $d) {
+            fputcsv($out, [$d['date'], $d['orders_count'], $d['paid_count'], $money($d['sales']), $money($d['refunds'])]);
+        }
+        fputcsv($out, []);
+
+        fputcsv($out, ['Category', 'Orders', 'Units sold', 'Revenue (NGN)']);
+        foreach ($r['category_breakdown'] as $c) {
+            fputcsv($out, [$this->sanitizeCsvCell($c['category_name']), $c['order_count'], $c['units_sold'], $money($c['revenue'])]);
+        }
+        fputcsv($out, []);
+
+        fputcsv($out, ['Gateway', 'Attempts', 'Successful', 'Failed', 'Received (NGN)']);
+        foreach ($r['gateway_breakdown'] as $g) {
+            fputcsv($out, [$this->sanitizeCsvCell($g['provider_name']), $g['total_attempts'], $g['successful_count'], $g['failed_count'], $money($g['total_volume'])]);
+        }
+
+        if ($r['owed_refunds'] !== []) {
+            fputcsv($out, []);
+            fputcsv($out, ['Cancelled after payment – refund owed']);
+            fputcsv($out, ['Order', 'Paid (NGN)', 'Refunded (NGN)', 'Owed (NGN)']);
+            foreach ($r['owed_refunds'] as $o) {
+                fputcsv($out, [$this->sanitizeCsvCell($o['order_number']), $money($o['paid']), $money($o['refunded']), $money($o['owed'])]);
+            }
         }
 
         fclose($out);
         exit;
+    }
+
+    /**
+     * @return resource
+     */
+    private function beginCsv(string $filename)
+    {
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: no-store');
+        $out = fopen('php://output', 'w');
+        fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM so Excel reads ₦ and names correctly
+        return $out;
     }
 
     /**
@@ -584,7 +591,12 @@ class AdminDashboardController
      */
     public function exportOrdersCsv(): void
     {
+        // Same filters as the admin order list; all dates unless a range is given.
+        if (!isset($_GET['range']) && !isset($_GET['start_date'])) {
+            $_GET['range'] = 'all';
+        }
         [$range, $startDate, $endDate] = $this->resolveDateRange();
+        $search = trim((string) ($_GET['search'] ?? ''));
 
         $status = $_GET['status'] ?? 'all';
         $paymentStatus = $_GET['payment_status'] ?? 'all';
@@ -610,22 +622,30 @@ class AdminDashboardController
             FROM `orders` o
             LEFT JOIN `users` u ON u.id = o.user_id
             LEFT JOIN `payments` p ON p.order_id = o.id AND p.id = (SELECT MAX(p2.id) FROM `payments` p2 WHERE p2.order_id = o.id)
-            WHERE o.created_at BETWEEN ? AND ?
+            WHERE o.created_at >= ? AND o.created_at < ?
         ";
 
         $types = 'ss';
         $params = [$startDate, $endDate];
 
-        if ($status !== 'all') {
+        if ($status === 'attention') {
+            $sql .= " AND o.requires_attention = 1";
+        } elseif ($status !== 'all' && $status !== '') {
             $sql .= " AND o.order_status = ?";
             $types .= 's';
             $params[] = $status;
         }
 
-        if ($paymentStatus !== 'all') {
+        if ($paymentStatus !== 'all' && $paymentStatus !== '') {
             $sql .= " AND o.payment_status = ?";
             $types .= 's';
             $params[] = $paymentStatus;
+        }
+
+        if ($search !== '') {
+            $sql .= " AND (o.order_number LIKE ? OR o.guest_email LIKE ? OR u.email LIKE ? OR o.shipping_address_snapshot LIKE ?)";
+            $types .= 'ssss';
+            array_push($params, "%{$search}%", "%{$search}%", "%{$search}%", "%{$search}%");
         }
 
         $sql .= " ORDER BY o.created_at DESC";

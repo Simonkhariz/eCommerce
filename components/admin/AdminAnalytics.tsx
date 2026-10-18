@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
-import { adminDownloadExport, adminGetAnalyticsReport, errorMessage } from '@/lib/admin-api';
+import Link from 'next/link';
+import { AnalyticsReport, adminDownloadExport, adminGetAnalyticsReport, errorMessage } from '@/lib/admin-api';
 import { formatDate, formatPrice, gatewayLabel, humanize, num } from '@/lib/admin-format';
 import {
   Button,
@@ -31,29 +32,6 @@ const RANGES = [
   { value: 'custom', label: 'Custom dates' },
 ];
 
-interface AnalyticsSummary {
-  gross_sales: number;
-  net_sales: number;
-  total_refunded: number;
-  refund_count: number;
-  aov: number;
-  total_orders: number;
-  paid_orders: number;
-  conversion_rate: number;
-  repeat_customer_rate: number;
-  total_units_sold: number;
-  pending_fulfillment: number;
-}
-
-interface AnalyticsReport {
-  filters: { range: string; start_date: string; end_date: string };
-  summary: AnalyticsSummary;
-  daily_breakdown: Array<{ date: string; orders_count: number | string; paid_count: number | string; sales: number | string }>;
-  category_breakdown: Array<{ category_name: string; order_count: number | string; units_sold: number | string; revenue: number | string }>;
-  gateway_breakdown: Array<{ provider_name: string; total_attempts: number | string; successful_count: number | string; total_volume: number | string }>;
-  formulas: Record<string, string>;
-}
-
 /** Sales report for a date range, with CSV exports of the report and of orders. */
 export function AdminAnalytics() {
   const toast = useToast();
@@ -68,7 +46,7 @@ export function AdminAnalytics() {
     : { range: filters.range };
 
   const { data, loading, error, reload } = useAdminData<AnalyticsReport | null>(
-    async () => (params ? ((await adminGetAnalyticsReport(params)) as AnalyticsReport) : null),
+    async () => (params ? adminGetAnalyticsReport(params) : null),
     [filters.range, filters.start_date, filters.end_date]
   );
 
@@ -158,8 +136,8 @@ export function AdminAnalytics() {
       </Toolbar>
 
       <Notice>
-        This report counts orders placed in the range that are paid or beyond. The Overview counts payments by the date they were verified, so the
-        two can differ for orders paid on a later day.
+        Sales are counted on the day the payment was verified and refunds on the day they were completed, the same rules as the Overview.
+        Orders paid and then cancelled count as owed until you record the refund.
       </Notice>
 
       {!params ? (
@@ -195,7 +173,10 @@ function Report({ report }: { report: AnalyticsReport }) {
   const daily = report.daily_breakdown ?? [];
   const categories = report.category_breakdown ?? [];
   const gateways = report.gateway_breakdown ?? [];
+  const topProducts = report.top_products ?? [];
+  const owed = report.owed_refunds ?? [];
   const formulas = Object.entries(report.formulas ?? {});
+  const hasActivity = daily.some((d) => d.orders_count > 0 || d.paid_count > 0 || d.refunds > 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -204,29 +185,77 @@ function Report({ report }: { report: AnalyticsReport }) {
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Net sales" value={formatPrice(num(s.net_sales))} sub={`${formatPrice(num(s.gross_sales))} gross · ${formatPrice(num(s.total_refunded))} refunded (${num(s.refund_count)})`} />
-        <Stat label="Average order value" value={formatPrice(num(s.aov))} sub={`From ${num(s.paid_orders).toLocaleString()} paid orders`} />
-        <Stat label="Units sold" value={num(s.total_units_sold).toLocaleString()} sub={`${num(s.pending_fulfillment).toLocaleString()} of these orders still to ship`} />
         <Stat
-          label="Checkout conversion"
+          label="Net sales"
+          value={formatPrice(num(s.net_sales))}
+          sub={`${formatPrice(num(s.gross_sales))} received − ${formatPrice(num(s.total_refunded))} refunded${num(s.owed_refunds) > 0 ? ` − ${formatPrice(num(s.owed_refunds))} owed` : ''}`}
+        />
+        <Stat label="Average order value" value={formatPrice(num(s.aov))} sub={`From ${num(s.paid_orders).toLocaleString()} paid orders`} />
+        <Stat
+          label="Units sold"
+          value={num(s.total_units_sold).toLocaleString()}
+          sub={`${num(s.paying_customers).toLocaleString()} paying customers · ${num(s.repeat_customer_rate)}% ordered again`}
+        />
+        <Stat
+          label="Placed orders that were paid"
           value={`${num(s.conversion_rate)}%`}
-          sub={`${num(s.paid_orders).toLocaleString()} paid of ${num(s.total_orders).toLocaleString()} placed · ${num(s.repeat_customer_rate)}% repeat customers`}
+          sub={`Of ${num(s.total_orders).toLocaleString()} orders placed in this period`}
         />
       </div>
 
+      {owed.length > 0 && (
+        <Panel title={`Refunds owed (${owed.length})`}>
+          <p className="px-4 pt-3 text-[13px] text-[#374151]">
+            These orders were paid and then cancelled, and the money has not all been returned. Record each refund once you have sent it.
+          </p>
+          <Table minWidth={520}>
+            <thead>
+              <tr>
+                <th scope="col">Order</th>
+                <th scope="col" className="text-right">Paid</th>
+                <th scope="col" className="text-right">Refunded</th>
+                <th scope="col" className="text-right">Owed</th>
+                <th scope="col">
+                  <span className="sr-only">Action</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {owed.map((o) => (
+                <tr key={o.order_number}>
+                  <td>
+                    <Link href={`/admin/orders/${encodeURIComponent(o.order_number)}`} className="font-semibold hover:underline">
+                      {o.order_number}
+                    </Link>
+                  </td>
+                  <td className="text-right tabular-nums">{formatPrice(num(o.paid))}</td>
+                  <td className="text-right tabular-nums">{formatPrice(num(o.refunded))}</td>
+                  <td className="text-right font-semibold tabular-nums text-red-700">{formatPrice(num(o.owed))}</td>
+                  <td className="text-right">
+                    <Link href={`/admin/refunds?order=${encodeURIComponent(o.order_number)}`} className="text-xs font-semibold text-[#111827] underline">
+                      Record refund
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Panel>
+      )}
+
       <Panel title="Daily breakdown">
-        {daily.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No orders in this range.</p>
+        {!hasActivity ? (
+          <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No orders, payments or refunds in this range.</p>
         ) : (
           <div className="max-h-[420px] overflow-y-auto">
-            <Table minWidth={520}>
+            <Table minWidth={560}>
               <thead>
                 <tr>
                   <th scope="col">Date</th>
                   <th scope="col" className="text-right">Orders placed</th>
-                  <th scope="col" className="text-right">Paid</th>
-                  <th scope="col" className="text-right">Paid rate</th>
+                  <th scope="col" className="text-right">Payments received</th>
                   <th scope="col" className="text-right">Sales</th>
+                  <th scope="col" className="text-right">Refunds</th>
                 </tr>
               </thead>
               <tbody>
@@ -235,8 +264,8 @@ function Report({ report }: { report: AnalyticsReport }) {
                     <td>{formatDate(d.date)}</td>
                     <td className="text-right tabular-nums">{num(d.orders_count)}</td>
                     <td className="text-right tabular-nums">{num(d.paid_count)}</td>
-                    <td className="text-right tabular-nums">{pct(num(d.paid_count), num(d.orders_count))}</td>
                     <td className="text-right tabular-nums">{formatPrice(num(d.sales))}</td>
+                    <td className="text-right tabular-nums">{num(d.refunds) > 0 ? `−${formatPrice(num(d.refunds))}` : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -246,6 +275,31 @@ function Report({ report }: { report: AnalyticsReport }) {
       </Panel>
 
       <div className="grid gap-4 xl:grid-cols-2">
+        <Panel title="Top products">
+          {topProducts.length === 0 ? (
+            <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No paid sales in this range.</p>
+          ) : (
+            <Table minWidth={420}>
+              <thead>
+                <tr>
+                  <th scope="col">Product</th>
+                  <th scope="col" className="text-right">Units</th>
+                  <th scope="col" className="text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topProducts.map((p) => (
+                  <tr key={`${p.product_id}-${p.name}`}>
+                    <td>{p.name}</td>
+                    <td className="text-right tabular-nums">{num(p.units_sold)}</td>
+                    <td className="text-right tabular-nums">{formatPrice(num(p.revenue))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Panel>
+
         <Panel title="Sales by category">
           {categories.length === 0 ? (
             <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No paid sales in this range.</p>
@@ -272,36 +326,38 @@ function Report({ report }: { report: AnalyticsReport }) {
             </Table>
           )}
         </Panel>
-
-        <Panel title="Payment gateways">
-          {gateways.length === 0 ? (
-            <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No payment attempts in this range.</p>
-          ) : (
-            <Table minWidth={420}>
-              <thead>
-                <tr>
-                  <th scope="col">Gateway</th>
-                  <th scope="col" className="text-right">Orders</th>
-                  <th scope="col" className="text-right">Paid</th>
-                  <th scope="col" className="text-right">Volume</th>
-                </tr>
-              </thead>
-              <tbody>
-                {gateways.map((g) => (
-                  <tr key={g.provider_name}>
-                    <td>{g.provider_name === 'Pending' ? 'No payment started' : gatewayLabel(g.provider_name)}</td>
-                    <td className="text-right tabular-nums">{num(g.total_attempts)}</td>
-                    <td className="text-right tabular-nums">
-                      {num(g.successful_count)} <span className="text-xs text-[#6b7280]">({pct(num(g.successful_count), num(g.total_attempts))})</span>
-                    </td>
-                    <td className="text-right tabular-nums">{formatPrice(num(g.total_volume))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </Panel>
       </div>
+
+      <Panel title="Payment gateways">
+        {gateways.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No payment attempts in this range.</p>
+        ) : (
+          <Table minWidth={560}>
+            <thead>
+              <tr>
+                <th scope="col">Gateway</th>
+                <th scope="col" className="text-right">Attempts</th>
+                <th scope="col" className="text-right">Paid</th>
+                <th scope="col" className="text-right">Failed</th>
+                <th scope="col" className="text-right">Received</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gateways.map((g) => (
+                <tr key={g.provider_name}>
+                  <td>{gatewayLabel(g.provider_name)}</td>
+                  <td className="text-right tabular-nums">{num(g.total_attempts)}</td>
+                  <td className="text-right tabular-nums">
+                    {num(g.successful_count)} <span className="text-xs text-[#6b7280]">({pct(num(g.successful_count), num(g.total_attempts))})</span>
+                  </td>
+                  <td className="text-right tabular-nums">{num(g.failed_count)}</td>
+                  <td className="text-right tabular-nums">{formatPrice(num(g.total_volume))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Panel>
 
       {formulas.length > 0 && (
         <Panel

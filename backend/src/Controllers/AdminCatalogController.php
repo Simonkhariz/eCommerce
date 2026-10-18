@@ -96,7 +96,7 @@ class AdminCatalogController
             $productId = $this->productRepo->create($body, $variants, $images);
             $created = $this->productRepo->findDetail((string) $productId, true);
 
-            AuditService::record(null, 'PRODUCT_CREATED', 'product', (string) $productId, null, [
+            AuditService::record($this->currentAdminId(), 'product.create', 'product', (string) $productId, null, [
                 'name' => $body['name'],
                 'sku' => $body['sku'],
                 'price' => $body['base_price'],
@@ -158,7 +158,7 @@ class AdminCatalogController
         }
         $updated = $this->productRepo->findDetail((string) $id, true);
 
-        AuditService::record(null, 'PRODUCT_UPDATED', 'product', (string) $id, [
+        AuditService::record($this->currentAdminId(), 'product.update', 'product', (string) $id, [
             'name' => $existing['name'],
             'price' => $existing['base_price'],
             'sku' => $existing['sku'],
@@ -194,7 +194,7 @@ class AdminCatalogController
         try {
             $result = $this->productRepo->updateStatus($id, $status);
 
-            AuditService::record(null, 'PRODUCT_STATUS_CHANGED', 'product', (string) $id, [
+            AuditService::record($this->currentAdminId(), 'product.status_change', 'product', (string) $id, [
                 'status' => $existing['status'] ?? null,
             ], [
                 'status' => $status,
@@ -261,7 +261,7 @@ class AdminCatalogController
 
         $this->productRepo->delete($id);
 
-        AuditService::record(null, 'PRODUCT_DELETED', 'product', (string) $id, null, [
+        AuditService::record($this->currentAdminId(), 'product.archive', 'product', (string) $id, null, [
             'status' => 'archived',
         ]);
 

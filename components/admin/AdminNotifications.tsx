@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
-import { RefreshCw, RotateCcw } from 'lucide-react';
-import { adminGetOutbox, adminRetryOutbox, errorMessage, OutboxRow } from '@/lib/admin-api';
+import { RefreshCw, RotateCcw, Send } from 'lucide-react';
+import { adminGetOutbox, adminGetSystemStatus, adminProcessOutbox, adminRetryOutbox, errorMessage, OutboxRow } from '@/lib/admin-api';
 import { formatDateTime, formatRelative, humanize } from '@/lib/admin-format';
 import {
   Button,
   DataState,
+  Notice,
   FilterSelect,
   PageHeader,
   Pagination,
@@ -27,11 +28,16 @@ const STATUS_OPTIONS = [
   { value: 'failed', label: 'Failed' },
 ];
 
-const STATUS_PILL: Record<OutboxRow['status'], { label: string; tone: 'amber' | 'green' | 'red' }> = {
-  pending: { label: 'Waiting', tone: 'amber' },
-  sent: { label: 'Sent', tone: 'green' },
-  failed: { label: 'Failed', tone: 'red' },
-};
+function statusPill(row: OutboxRow): { label: string; tone: 'amber' | 'green' | 'red' | 'neutral' } {
+  if (row.status === 'sent') {
+    return row.transport === 'log' ? { label: 'Logged only', tone: 'neutral' } : { label: 'Delivered', tone: 'green' };
+  }
+  if (row.status === 'failed') return { label: 'Failed', tone: 'red' };
+  return row.attempt_count > 0 ? { label: 'Retrying', tone: 'amber' } : { label: 'Waiting', tone: 'amber' };
+}
+
+/** Sign-in links carry a one-time token that is never stored, so they cannot be re-sent. */
+const NOT_RESENDABLE = ['magic_link', 'account_verification'];
 
 /** Every email the store has queued: order confirmations, shipping updates, sign-in links, newsletters. */
 export function AdminNotifications() {
@@ -42,13 +48,29 @@ export function AdminNotifications() {
     () => adminGetOutbox({ status: filters.status, page, per_page: 25 }),
     [filters.status, page]
   );
+  const { data: status, reload: reloadStatus } = useAdminData(() => adminGetSystemStatus(), []);
   const [retrying, setRetrying] = useState<number | null>(null);
+  const [processing, setProcessing] = useState(false);
+
+  const processNow = async () => {
+    setProcessing(true);
+    try {
+      const res = await adminProcessOutbox();
+      toast.success(res.message || 'Queue processed.');
+      await Promise.all([reload(), reloadStatus()]);
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      toast.error(errorMessage(err, 'The queue could not be processed.'));
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   const retry = async (row: OutboxRow) => {
     setRetrying(row.id);
     try {
-      await adminRetryOutbox(row.id);
-      toast.success(`Email to ${row.recipient_email} re-sent.`);
+      const res = await adminRetryOutbox(row.id);
+      toast.success(res.message || `Email to ${row.recipient_email} sent.`);
       await reload();
     } catch (err) {
       if (redirectIfSignedOut(err)) return;
@@ -66,12 +88,34 @@ export function AdminNotifications() {
         title="Email outbox"
         description="Every email the store has queued. Message bodies are not shown here because they can contain customer details."
         actions={
-          <Button onClick={reload} loading={loading && !!data}>
-            <RefreshCw className="size-3.5" aria-hidden="true" />
-            Refresh
-          </Button>
+          <>
+            <Button onClick={processNow} loading={processing} disabled={!status || status.mail.outbox_pending === 0}>
+              <Send className="size-3.5" aria-hidden="true" />
+              Send queued now{status ? ` (${status.mail.outbox_pending})` : ''}
+            </Button>
+            <Button onClick={reload} loading={loading && !!data} aria-label="Refresh list">
+              <RefreshCw className="size-3.5" aria-hidden="true" />
+            </Button>
+          </>
         }
       />
+
+      {status?.mail.mode === 'log_only' && (
+        <div className="mb-3">
+          <Notice tone="warning">
+            Email is in log-only mode: messages are written to <code>backend/storage/logs/mail.log</code> and do not reach customers. Set
+            MAIL_MAILER=smtp and the MAIL_* settings in backend/.env to deliver them.
+          </Notice>
+        </div>
+      )}
+      {status && status.mail.oldest_due_minutes !== null && status.mail.oldest_due_minutes > 15 && (
+        <div className="mb-3">
+          <Notice tone="warning">
+            The oldest queued email has been waiting {status.mail.oldest_due_minutes} minutes. Schedule
+            <code> php backend/scripts/process_outbox.php</code> every few minutes, or use “Send queued now”.
+          </Notice>
+        </div>
+      )}
       <Toolbar>
         <FilterSelect label="Status" value={filters.status} onChange={(v) => setFilters({ status: v })} options={STATUS_OPTIONS} />
       </Toolbar>
@@ -102,7 +146,8 @@ export function AdminNotifications() {
             </thead>
             <tbody>
               {rows.map((row) => {
-                const s = STATUS_PILL[row.status] ?? { label: humanize(row.status), tone: 'amber' as const };
+                const s = statusPill(row);
+                const canResend = !NOT_RESENDABLE.includes(row.template) && row.status !== 'sent';
                 return (
                   <tr key={row.id}>
                     <td className="max-w-[220px]">
@@ -119,9 +164,12 @@ export function AdminNotifications() {
                     <td>
                       <StatusPill label={s.label} tone={s.tone} />
                       {row.last_error && (
-                        <span className="mt-1 block max-w-[240px] truncate text-xs text-red-700" title={row.last_error}>
+                        <span className={`mt-1 block max-w-[240px] truncate text-xs ${row.status === 'failed' ? 'text-red-700' : 'text-[#6b7280]'}`} title={row.last_error}>
                           {row.last_error}
                         </span>
+                      )}
+                      {row.status === 'pending' && row.next_attempt_at && row.attempt_count > 0 && (
+                        <span className="mt-1 block text-xs text-[#6b7280]">Next try {formatDateTime(row.next_attempt_at)}</span>
                       )}
                     </td>
                     <td className="text-right tabular-nums">{row.attempt_count ?? 0}</td>
@@ -130,10 +178,10 @@ export function AdminNotifications() {
                     </td>
                     <td className="whitespace-nowrap text-xs text-[#6b7280]">{row.sent_at ? formatDateTime(row.sent_at) : '—'}</td>
                     <td className="text-right">
-                      {row.status === 'failed' && (
+                      {canResend && (
                         <Button size="sm" onClick={() => retry(row)} loading={retrying === row.id} disabled={retrying !== null && retrying !== row.id}>
                           <RotateCcw className="size-3.5" aria-hidden="true" />
-                          Retry
+                          {row.status === 'failed' ? 'Retry' : 'Send now'}
                         </Button>
                       )}
                     </td>

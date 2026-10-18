@@ -252,7 +252,7 @@ class AdminOperationsController
             (new SessionRepository())->destroyUserSessions($id);
         }
 
-        AuditService::record($this->adminId(), 'customer.status_update', 'user', (string) $id, ['status' => $customer['status']], ['status' => $status]);
+        AuditService::record($this->adminId(), 'customer.status_update', 'customer', (string) $id, ['status' => $customer['status']], ['status' => $status]);
         Response::success(['id' => $id, 'status' => $status], $status === 'suspended' ? 'Customer suspended and signed out.' : 'Customer reactivated.');
     }
 
@@ -720,7 +720,7 @@ class AdminOperationsController
         }
         // Payloads can contain customer data; the list shows metadata only.
         $this->paginate(
-            "SELECT `id`, `recipient_email`, `subject`, `template`, `status`, `attempt_count`, `last_error`, `created_at`, `sent_at` FROM `email_outbox`" . $where,
+            "SELECT `id`, `recipient_email`, `subject`, `template`, `status`, `transport`, `attempt_count`, `last_error`, `next_attempt_at`, `created_at`, `sent_at` FROM `email_outbox`" . $where,
             "SELECT COUNT(*) AS total FROM `email_outbox`" . $where,
             $types,
             $params,
@@ -733,11 +733,26 @@ class AdminOperationsController
     public function retryOutbox(array $params): void
     {
         $id = (int) ($params['id'] ?? 0);
-        if (MailService::getInstance()->retryOutboxItem($id)) {
-            AuditService::record($this->adminId(), 'email.retry', 'email_outbox', (string) $id, null, null);
-            Response::success(['id' => $id], 'Email re-sent.');
+        $result = MailService::getInstance()->retryOutboxItem($id);
+        AuditService::record($this->adminId(), 'email.retry', 'email_outbox', (string) $id, null, ['ok' => $result['ok']]);
+        if ($result['ok']) {
+            Response::success(['id' => $id], $result['message']);
         }
-        Response::error('The email could not be re-sent. Check the mail settings and try again.', 500, 'RETRY_FAILED');
+        Response::error($result['message'], 422, 'RETRY_FAILED');
+    }
+
+    /**
+     * POST /api/v1/admin/notifications/outbox/process
+     * Deliver queued emails now (the same work as scripts/process_outbox.php, one batch).
+     */
+    public function processOutbox(): void
+    {
+        $summary = MailService::getInstance()->processQueue(50);
+        AuditService::record($this->adminId(), 'email.process_queue', 'email_outbox', null, null, $summary);
+        $remaining = (int) ($this->db->fetchOne("SELECT COUNT(*) AS c FROM `email_outbox` WHERE `status` = 'pending'")['c'] ?? 0);
+        Response::success($summary + ['still_pending' => $remaining], $summary['processed'] === 0
+            ? 'Nothing was due to send.'
+            : "Processed {$summary['processed']}: {$summary['sent']} sent, {$summary['retrying']} will retry, {$summary['failed']} failed.");
     }
 
     // =========================================================================
@@ -890,7 +905,7 @@ class AdminOperationsController
 
     public static function mailMode(): string
     {
-        return strtolower((string) Env::get('MAIL_MAILER', 'log')) === 'smtp' && Env::get('MAIL_HOST', '') !== '' ? 'smtp' : 'log_only';
+        return MailService::mode();
     }
 
     // =========================================================================
@@ -927,6 +942,8 @@ class AdminOperationsController
                 'mode' => self::mailMode(),
                 'outbox_pending' => (int) ($outbox['pending'] ?? 0),
                 'outbox_failed' => (int) ($outbox['failed'] ?? 0),
+                // A due email older than ~15 minutes means process_outbox.php is not scheduled.
+                'oldest_due_minutes' => ($oldest = $this->db->fetchOne("SELECT TIMESTAMPDIFF(MINUTE, MIN(`created_at`), NOW()) AS m FROM `email_outbox` WHERE `status` = 'pending' AND (`next_attempt_at` IS NULL OR `next_attempt_at` <= NOW())")) && $oldest['m'] !== null ? (int) $oldest['m'] : null,
             ],
             'orders' => [
                 'needs_attention' => $count("SELECT COUNT(*) AS c FROM `orders` WHERE `requires_attention` = 1"),
@@ -997,33 +1014,21 @@ class AdminOperationsController
         }
 
         $frontend = Env::frontendUrl();
-        $this->db->transaction(function (Database $db) use ($recipients, $subject, $content, $frontend): void {
+        $mail = MailService::getInstance();
+        $this->db->transaction(function () use ($mail, $recipients, $subject, $content, $frontend): void {
             foreach ($recipients as $r) {
-                $db->execute(
-                    "INSERT INTO `email_outbox` (`recipient_email`, `subject`, `template`, `payload`, `status`)
-                     VALUES (?, ?, 'marketing_broadcast', ?, 'pending')",
-                    'sss',
-                    [
-                        $r['email'],
-                        $subject,
-                        json_encode([
-                            'subject' => $subject,
-                            'content' => $content,
-                            'unsubscribe_url' => $frontend . '/unsubscribe?token=' . $r['unsubscribe_token'],
-                        ]),
-                    ]
-                );
+                $mail->queueBroadcast($r['email'], $subject, $content, $frontend . '/unsubscribe?token=' . $r['unsubscribe_token']);
             }
         });
 
-        AuditService::record($this->adminId(), 'marketing.broadcast_queued', 'email_campaign', null, null, [
+        AuditService::record($this->adminId(), 'marketing.broadcast', 'email_campaign', null, null, [
             'subject' => $subject,
             'recipient_count' => count($recipients),
         ]);
 
         Response::success(
             ['queued_count' => count($recipients), 'mail_mode' => self::mailMode()],
-            'Broadcast queued for ' . count($recipients) . ' subscribers.'
+            'Queued for ' . count($recipients) . ' subscribers. The outbox worker sends them in batches.'
         );
     }
 
@@ -1143,7 +1148,7 @@ class AdminOperationsController
         AuditService::record(
             $adminId,
             $passwordChanged ? 'admin.password_change' : 'admin.profile_update',
-            'user',
+            'admin',
             (string) $adminId,
             ['full_name' => $user['full_name'], 'phone' => $user['phone']],
             ['full_name' => $fullName, 'phone' => $phone]

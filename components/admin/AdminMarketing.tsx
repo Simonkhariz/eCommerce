@@ -125,7 +125,7 @@ export function AdminMarketing() {
           ) : (
             <p className="text-xs text-[#6b7280]">
               Goes to {data ? activeCount.toLocaleString() : '…'} active subscriber{activeCount === 1 ? '' : 's'}; every email includes an
-              unsubscribe link. Broadcasts are queued in the email outbox.
+              unsubscribe link. Emails are queued and sent in batches by the email worker (or “Send queued now” on the Email outbox page).
             </p>
           )}
 

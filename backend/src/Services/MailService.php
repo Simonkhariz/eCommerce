@@ -9,28 +9,36 @@ use App\Database\Database;
 use Throwable;
 
 /**
- * MailService handles store lifecycle email notifications, templating,
- * SMTP dispatch, safe local development mail logging, and outbox deduplication.
+ * Store email, outbox first.
+ *
+ * Every email is a row in `email_outbox` whose payload holds everything needed to render it
+ * (MailTemplates). Transactional emails get one immediate delivery attempt (they are queued from
+ * afterCommit callbacks, so never inside an open transaction); anything that fails, and every
+ * newsletter, is delivered by backend/scripts/process_outbox.php with retries and backoff.
+ *
+ * Status is honest: 'sent' only when the SMTP server accepted the message or, in log mode, when it
+ * was written to storage/logs/mail.log (transport = 'log', shown as "logged only" in the admin).
+ *
+ * Sign-in links are the exception: the raw token is never stored, so they are delivered
+ * immediately and the outbox row keeps only a fingerprint (they cannot be re-sent).
  */
 class MailService
 {
+    public const MAX_ATTEMPTS = 5;
+    /** Minutes to wait after attempt N fails (index = attempts so far). */
+    private const BACKOFF_MINUTES = [1 => 1, 2 => 5, 3 => 15, 4 => 60];
+    /** How long a worker owns a row while delivering it. */
+    private const LEASE_MINUTES = 10;
+
     private static ?MailService $instance = null;
     private Database $db;
     private string $logPath;
-    private string $frontendUrl;
+    private ?MailTemplates $templates = null;
 
     public function __construct(?Database $db = null)
     {
         $this->db = $db ?? Database::getInstance();
-        $this->frontendUrl = Env::frontendUrl();
-        $this->logPath = defined('BASE_PATH')
-            ? BASE_PATH . '/storage/logs/mail.log'
-            : dirname(__DIR__, 2) . '/storage/logs/mail.log';
-
-        $dir = dirname($this->logPath);
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0755, true);
-        }
+        $this->logPath = (defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 2)) . '/storage/logs/mail.log';
     }
 
     public static function getInstance(): self
@@ -41,737 +49,484 @@ class MailService
         return self::$instance;
     }
 
-    /**
-     * Dispatch notification for order placed (pending payment).
-     */
+    /** Templates are built once per request (they read the store settings). */
+    private function templates(): MailTemplates
+    {
+        return $this->templates ??= new MailTemplates($this->db);
+    }
+
+    public static function mode(): string
+    {
+        return SmtpTransport::isConfigured() ? 'smtp' : 'log_only';
+    }
+
+    // =========================================================================
+    // Order emails (called from afterCommit callbacks)
+    // =========================================================================
+
     public function sendOrderReceived(array $order): bool
     {
-        $recipient = trim((string) ($order['guest_email'] ?? $order['email'] ?? ''));
-        if (empty($recipient) || !filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+        $payload = $this->orderPayload((string) ($order['order_number'] ?? ''));
+        if ($payload === null) {
             return false;
         }
-
-        $orderNumber = (string) ($order['order_number'] ?? 'ORD-UNKNOWN');
-        $subject = "Order Confirmation: #{$orderNumber} - Awaiting Payment";
-
-        $html = $this->renderOrderReceivedHtml($order);
-        $text = $this->renderOrderReceivedText($order);
-
-        $payload = [
-            'order_number' => $orderNumber,
-            'grand_total' => $order['grand_total'] ?? 0,
-            'currency' => $order['currency'] ?? 'NGN',
-            'order_status' => $order['order_status'] ?? 'pending_payment',
-        ];
-
-        return $this->send($recipient, $subject, 'order_received', $payload, $html, $text, $orderNumber);
+        return $this->queue($payload['recipient'], 'order_received', $payload['data'], 'order_received:' . $payload['data']['order_number']);
     }
 
     /**
-     * Dispatch notification for verified payment.
-     * STRICT ENFORCEMENT: Never send a paid email before verification.
+     * Receipt. Only for orders whose payment is verified (guard kept from the original design).
      */
     public function sendPaymentVerified(array $order, array $paymentDetails = []): bool
     {
-        // Enforce payment status validation
-        $orderPaymentStatus = strtolower(trim((string) ($order['payment_status'] ?? '')));
-        $orderStatus = strtolower(trim((string) ($order['order_status'] ?? '')));
-
-        if ($orderPaymentStatus !== 'successful' && $orderStatus !== 'paid') {
-            error_log("[MailService Guard] Refused to send payment_verified email for order {$order['order_number']} because payment is not verified.");
+        $payload = $this->orderPayload((string) ($order['order_number'] ?? ''));
+        if ($payload === null) {
+            return false;
+        }
+        $data = $payload['data'];
+        if (!in_array($data['payment_status'], ['successful', 'partially_refunded'], true)) {
+            error_log("[MailService] Refused payment_verified email for {$data['order_number']}: payment is not verified.");
             return false;
         }
 
-        $recipient = trim((string) ($order['guest_email'] ?? $order['email'] ?? ''));
-        if (empty($recipient) || !filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
-            return false;
-        }
+        $payment = $this->db->fetchOne(
+            "SELECT `provider`, `provider_reference`, `amount`, `amount_received`, `payment_method`, `verified_at`
+             FROM `payments` WHERE `order_id` = ? AND `status` IN ('successful', 'partially_refunded')
+             ORDER BY `verified_at` ASC, `id` ASC LIMIT 1",
+            'i',
+            [$data['order_id']]
+        );
+        $provider = (string) ($payment['provider'] ?? '');
+        $label = ['kora' => 'Kora', 'monnify' => 'Monnify', 'whatsapp' => 'Bank transfer', 'manual' => 'Bank transfer'][$provider] ?? ucfirst($provider);
+        $method = trim(str_replace('_', ' ', (string) ($payment['payment_method'] ?? '')));
 
-        $orderNumber = (string) ($order['order_number'] ?? 'ORD-UNKNOWN');
-        $subject = "Payment Verified & Receipt: Order #{$orderNumber}";
+        $data['payment_reference'] = (string) ($payment['provider_reference'] ?? $paymentDetails['reference'] ?? '');
+        $data['payment_label'] = trim($label . ($method !== '' && strcasecmp($method, $label) !== 0 ? ' · ' . $method : ''));
+        $data['amount_paid'] = (float) ($payment['amount_received'] ?? $payment['amount'] ?? $data['grand_total']);
+        $data['verified_at'] = $payment['verified_at'] ?? null;
 
-        $html = $this->renderPaymentVerifiedHtml($order, $paymentDetails);
-        $text = $this->renderPaymentVerifiedText($order, $paymentDetails);
-
-        $payload = [
-            'order_number' => $orderNumber,
-            'payment_reference' => $paymentDetails['reference'] ?? $paymentDetails['provider_reference'] ?? 'VERIFIED',
-            'amount' => $order['grand_total'] ?? 0,
-            'currency' => $order['currency'] ?? 'NGN',
-            'payment_method' => $paymentDetails['payment_method'] ?? 'Online Payment',
-            'verified_at' => date('Y-m-d H:i:s'),
-        ];
-
-        return $this->send($recipient, $subject, 'payment_verified', $payload, $html, $text, $orderNumber);
+        return $this->queue($payload['recipient'], 'payment_verified', $data, 'payment_verified:' . $data['order_number']);
     }
 
-    /**
-     * Dispatch notification for shipment / carrier tracking update.
-     */
     public function sendShipmentTracking(array $order, array $shipment): bool
     {
-        $recipient = trim((string) ($order['guest_email'] ?? $order['email'] ?? ''));
-        if (empty($recipient) || !filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+        $payload = $this->orderPayload((string) ($order['order_number'] ?? ''));
+        if ($payload === null) {
             return false;
         }
+        $data = $payload['data'];
+        $data['carrier'] = (string) ($shipment['carrier'] ?? '');
+        $data['tracking_number'] = (string) ($shipment['tracking_number'] ?? '');
+        $data['tracking_url'] = (string) ($shipment['tracking_url'] ?? '');
 
-        $orderNumber = (string) ($order['order_number'] ?? 'ORD-UNKNOWN');
-        $subject = "Your Order #{$orderNumber} Has Shipped! Tracking Details Inside";
-
-        $html = $this->renderShipmentTrackingHtml($order, $shipment);
-        $text = $this->renderShipmentTrackingText($order, $shipment);
-
-        $payload = [
-            'order_number' => $orderNumber,
-            'carrier' => $shipment['carrier'] ?? 'Logistics Carrier',
-            'tracking_number' => $shipment['tracking_number'] ?? null,
-            'tracking_url' => $shipment['tracking_url'] ?? null,
-            'shipment_status' => $shipment['status'] ?? 'shipped',
-        ];
-
-        return $this->send($recipient, $subject, 'shipment_tracking', $payload, $html, $text, $orderNumber);
+        return $this->queue(
+            $payload['recipient'],
+            'shipment_tracking',
+            $data,
+            'shipment_tracking:' . $data['order_number'] . ':' . $data['tracking_number']
+        );
     }
 
     /**
-     * Dispatch notification for order cancellation or refund.
+     * @param string $type 'cancellation' or 'refund'
+     * @param array{reason?: string, amount?: float|string, refund_id?: int, reference?: string|null} $extra
      */
     public function sendCancellationOrRefund(array $order, string $type, array $extra = []): bool
     {
-        $recipient = trim((string) ($order['guest_email'] ?? $order['email'] ?? ''));
-        if (empty($recipient) || !filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+        $payload = $this->orderPayload((string) ($order['order_number'] ?? ''));
+        if ($payload === null) {
             return false;
         }
+        $data = $payload['data'];
+        $data['reason'] = trim((string) ($extra['reason'] ?? ''));
 
-        $orderNumber = (string) ($order['order_number'] ?? 'ORD-UNKNOWN');
-        $isRefund = ($type === 'refund');
-        $subject = $isRefund
-            ? "Refund Processed: Order #{$orderNumber}"
-            : "Order Cancelled: #{$orderNumber}";
+        if ($type === 'refund') {
+            $data['amount'] = (float) ($extra['amount'] ?? 0);
+            $data['refund_reference'] = (string) ($extra['reference'] ?? '');
+            $key = 'refund_processed:' . $data['order_number'] . ':' . ($extra['refund_id'] ?? md5(json_encode($extra)));
+            return $this->queue($payload['recipient'], 'refund_processed', $data, $key);
+        }
 
-        $html = $this->renderCancellationRefundHtml($order, $type, $extra);
-        $text = $this->renderCancellationRefundText($order, $type, $extra);
+        $paid = $this->db->fetchOne(
+            "SELECT COALESCE(SUM(`amount`), 0) AS paid FROM `payments`
+             WHERE `order_id` = ? AND `status` IN ('successful', 'partially_refunded')",
+            'i',
+            [$data['order_id']]
+        );
+        $data['was_paid'] = (float) ($paid['paid'] ?? 0) > 0;
+        $data['amount_paid'] = (float) ($paid['paid'] ?? 0);
 
-        $payload = [
-            'order_number' => $orderNumber,
-            'type' => $type,
-            'reason' => $extra['reason'] ?? 'Requested by customer or store admin',
-            'amount' => $extra['amount'] ?? $order['grand_total'] ?? 0,
-            'currency' => $order['currency'] ?? 'NGN',
-            'reference' => $extra['reference'] ?? null,
-        ];
-
-        return $this->send($recipient, $subject, 'cancellation_refund', $payload, $html, $text, $orderNumber . '-' . $type);
+        return $this->queue($payload['recipient'], 'order_cancelled', $data, 'order_cancelled:' . $data['order_number']);
     }
 
-    /**
-     * Dispatch account verification / magic link notification.
-     */
-    public function sendAccountVerification(string $email, string $tokenOrLink, string $type = 'magic_link'): bool
+    // =========================================================================
+    // Sign-in links (delivered immediately; the token is never stored)
+    // =========================================================================
+
+    public function sendAccountVerification(string $email, string $rawToken, string $type = 'magic_link'): bool
     {
-        $email = trim(strtolower($email));
-        if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $email = strtolower(trim($email));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             return false;
         }
 
-        $subject = ($type === 'magic_link')
-            ? 'Your Shop.co Sign-In Magic Link'
-            : 'Verify Your Shop.co Account';
+        $link = Env::frontendUrl() . '/auth/verify?token=' . rawurlencode($rawToken);
+        $templates = $this->templates();
+        $rendered = $templates->render('magic_link', ['link' => $link, 'ttl_minutes' => 15]);
+        $fingerprint = substr(hash('sha256', $rawToken), 0, 12);
 
-        $html = $this->renderAccountVerificationHtml($email, $tokenOrLink, $type);
-        $text = $this->renderAccountVerificationText($email, $tokenOrLink, $type);
-
-        // Never persist the raw sign-in token in the outbox (admins can read it); keep a fingerprint only.
-        $fingerprint = substr(hash('sha256', $tokenOrLink), 0, 12);
-        $payload = [
-            'type' => $type,
-            'token_fingerprint' => $fingerprint,
-        ];
-
-        // Dedup per token, so requesting a fresh link always delivers the fresh link.
-        return $this->send($email, $subject, 'account_verification', $payload, $html, $text, $email . '-' . $type . '-' . $fingerprint);
-    }
-
-    /**
-     * Core sending method with deduplication, outbox tracking, and SMTP / Mail Log dispatch.
-     */
-    public function send(
-        string $recipientEmail,
-        string $subject,
-        string $template,
-        array $payload,
-        string $htmlBody,
-        string $textBody,
-        string $dedupKey = ''
-    ): bool {
-        $recipientEmail = trim(strtolower($recipientEmail));
-
-        // 1. Deduplication check (within last 5 minutes)
-        if ($dedupKey !== '') {
-            $dedupPattern = '%"dedup_key":"' . $dedupKey . '"%';
-            $existing = $this->db->fetchOne(
-                "SELECT `id`, `status`, `created_at` FROM `email_outbox`
-                 WHERE `recipient_email` = ? AND `template` = ? AND `payload` LIKE ?
-                   AND `created_at` >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
-                 LIMIT 1",
-                'sss',
-                [$recipientEmail, $template, $dedupPattern]
-            );
-
-            if ($existing !== null) {
-                error_log("[MailService] Deduplication triggered: skipped duplicate {$template} email to {$recipientEmail} (Dedup key: {$dedupKey}).");
-                return true;
-            }
-
-            // Include dedup_key inside payload for future checks
-            $payload['dedup_key'] = $dedupKey;
-        }
-
-        $jsonPayload = json_encode($payload, JSON_UNESCAPED_SLASHES);
-
-        // 2. Determine Mail Delivery Provider
-        $mailHost = trim((string) Env::get('MAIL_HOST', ''));
-        $mailMailer = trim(strtolower((string) Env::get('MAIL_MAILER', 'log')));
-
-        $sentSuccessfully = false;
-        $deliveryNote = null;
-        $errorMessage = null;
-
-        if ($mailMailer === 'smtp' && $mailHost !== '' && $mailHost !== '127.0.0.1') {
-            try {
-                $sentSuccessfully = $this->sendViaSmtp($recipientEmail, $subject, $htmlBody, $textBody);
-                $deliveryNote = "Sent via SMTP host {$mailHost}";
-            } catch (Throwable $e) {
-                $errorMessage = "SMTP delivery error: " . $e->getMessage();
-                error_log("[MailService SMTP Failure] " . $errorMessage);
-                // Safe failover to local development mail log
-                $this->writeToDevMailLog($recipientEmail, $subject, $template, $htmlBody, $textBody, $errorMessage);
-                $deliveryNote = "SMTP failed. Safely written to local storage/logs/mail.log";
-                $sentSuccessfully = true; // Recorded safely in dev log
-            }
-        } else {
-            // Local development mode: Write safely to development mail log
-            try {
-                $this->writeToDevMailLog($recipientEmail, $subject, $template, $htmlBody, $textBody);
-                $deliveryNote = "Logged to local dev mail file (storage/logs/mail.log)";
-                $sentSuccessfully = true;
-            } catch (Throwable $e) {
-                $errorMessage = "Failed to write dev mail log: " . $e->getMessage();
-                error_log("[MailService DevLog Failure] " . $errorMessage);
-                $sentSuccessfully = false;
-            }
-        }
-
-        // 3. Persist record in email_outbox table
-        $status = $sentSuccessfully ? 'sent' : 'failed';
-        $lastError = $errorMessage ? $errorMessage : ($deliveryNote ? "[DEV_LOG] {$deliveryNote}" : null);
+        [$ok, $transport, $error] = $this->transmit($email, $rendered, $templates->storeName(), 'magic_link');
 
         try {
             $this->db->insert(
-                "INSERT INTO `email_outbox` (`recipient_email`, `subject`, `template`, `payload`, `status`, `attempt_count`, `last_error`, `created_at`, `sent_at`)
-                 VALUES (?, ?, ?, ?, ?, 1, ?, NOW(), ?)",
-                'sssssss',
+                "INSERT INTO `email_outbox` (`recipient_email`, `subject`, `template`, `dedup_key`, `payload`, `status`, `transport`, `attempt_count`, `last_error`, `sent_at`)
+                 VALUES (?, ?, 'magic_link', ?, ?, ?, ?, 1, ?, ?)",
+                'ssssssss',
                 [
-                    $recipientEmail,
-                    $subject,
-                    $template,
-                    $jsonPayload,
-                    $status,
-                    $lastError,
-                    $sentSuccessfully ? date('Y-m-d H:i:s') : null,
+                    $email,
+                    $rendered['subject'],
+                    'magic_link:' . $fingerprint,
+                    json_encode(['v' => MailTemplates::VERSION, 'type' => $type, 'token_fingerprint' => $fingerprint]),
+                    $ok ? 'sent' : 'failed',
+                    $transport,
+                    $error,
+                    $ok ? date('Y-m-d H:i:s') : null,
                 ]
             );
         } catch (Throwable $e) {
-            error_log("[MailService Outbox Insert Failure] " . $e->getMessage());
+            error_log('[MailService] Could not record sign-in email: ' . $e->getMessage());
         }
 
-        return $sentSuccessfully;
+        return $ok;
     }
 
+    // =========================================================================
+    // Newsletter
+    // =========================================================================
+
     /**
-     * Retry an item from the email_outbox.
+     * Queue one newsletter email (delivered by the outbox worker, never inline).
      */
-    public function retryOutboxItem(int $outboxId): bool
+    public function queueBroadcast(string $email, string $subject, string $content, string $unsubscribeUrl): void
     {
-        $item = $this->db->fetchOne("SELECT * FROM `email_outbox` WHERE `id` = ?", 'i', [$outboxId]);
-        if (!$item) {
+        $this->queue($email, 'marketing_broadcast', [
+            'subject' => $subject,
+            'content' => $content,
+            'unsubscribe_url' => $unsubscribeUrl,
+        ], null, false);
+    }
+
+    // =========================================================================
+    // Outbox
+    // =========================================================================
+
+    /**
+     * Insert an outbox row (skipping exact duplicates) and optionally try to deliver it now.
+     * Returns false only when the email could not be queued at all.
+     */
+    public function queue(string $recipient, string $template, array $data, ?string $dedupKey, bool $deliverNow = true): bool
+    {
+        $recipient = strtolower(trim($recipient));
+        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
             return false;
         }
 
-        $payload = json_decode((string) $item['payload'], true) ?: [];
-        $recipient = $item['recipient_email'];
-        $subject = $item['subject'];
-        $template = $item['template'];
-
-        // Reconstruct basic body
-        $html = "<div style='font-family:sans-serif;'><h3>{$subject}</h3><pre>" . htmlspecialchars(json_encode($payload, JSON_PRETTY_PRINT)) . "</pre></div>";
-        $text = "{$subject}\n\n" . json_encode($payload, JSON_PRETTY_PRINT);
-
-        $success = $this->send($recipient, $subject, $template, $payload, $html, $text);
-
-        if ($success) {
-            $this->db->executeUpdate(
-                "UPDATE `email_outbox` SET `status` = 'sent', `attempt_count` = `attempt_count` + 1, `sent_at` = NOW(), `last_error` = 'Retried successfully' WHERE `id` = ?",
-                'i',
-                [$outboxId]
-            );
-        } else {
-            $this->db->executeUpdate(
-                "UPDATE `email_outbox` SET `attempt_count` = `attempt_count` + 1 WHERE `id` = ?",
-                'i',
-                [$outboxId]
-            );
-        }
-
-        return $success;
-    }
-
-    /**
-     * Write formatted email to local development log file.
-     */
-    private function writeToDevMailLog(
-        string $recipient,
-        string $subject,
-        string $template,
-        string $htmlBody,
-        string $textBody,
-        ?string $errorNote = null
-    ): void {
-        $from = Env::get('MAIL_FROM_ADDRESS', 'orders@shop.co');
-        $fromName = Env::get('MAIL_FROM_NAME', 'SHOP.CO');
-        $timestamp = date('Y-m-d H:i:s');
-
-        $separator = str_repeat('=', 80);
-        $subSeparator = str_repeat('-', 80);
-
-        $logContent = <<<LOG
-{$separator}
-[SHOP.CO DEV EMAIL DISPATCH] {$timestamp}
-To: {$recipient}
-From: "{$fromName}" <{$from}>
-Subject: {$subject}
-Template: {$template}
-Status: RECORDED TO DEV MAIL LOG
-LOG;
-
-        if ($errorNote) {
-            $logContent .= "\nWarning: {$errorNote}";
-        }
-
-        $logContent .= <<<LOG
-
-{$subSeparator}
-[PLAIN TEXT VERSION]
-{$textBody}
-{$subSeparator}
-[HTML VERSION]
-{$htmlBody}
-{$separator}
-
-LOG;
-
-        file_put_contents($this->logPath, $logContent, FILE_APPEND | LOCK_EX);
-    }
-
-    /**
-     * Send email via SMTP socket.
-     */
-    private function sendViaSmtp(string $recipient, string $subject, string $htmlBody, string $textBody): bool
-    {
-        $host = (string) Env::get('MAIL_HOST');
-        $port = (int) Env::get('MAIL_PORT', 587);
-        $username = (string) Env::get('MAIL_USERNAME', '');
-        $password = (string) Env::get('MAIL_PASSWORD', '');
-        $encryption = strtolower((string) Env::get('MAIL_ENCRYPTION', 'tls'));
-        $from = (string) Env::get('MAIL_FROM_ADDRESS', 'orders@shop.co');
-        $fromName = (string) Env::get('MAIL_FROM_NAME', 'SHOP.CO');
-
-        $socket = @fsockopen(($encryption === 'ssl' ? 'ssl://' . $host : $host), $port, $errno, $errstr, 15);
-        if (!$socket) {
-            throw new \RuntimeException("Could not connect to SMTP server {$host}:{$port} ({$errno}: {$errstr})");
-        }
-
-        $read = function () use ($socket): string {
-            $response = '';
-            while ($line = fgets($socket, 515)) {
-                $response .= $line;
-                if (substr($line, 3, 1) === ' ') {
-                    break;
+        try {
+            if ($dedupKey !== null) {
+                $existing = $this->db->fetchOne("SELECT `id` FROM `email_outbox` WHERE `dedup_key` = ? LIMIT 1", 's', [$dedupKey]);
+                if ($existing !== null) {
+                    return true;
                 }
             }
-            return $response;
-        };
 
-        $write = function (string $cmd) use ($socket, $read): string {
-            fputs($socket, $cmd . "\r\n");
-            return $read();
-        };
+            $data['v'] = MailTemplates::VERSION;
+            $subject = $this->templates()->render($template, $data)['subject'];
 
-        $read(); // Initial greeting
-
-        $write("EHLO " . gethostname());
-
-        if ($encryption === 'tls') {
-            $write("STARTTLS");
-            stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
-            $write("EHLO " . gethostname());
+            $id = (int) $this->db->insert(
+                "INSERT INTO `email_outbox` (`recipient_email`, `subject`, `template`, `dedup_key`, `payload`, `status`, `attempt_count`)
+                 VALUES (?, ?, ?, ?, ?, 'pending', 0)",
+                'sssss',
+                [$recipient, mb_substr($subject, 0, 255), $template, $dedupKey, json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]
+            );
+        } catch (Throwable $e) {
+            error_log("[MailService] Could not queue {$template} for {$recipient}: " . $e->getMessage());
+            return false;
         }
 
-        if ($username !== '' && $password !== '') {
-            $write("AUTH LOGIN");
-            $write(base64_encode($username));
-            $write(base64_encode($password));
+        if ($deliverNow && !$this->db->inTransaction() && filter_var(Env::get('MAIL_SEND_IMMEDIATELY', 'true'), FILTER_VALIDATE_BOOLEAN)) {
+            $this->deliver($id);
         }
-
-        $write("MAIL FROM: <{$from}>");
-        $write("RCPT TO: <{$recipient}>");
-        $write("DATA");
-
-        $boundary = '=_ShopCo_' . md5(uniqid((string) time(), true));
-        $headers = [
-            "From: \"{$fromName}\" <{$from}>",
-            "To: <{$recipient}>",
-            "Subject: {$subject}",
-            "MIME-Version: 1.0",
-            "Content-Type: multipart/alternative; boundary=\"{$boundary}\"",
-            "Date: " . date('r'),
-        ];
-
-        $message = implode("\r\n", $headers) . "\r\n\r\n";
-        $message .= "--{$boundary}\r\n";
-        $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
-        $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-        $message .= $textBody . "\r\n\r\n";
-        $message .= "--{$boundary}\r\n";
-        $message .= "Content-Type: text/html; charset=UTF-8\r\n";
-        $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-        $message .= $htmlBody . "\r\n\r\n";
-        $message .= "--{$boundary}--\r\n.";
-
-        $response = $write($message);
-        $write("QUIT");
-        fclose($socket);
-
-        return str_contains($response, '250') || str_contains($response, 'OK');
+        return true;
     }
 
-    // -------------------------------------------------------------------------
-    // HTML & Text Template Renderers
-    // -------------------------------------------------------------------------
-
-    private function renderOrderReceivedHtml(array $order): string
+    /**
+     * Deliver one outbox row if it is due and nobody else is delivering it.
+     *
+     * @return array{id: int, status: string, error: string|null}|null null when the row was not due / claimed
+     */
+    public function deliver(int $id): ?array
     {
-        $num = htmlspecialchars((string) ($order['order_number'] ?? ''));
-        $total = number_format((float) ($order['grand_total'] ?? 0), 2);
-        $currency = htmlspecialchars((string) ($order['currency'] ?? 'NGN'));
-        $subtotal = number_format((float) ($order['subtotal'] ?? 0), 2);
-        $shipping = number_format((float) ($order['shipping_fee'] ?? 0), 2);
-        $discount = number_format((float) ($order['discount_amount'] ?? 0), 2);
+        // Claim the row: the conditional update doubles as a lease so two workers never send it twice.
+        $claimed = $this->db->executeUpdate(
+            "UPDATE `email_outbox`
+             SET `next_attempt_at` = DATE_ADD(NOW(), INTERVAL " . self::LEASE_MINUTES . " MINUTE)
+             WHERE `id` = ? AND `status` = 'pending' AND (`next_attempt_at` IS NULL OR `next_attempt_at` <= NOW())",
+            'i',
+            [$id]
+        );
+        if ($claimed !== 1) {
+            return null;
+        }
 
-        $address = is_array($order['shipping_address'] ?? null) ? $order['shipping_address'] : [];
-        $recipientName = htmlspecialchars($address['full_name'] ?? 'Valued Customer');
-        $street = htmlspecialchars($address['address_line1'] ?? '');
-        $cityState = htmlspecialchars(($address['city'] ?? '') . ', ' . ($address['state'] ?? ''));
+        $row = $this->db->fetchOne("SELECT * FROM `email_outbox` WHERE `id` = ?", 'i', [$id]);
+        $payload = json_decode((string) ($row['payload'] ?? ''), true);
+        $template = (string) $row['template'];
 
-        $itemsHtml = '';
-        if (!empty($order['items']) && is_array($order['items'])) {
-            foreach ($order['items'] as $item) {
-                $name = htmlspecialchars($item['name'] ?? $item['item_name'] ?? 'Product');
-                $qty = (int) ($item['quantity'] ?? 1);
-                $lineTotal = number_format((float) ($item['line_total'] ?? ($item['unit_price'] ?? 0) * $qty), 2);
-                $itemsHtml .= "<tr>
-                    <td style='padding:8px 0; border-bottom:1px solid #f0f0f0;'>{$name} x {$qty}</td>
-                    <td style='padding:8px 0; border-bottom:1px solid #f0f0f0; text-align:right;'>{$currency} {$lineTotal}</td>
-                </tr>";
+        if (!is_array($payload) || (int) ($payload['v'] ?? 0) !== MailTemplates::VERSION || !in_array($template, MailTemplates::RENDERABLE, true)) {
+            return $this->finish($id, 'failed', null, 'This email was queued by an older version of the store and cannot be rendered.', false);
+        }
+
+        if ($template === 'marketing_broadcast') {
+            $sub = $this->db->fetchOne("SELECT `status` FROM `newsletter_subscribers` WHERE `email` = ?", 's', [$row['recipient_email']]);
+            if (($sub['status'] ?? null) !== 'active') {
+                return $this->finish($id, 'failed', null, 'Not sent: the recipient unsubscribed before delivery.', false);
             }
         }
 
-        return <<<HTML
-<!DOCTYPE html>
-<html>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background-color:#f9fafb; margin:0; padding:24px; color:#111827;">
-    <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:16px; border:1px solid #e5e7eb; overflow:hidden;">
-        <div style="background:#000000; padding:24px; text-align:center;">
-            <h1 style="color:#ffffff; margin:0; font-size:24px; letter-spacing:1px; font-weight:800;">SHOP.CO</h1>
-        </div>
-        <div style="padding:32px;">
-            <div style="display:inline-block; background:#fffbeb; color:#b45309; padding:4px 12px; border-radius:9999px; font-size:12px; font-weight:700; margin-bottom:16px;">
-                STATUS: PENDING PAYMENT
-            </div>
-            <h2 style="margin:0 0 8px 0; font-size:20px;">Thank You, {$recipientName}!</h2>
-            <p style="color:#4b5563; font-size:14px; line-height:1.5; margin:0 0 20px 0;">
-                Your order <strong>#{$num}</strong> has been received and your items have been reserved.
-                Please complete your payment via Monnify, Kora, or WhatsApp agent to initiate fulfillment.
-            </p>
+        try {
+            $templates = $this->templates();
+            $rendered = $templates->render($template, $payload);
+        } catch (Throwable $e) {
+            error_log("[MailService] Render failed for outbox #{$id}: " . $e->getMessage());
+            return $this->finish($id, 'failed', null, 'The email could not be rendered.', false);
+        }
 
-            <table style="width:100%; border-collapse:collapse; margin-bottom:20px; font-size:14px;">
-                <thead>
-                    <tr style="border-bottom:2px solid #e5e7eb; text-align:left; color:#6b7280;">
-                        <th style="padding-bottom:8px;">Item</th>
-                        <th style="padding-bottom:8px; text-align:right;">Subtotal</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {$itemsHtml}
-                </tbody>
-            </table>
+        [$ok, $transport, $error] = $this->transmit((string) $row['recipient_email'], $rendered, $templates->storeName(), $template, $payload);
 
-            <div style="background:#f3f4f6; border-radius:12px; padding:16px; margin-bottom:24px; font-size:13px;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span style="color:#6b7280;">Subtotal:</span>
-                    <span>{$currency} {$subtotal}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span style="color:#6b7280;">Discount:</span>
-                    <span style="color:#15803d;">-{$currency} {$discount}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
-                    <span style="color:#6b7280;">Delivery Fee:</span>
-                    <span>{$currency} {$shipping}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:700; border-top:1px solid #e5e7eb; padding-top:8px;">
-                    <span>Total Due:</span>
-                    <span>{$currency} {$total}</span>
-                </div>
-            </div>
+        if ($ok) {
+            return $this->finish($id, 'sent', $transport, null, true);
+        }
 
-            <div style="font-size:13px; color:#4b5563; margin-bottom:24px;">
-                <strong>Delivery Address:</strong><br/>
-                {$recipientName}<br/>
-                {$street}<br/>
-                {$cityState}
-            </div>
+        $attempts = (int) $row['attempt_count'] + 1;
+        if ($attempts >= self::MAX_ATTEMPTS) {
+            return $this->finish($id, 'failed', $transport, $error, true);
+        }
 
-            <div style="text-align:center;">
-                <a href="{$this->frontendUrl}/track-order?orderNumber={$num}" style="display:inline-block; background:#000000; color:#ffffff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:600; font-size:14px;">
-                    View Order & Complete Payment
-                </a>
-            </div>
-        </div>
-        <div style="background:#f9fafb; border-top:1px solid #e5e7eb; padding:16px; text-align:center; font-size:12px; color:#9ca3af;">
-            SHOP.CO Luxury Fashion & Lifestyle · Enugu & Lagos, Nigeria
-        </div>
-    </div>
-</body>
-</html>
-HTML;
+        $this->db->executeUpdate(
+            "UPDATE `email_outbox`
+             SET `attempt_count` = ?, `last_error` = ?, `transport` = ?,
+                 `next_attempt_at` = DATE_ADD(NOW(), INTERVAL ? MINUTE)
+             WHERE `id` = ?",
+            'issii',
+            [$attempts, $error, $transport, self::BACKOFF_MINUTES[$attempts] ?? 60, $id]
+        );
+        return ['id' => $id, 'status' => 'pending', 'error' => $error];
     }
 
-    private function renderOrderReceivedText(array $order): string
+    /**
+     * Deliver due rows (oldest first). Used by scripts/process_outbox.php and the admin "Send now".
+     *
+     * @return array{processed: int, sent: int, failed: int, retrying: int}
+     */
+    public function processQueue(int $limit = 50): array
     {
-        $num = $order['order_number'] ?? '';
-        $total = number_format((float) ($order['grand_total'] ?? 0), 2);
-        $curr = $order['currency'] ?? 'NGN';
-        return "SHOP.CO - Order Confirmation\nOrder #{$num}\nTotal Due: {$curr} {$total}\nStatus: Pending Payment\nTrack & Pay: {$this->frontendUrl}/track-order?orderNumber={$num}";
+        $ids = array_column($this->db->fetchAll(
+            "SELECT `id` FROM `email_outbox`
+             WHERE `status` = 'pending' AND (`next_attempt_at` IS NULL OR `next_attempt_at` <= NOW())
+             ORDER BY `id` ASC LIMIT ?",
+            'i',
+            [max(1, min(500, $limit))]
+        ), 'id');
+
+        $summary = ['processed' => 0, 'sent' => 0, 'failed' => 0, 'retrying' => 0];
+        foreach ($ids as $id) {
+            $result = $this->deliver((int) $id);
+            if ($result === null) {
+                continue;
+            }
+            $summary['processed']++;
+            $key = $result['status'] === 'sent' ? 'sent' : ($result['status'] === 'failed' ? 'failed' : 'retrying');
+            $summary[$key]++;
+        }
+        return $summary;
     }
 
-    private function renderPaymentVerifiedHtml(array $order, array $payment): string
+    /**
+     * Admin "Retry" / "Send again": re-render the stored payload and deliver the same row.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public function retryOutboxItem(int $outboxId): array
     {
-        $num = htmlspecialchars((string) ($order['order_number'] ?? ''));
-        $total = number_format((float) ($order['grand_total'] ?? 0), 2);
-        $curr = htmlspecialchars((string) ($order['currency'] ?? 'NGN'));
-        $ref = htmlspecialchars((string) ($payment['reference'] ?? $payment['provider_reference'] ?? 'VERIFIED'));
-        $method = htmlspecialchars((string) ($payment['payment_method'] ?? 'Online Payment'));
-        $date = date('M d, Y h:i A');
+        $row = $this->db->fetchOne("SELECT `id`, `template`, `payload`, `attempt_count` FROM `email_outbox` WHERE `id` = ?", 'i', [$outboxId]);
+        if ($row === null) {
+            return ['ok' => false, 'message' => 'Email not found.'];
+        }
+        if ($row['template'] === 'magic_link' || $row['template'] === 'account_verification') {
+            return ['ok' => false, 'message' => 'Sign-in links cannot be re-sent. Ask the customer to request a new link.'];
+        }
+        $payload = json_decode((string) $row['payload'], true);
+        if (!is_array($payload) || (int) ($payload['v'] ?? 0) !== MailTemplates::VERSION || !in_array($row['template'], MailTemplates::RENDERABLE, true)) {
+            return ['ok' => false, 'message' => 'This email was created by an older version of the store and cannot be re-sent.'];
+        }
 
-        return <<<HTML
-<!DOCTYPE html>
-<html>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background-color:#f9fafb; margin:0; padding:24px; color:#111827;">
-    <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:16px; border:1px solid #e5e7eb; overflow:hidden;">
-        <div style="background:#01AB31; padding:24px; text-align:center;">
-            <h1 style="color:#ffffff; margin:0; font-size:24px; letter-spacing:1px; font-weight:800;">SHOP.CO</h1>
-            <p style="color:#ffffff; margin:4px 0 0 0; font-size:14px; opacity:0.9;">Official Payment Receipt</p>
-        </div>
-        <div style="padding:32px;">
-            <div style="display:inline-block; background:#dcfce7; color:#15803d; padding:4px 12px; border-radius:9999px; font-size:12px; font-weight:700; margin-bottom:16px;">
-                PAYMENT CONFIRMED
-            </div>
-            <h2 style="margin:0 0 8px 0; font-size:20px;">We Received Your Payment!</h2>
-            <p style="color:#4b5563; font-size:14px; line-height:1.5; margin:0 0 20px 0;">
-                Your payment for order <strong>#{$num}</strong> has cleared successfully. Our fulfillment team is now preparing your package for dispatch.
-            </p>
+        // Give it one more attempt within the limit.
+        $this->db->executeUpdate(
+            "UPDATE `email_outbox` SET `status` = 'pending', `next_attempt_at` = NULL, `attempt_count` = LEAST(`attempt_count`, ?) WHERE `id` = ?",
+            'ii',
+            [self::MAX_ATTEMPTS - 1, $outboxId]
+        );
+        $result = $this->deliver($outboxId);
 
-            <div style="border:1px dashed #d1d5db; border-radius:12px; padding:20px; margin-bottom:24px; background:#fbfbfb;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px;">
-                    <span style="color:#6b7280;">Transaction Reference:</span>
-                    <span style="font-family:monospace; font-weight:600;">{$ref}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px;">
-                    <span style="color:#6b7280;">Payment Method:</span>
-                    <span>{$method}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px;">
-                    <span style="color:#6b7280;">Timestamp:</span>
-                    <span>{$date}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; font-size:18px; font-weight:800; border-top:1px solid #e5e7eb; padding-top:12px; color:#15803d;">
-                    <span>Amount Paid:</span>
-                    <span>{$curr} {$total}</span>
-                </div>
-            </div>
-
-            <div style="text-align:center;">
-                <a href="{$this->frontendUrl}/track-order?orderNumber={$num}" style="display:inline-block; background:#000000; color:#ffffff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:600; font-size:14px;">
-                    Track Order Status
-                </a>
-            </div>
-        </div>
-        <div style="background:#f9fafb; border-top:1px solid #e5e7eb; padding:16px; text-align:center; font-size:12px; color:#9ca3af;">
-            SHOP.CO Logistics & Fulfillment · Secured by Kora & Monnify switches
-        </div>
-    </div>
-</body>
-</html>
-HTML;
+        return match ($result['status'] ?? null) {
+            'sent' => ['ok' => true, 'message' => self::mode() === 'smtp' ? 'Email sent.' : 'Email written to the mail log (SMTP is not configured).'],
+            'pending' => ['ok' => false, 'message' => 'Sending failed again; it will be retried automatically. ' . ($result['error'] ?? '')],
+            default => ['ok' => false, 'message' => $result['error'] ?? 'The email could not be sent.'],
+        };
     }
 
-    private function renderPaymentVerifiedText(array $order, array $payment): string
+    // =========================================================================
+    // Internals
+    // =========================================================================
+
+    /**
+     * @param array{subject: string, html: string, text: string} $rendered
+     * @return array{0: bool, 1: string, 2: string|null} ok, transport, error
+     */
+    private function transmit(string $to, array $rendered, string $storeName, string $template, array $payload = []): array
     {
-        $num = $order['order_number'] ?? '';
-        $total = number_format((float) ($order['grand_total'] ?? 0), 2);
-        $curr = $order['currency'] ?? 'NGN';
-        $ref = $payment['reference'] ?? 'VERIFIED';
-        return "SHOP.CO Payment Receipt\nOrder #{$num}\nAmount Paid: {$curr} {$total}\nRef: {$ref}\nStatus: Paid / Verified\nTrack: {$this->frontendUrl}/track-order?orderNumber={$num}";
+        $headers = [];
+        if ($template === 'marketing_broadcast' && !empty($payload['unsubscribe_url'])) {
+            $headers['List-Unsubscribe'] = '<' . $payload['unsubscribe_url'] . '>';
+        }
+
+        if (SmtpTransport::isConfigured()) {
+            try {
+                (new SmtpTransport())->send($to, $rendered['subject'], $rendered['html'], $rendered['text'], $storeName, $headers);
+                return [true, 'smtp', null];
+            } catch (Throwable $e) {
+                error_log("[MailService SMTP] {$template} to {$to}: " . $e->getMessage());
+                return [false, 'smtp', mb_substr($e->getMessage(), 0, 500)];
+            }
+        }
+
+        try {
+            $this->writeToMailLog($to, $rendered, $template);
+            return [true, 'log', null];
+        } catch (Throwable $e) {
+            return [false, 'log', 'Could not write to storage/logs/mail.log: ' . $e->getMessage()];
+        }
     }
 
-    private function renderShipmentTrackingHtml(array $order, array $shipment): string
+    /**
+     * @return array{id: int, status: string, error: string|null}
+     */
+    private function finish(int $id, string $status, ?string $transport, ?string $error, bool $countAttempt): array
     {
-        $num = htmlspecialchars((string) ($order['order_number'] ?? ''));
-        $carrier = htmlspecialchars((string) ($shipment['carrier'] ?? 'Logistics Provider'));
-        $trackingNumber = htmlspecialchars((string) ($shipment['tracking_number'] ?? 'N/A'));
-        $trackingUrl = htmlspecialchars((string) ($shipment['tracking_url'] ?? $this->frontendUrl . '/track-order?orderNumber=' . $num));
-
-        return <<<HTML
-<!DOCTYPE html>
-<html>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background-color:#f9fafb; margin:0; padding:24px; color:#111827;">
-    <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:16px; border:1px solid #e5e7eb; overflow:hidden;">
-        <div style="background:#2563eb; padding:24px; text-align:center;">
-            <h1 style="color:#ffffff; margin:0; font-size:24px; letter-spacing:1px; font-weight:800;">SHOP.CO</h1>
-            <p style="color:#ffffff; margin:4px 0 0 0; font-size:14px; opacity:0.9;">Shipment Dispatched</p>
-        </div>
-        <div style="padding:32px;">
-            <h2 style="margin:0 0 8px 0; font-size:20px;">Your Package is on the Way!</h2>
-            <p style="color:#4b5563; font-size:14px; line-height:1.5; margin:0 0 20px 0;">
-                Great news! Order <strong>#{$num}</strong> has been handed over to <strong>{$carrier}</strong> for delivery.
-            </p>
-
-            <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:20px; margin-bottom:24px;">
-                <div style="margin-bottom:8px; font-size:13px; color:#1e40af;">
-                    <strong>Carrier:</strong> {$carrier}
-                </div>
-                <div style="margin-bottom:12px; font-size:13px; color:#1e40af;">
-                    <strong>Waybill / Tracking #:</strong> <span style="font-family:monospace; font-weight:bold;">{$trackingNumber}</span>
-                </div>
-                <div>
-                    <a href="{$trackingUrl}" target="_blank" style="display:inline-block; background:#2563eb; color:#ffffff; text-decoration:none; padding:8px 18px; border-radius:8px; font-size:12px; font-weight:600;">
-                        Live Carrier Tracking
-                    </a>
-                </div>
-            </div>
-
-            <div style="text-align:center;">
-                <a href="{$this->frontendUrl}/track-order?orderNumber={$num}" style="display:inline-block; background:#000000; color:#ffffff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:600; font-size:14px;">
-                    Track in Shop.co Portal
-                </a>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-HTML;
+        $this->db->executeUpdate(
+            "UPDATE `email_outbox`
+             SET `status` = ?, `transport` = COALESCE(?, `transport`), `last_error` = ?,
+                 `attempt_count` = `attempt_count` + ?, `next_attempt_at` = NULL,
+                 `sent_at` = IF(? = 'sent', NOW(), `sent_at`)
+             WHERE `id` = ?",
+            'sssisi',
+            [$status, $transport, $error, $countAttempt ? 1 : 0, $status, $id]
+        );
+        return ['id' => $id, 'status' => $status, 'error' => $error];
     }
 
-    private function renderShipmentTrackingText(array $order, array $shipment): string
+    /**
+     * Everything the order templates need, read from the committed order.
+     *
+     * @return array{recipient: string, data: array<string, mixed>}|null
+     */
+    private function orderPayload(string $orderNumber): ?array
     {
-        $num = $order['order_number'] ?? '';
-        $carrier = $shipment['carrier'] ?? 'Carrier';
-        $trackingNumber = $shipment['tracking_number'] ?? 'N/A';
-        return "SHOP.CO Shipment Notification\nOrder #{$num} has been dispatched via {$carrier}.\nTracking Number: {$trackingNumber}\nTrack: {$this->frontendUrl}/track-order?orderNumber={$num}";
+        if ($orderNumber === '') {
+            return null;
+        }
+        $order = $this->db->fetchOne(
+            "SELECT o.*, u.email AS account_email, u.full_name AS account_name
+             FROM `orders` o LEFT JOIN `users` u ON u.id = o.user_id
+             WHERE o.order_number = ?",
+            's',
+            [$orderNumber]
+        );
+        if ($order === null) {
+            return null;
+        }
+
+        $recipient = trim((string) ($order['guest_email'] ?: $order['account_email'] ?: ''));
+        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            return null;
+        }
+
+        $address = json_decode((string) ($order['shipping_address_snapshot'] ?? ''), true) ?: [];
+        $zone = json_decode((string) ($order['shipping_zone_snapshot'] ?? ''), true) ?: [];
+
+        $items = [];
+        foreach ($this->db->fetchAll(
+            "SELECT `item_name`, `variant_options`, `quantity`, `line_total` FROM `order_items` WHERE `order_id` = ? ORDER BY `id`",
+            'i',
+            [(int) $order['id']]
+        ) as $item) {
+            $opts = json_decode((string) ($item['variant_options'] ?? ''), true) ?: [];
+            $items[] = [
+                'name' => (string) $item['item_name'],
+                'options' => implode(' / ', array_filter([$opts['size'] ?? null, $opts['color'] ?? $opts['color_name'] ?? null])),
+                'quantity' => (int) $item['quantity'],
+                'line_total' => (float) $item['line_total'],
+            ];
+        }
+
+        return [
+            'recipient' => $recipient,
+            'data' => [
+                'order_id' => (int) $order['id'],
+                'order_number' => (string) $order['order_number'],
+                'order_status' => (string) $order['order_status'],
+                'payment_status' => (string) $order['payment_status'],
+                'customer_name' => (string) ($address['full_name'] ?? $order['account_name'] ?? ''),
+                'currency' => (string) ($order['currency'] ?: 'NGN'),
+                'subtotal' => (float) $order['subtotal'],
+                'discount_amount' => (float) $order['discount_amount'],
+                'promo_code' => $order['applied_promo_code'] ?? null,
+                'shipping_fee' => (float) $order['shipping_fee'],
+                'grand_total' => (float) $order['grand_total'],
+                'zone_name' => $zone['name'] ?? null,
+                'estimated_days' => $zone['estimated_days'] ?? null,
+                'expires_at' => $order['expires_at'] ?? null,
+                'items' => $items,
+                'address' => [
+                    'full_name' => $address['full_name'] ?? '',
+                    'phone' => $address['phone'] ?? '',
+                    'address_line1' => $address['address_line1'] ?? '',
+                    'address_line2' => $address['address_line2'] ?? '',
+                    'city' => $address['city'] ?? '',
+                    'state' => $address['state'] ?? '',
+                ],
+            ],
+        ];
     }
 
-    private function renderCancellationRefundHtml(array $order, string $type, array $extra): string
+    /**
+     * @param array{subject: string, html: string, text: string} $rendered
+     */
+    private function writeToMailLog(string $to, array $rendered, string $template): void
     {
-        $num = htmlspecialchars((string) ($order['order_number'] ?? ''));
-        $isRefund = ($type === 'refund');
-        $title = $isRefund ? "Refund Processed" : "Order Cancelled";
-        $reason = htmlspecialchars((string) ($extra['reason'] ?? 'Not specified'));
-        $amount = number_format((float) ($extra['amount'] ?? $order['grand_total'] ?? 0), 2);
-        $curr = htmlspecialchars((string) ($order['currency'] ?? 'NGN'));
+        $dir = dirname($this->logPath);
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            throw new \RuntimeException('Mail log directory is not writable.');
+        }
 
-        $amountRow = $amount !== '' ? "<div><strong>Amount:</strong> {$curr} {$amount}</div>" : "";
+        $line = str_repeat('=', 80);
+        $entry = "{$line}\n"
+            . '[' . date('Y-m-d H:i:s') . "] LOGGED ONLY – not delivered (MAIL_MAILER is not smtp)\n"
+            . "To: {$to}\nSubject: {$rendered['subject']}\nTemplate: {$template}\n"
+            . str_repeat('-', 80) . "\n{$rendered['text']}\n"
+            . str_repeat('-', 80) . "\n[HTML]\n{$rendered['html']}\n{$line}\n\n";
 
-        return <<<HTML
-<!DOCTYPE html>
-<html>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background-color:#f9fafb; margin:0; padding:24px; color:#111827;">
-    <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:16px; border:1px solid #e5e7eb; overflow:hidden;">
-        <div style="background:#374151; padding:24px; text-align:center;">
-            <h1 style="color:#ffffff; margin:0; font-size:24px; letter-spacing:1px; font-weight:800;">SHOP.CO</h1>
-            <p style="color:#ffffff; margin:4px 0 0 0; font-size:14px; opacity:0.9;">{$title}</p>
-        </div>
-        <div style="padding:32px;">
-            <h2 style="margin:0 0 8px 0; font-size:20px;">{$title} for Order #{$num}</h2>
-            <p style="color:#4b5563; font-size:14px; line-height:1.5; margin:0 0 20px 0;">
-                This email confirms that order <strong>#{$num}</strong> has been updated.
-            </p>
-
-            <div style="background:#f3f4f6; border-radius:12px; padding:16px; margin-bottom:24px; font-size:13px;">
-                <div style="margin-bottom:6px;"><strong>Status:</strong> {$title}</div>
-                <div style="margin-bottom:6px;"><strong>Reason:</strong> {$reason}</div>
-                {$amountRow}
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-HTML;
-    }
-
-    private function renderCancellationRefundText(array $order, string $type, array $extra): string
-    {
-        $num = $order['order_number'] ?? '';
-        $reason = $extra['reason'] ?? 'N/A';
-        return "SHOP.CO - Order #{$num} {$type}\nReason: {$reason}";
-    }
-
-    private function renderAccountVerificationHtml(string $email, string $tokenOrLink, string $type): string
-    {
-        $isMagic = ($type === 'magic_link');
-        $actionUrl = str_starts_with($tokenOrLink, 'http')
-            ? $tokenOrLink
-            : Env::frontendUrl() . "/auth/verify?token=" . urlencode($tokenOrLink);
-
-        return <<<HTML
-<!DOCTYPE html>
-<html>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background-color:#f9fafb; margin:0; padding:24px; color:#111827;">
-    <div style="max-width:500px; margin:0 auto; background:#ffffff; border-radius:16px; border:1px solid #e5e7eb; overflow:hidden;">
-        <div style="background:#000000; padding:24px; text-align:center;">
-            <h1 style="color:#ffffff; margin:0; font-size:24px; letter-spacing:1px; font-weight:800;">SHOP.CO</h1>
-        </div>
-        <div style="padding:32px; text-align:center;">
-            <h2 style="margin:0 0 8px 0; font-size:20px;">Sign in to your account</h2>
-            <p style="color:#4b5563; font-size:14px; line-height:1.5; margin:0 0 24px 0;">
-                Click the secure link below to sign in instantly. This link is valid for 15 minutes.
-            </p>
-            <div style="margin-bottom:24px;">
-                <a href="{$actionUrl}" style="display:inline-block; background:#000000; color:#ffffff; text-decoration:none; padding:12px 32px; border-radius:9999px; font-weight:600; font-size:14px;">
-                    Sign In to Shop.co
-                </a>
-            </div>
-            <p style="font-size:12px; color:#9ca3af; margin:0;">
-                If you did not request this link, you can safely ignore this email.
-            </p>
-        </div>
-    </div>
-</body>
-</html>
-HTML;
-    }
-
-    private function renderAccountVerificationText(string $email, string $tokenOrLink, string $type): string
-    {
-        return "SHOP.CO Sign In\nUse the following token or link to sign in:\n{$tokenOrLink}\nValid for 15 minutes.";
+        if (@file_put_contents($this->logPath, $entry, FILE_APPEND | LOCK_EX) === false) {
+            throw new \RuntimeException('Mail log is not writable.');
+        }
     }
 }
