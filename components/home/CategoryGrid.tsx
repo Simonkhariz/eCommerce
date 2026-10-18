@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ApiCategory } from '@/lib/api-client';
+import { canOptimizeImage } from '@/lib/image';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ArrowUpRight01Icon } from '@hugeicons/core-free-icons';
 
@@ -63,7 +64,7 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({ categories }) => {
                     src={cat.image}
                     alt=""
                     fill
-                    unoptimized
+                    unoptimized={!canOptimizeImage(cat.image)}
                     onError={() => setFailed((f) => ({ ...f, [cat.slug]: true }))}
                     sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw"
                     className="object-cover object-center group-hover:scale-110 transition-transform duration-500 opacity-90 group-hover:opacity-100"

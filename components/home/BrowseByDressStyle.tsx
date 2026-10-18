@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { DRESS_STYLE_IMAGES } from '@/lib/dress-styles';
-import { getCatalogFacets } from '@/lib/api-client';
+import { useStoreNav } from '@/lib/use-store-info';
 
 /** Alternating tile widths (out of 12 columns) for the mosaic layout. */
 const SPANS = ['md:col-span-4', 'md:col-span-8', 'md:col-span-8', 'md:col-span-4'];
@@ -14,19 +14,10 @@ const SPANS = ['md:col-span-4', 'md:col-span-8', 'md:col-span-8', 'md:col-span-4
  * Each tile links to the catalogue filtered by that style (?style=…).
  */
 export const BrowseByDressStyle: React.FC = () => {
-  const [styles, setStyles] = useState<string[] | null>(null);
+  // Shared with the header and footer (sent with the page, or loaded once).
+  const { dressStyles: styles } = useStoreNav();
 
-  useEffect(() => {
-    let cancelled = false;
-    getCatalogFacets()
-      .then((facets) => !cancelled && setStyles(facets.dress_styles ?? []))
-      .catch(() => !cancelled && setStyles([]));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (!styles || styles.length === 0) {
+  if (styles.length === 0) {
     return null;
   }
 
@@ -55,7 +46,6 @@ export const BrowseByDressStyle: React.FC = () => {
                         src={image}
                         alt=""
                         fill
-                        unoptimized
                         sizes={span === 'md:col-span-4' ? '(max-width: 768px) 100vw, 33vw' : '(max-width: 768px) 100vw, 66vw'}
                         className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
                       />

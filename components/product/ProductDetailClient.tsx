@@ -13,6 +13,7 @@ import { ProductTabs } from '@/components/product/ProductTabs';
 import { ProductCard } from '@/components/ui/ProductCard';
 import { formatPrice } from '@/lib/currency';
 import {
+  ApiProductDetail,
   getProductDetail,
   getProducts,
   mapApiProductToStorefront,
@@ -26,72 +27,93 @@ import {
   RefreshIcon,
 } from '@hugeicons/core-free-icons';
 
-/**
- * Product page (client). The server page.tsx provides the metadata and passes the id/slug.
- */
-export function ProductDetailClient({ id }: { id: string }) {
-  const router = useRouter();
+/** Start on the first option that is actually in stock (else the first option). */
+function firstChoice(product: Product | null): ProductVariant | undefined {
+  const variants = product?.variants ?? [];
+  return variants.find((v) => v.stock > 0) ?? variants[0];
+}
 
-  const [loading, setLoading] = useState(true);
+/**
+ * Product page (client). The server page.tsx provides the metadata and the product itself
+ * (`initial`), so the page arrives already filled in; stock is then refreshed in the
+ * background, because the server copy can be up to a minute old.
+ */
+export function ProductDetailClient({ id, initial = null }: { id: string; initial?: ApiProductDetail | null }) {
+  const router = useRouter();
+  const initialProduct = useMemo(() => (initial ? mapApiProductToStorefront(initial) : null), [initial]);
+
+  const [loading, setLoading] = useState(!initialProduct);
   const [error, setError] = useState<{ notFound?: boolean; message: string } | null>(null);
-  const [product, setProduct] = useState<Product | null>(null);
+  const [product, setProduct] = useState<Product | null>(initialProduct);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
 
-  const [selectedColor, setSelectedColor] = useState<ProductColor | null>(null);
-  const [selectedSize, setSelectedSize] = useState<string | null>(null);
+  const [selectedColor, setSelectedColor] = useState<ProductColor | null>(firstChoice(initialProduct)?.color ?? null);
+  const [selectedSize, setSelectedSize] = useState<string | null>(firstChoice(initialProduct)?.size ?? null);
   const [quantity, setQuantity] = useState(1);
 
   const { addToCart } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
 
-  // Load product detail from API
-  const loadProduct = useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
-    setError(null);
-
+  const loadRelated = useCallback(async (mapped: Product) => {
     try {
-      const apiData = await getProductDetail(id);
-      const mapped = mapApiProductToStorefront(apiData);
-      setProduct(mapped);
-      setQuantity(1);
-
-      // Start on the first option that is actually in stock (else the first option).
-      const variants = mapped.variants ?? [];
-      const initial = variants.find((v) => v.stock > 0) ?? variants[0];
-      setSelectedColor(initial ? initial.color : null);
-      setSelectedSize(initial ? initial.size : null);
-
-      // Fetch related products in same category
-      try {
-        const relatedRes = await getProducts({
-          category: mapped.category,
-          per_page: 5,
-        });
-        const mappedRelated = relatedRes.items
+      const relatedRes = await getProducts({ category: mapped.category, per_page: 5 });
+      setRelatedProducts(
+        relatedRes.items
           .filter((item) => String(item.id) !== mapped.id && item.slug !== mapped.slug)
           .slice(0, 4)
-          .map(mapApiProductToStorefront);
-        setRelatedProducts(mappedRelated);
-      } catch (e) {
-        // Non-blocking for related products
-      }
-    } catch (err: any) {
-      const is404 = err.statusCode === 404 || err.errorCode === 'RESOURCE_NOT_FOUND';
-      setError({
-        notFound: is404,
-        message: is404
-          ? `Product "${id}" was not found or is no longer available.`
-          : err.message || 'We could not load this product.',
-      });
-    } finally {
-      setLoading(false);
+          .map(mapApiProductToStorefront)
+      );
+    } catch {
+      // Non-blocking for related products
     }
-  }, [id]);
+  }, []);
+
+  // Load (or, when the server already sent it, quietly refresh) the product from the API.
+  const loadProduct = useCallback(
+    async (background = false) => {
+      if (!id) return;
+      if (!background) {
+        setLoading(true);
+        setError(null);
+      }
+
+      try {
+        const mapped = mapApiProductToStorefront(await getProductDetail(id));
+        setProduct(mapped);
+        if (background) {
+          // Keep the shopper's choice when it still exists.
+          setSelectedColor((color) => (mapped.variants?.some((v) => v.color.name === color?.name) ? color : firstChoice(mapped)?.color ?? null));
+          setSelectedSize((size) => (mapped.variants?.some((v) => v.size === size) ? size : firstChoice(mapped)?.size ?? null));
+        } else {
+          setQuantity(1);
+          setSelectedColor(firstChoice(mapped)?.color ?? null);
+          setSelectedSize(firstChoice(mapped)?.size ?? null);
+          void loadRelated(mapped);
+        }
+      } catch (err: any) {
+        if (background) return; // The server copy is still on screen.
+        const is404 = err.statusCode === 404 || err.errorCode === 'RESOURCE_NOT_FOUND';
+        setError({
+          notFound: is404,
+          message: is404
+            ? `Product "${id}" was not found or is no longer available.`
+            : err.message || 'We could not load this product.',
+        });
+      } finally {
+        if (!background) setLoading(false);
+      }
+    },
+    [id, loadRelated]
+  );
 
   useEffect(() => {
-    loadProduct();
-  }, [loadProduct]);
+    if (initialProduct) {
+      void loadRelated(initialProduct);
+      void loadProduct(true);
+    } else {
+      void loadProduct();
+    }
+  }, [initialProduct, loadProduct, loadRelated]);
 
   useEffect(() => {
     router.prefetch('/cart');
@@ -221,7 +243,7 @@ export function ProductDetailClient({ id }: { id: string }) {
           {error.message} Please check your connection and try again.
         </p>
         <button
-          onClick={loadProduct}
+          onClick={() => void loadProduct()}
           className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold px-8 py-3.5 rounded-full text-sm transition-all shadow-md"
         >
           <HugeiconsIcon icon={RefreshIcon} size={16} />

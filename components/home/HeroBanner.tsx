@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Sparkle, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
 import { ApiBanner, ApiPromotion, HomepageData } from '@/lib/api-client';
+import { canOptimizeImage } from '@/lib/image';
 
 interface HeroBannerProps {
   banners?: ApiBanner[];
@@ -173,8 +174,8 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
                 alt={title}
                 fill
                 priority
-                unoptimized
-                sizes="(max-width: 1024px) 100vw, 50vw"
+                unoptimized={!canOptimizeImage(imageUrl)}
+                sizes="(max-width: 640px) 100vw, 512px"
                 className="object-contain object-bottom drop-shadow-xl transition-opacity duration-500"
                 style={{ objectFit: 'contain', objectPosition: 'bottom' }}
               />

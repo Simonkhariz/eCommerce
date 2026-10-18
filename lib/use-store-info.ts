@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ApiCategory, apiGetShippingZones, getCatalogFacets, ShippingZone } from '@/lib/api-client';
+import { ApiCategory, apiGetShippingZones, CatalogFacets, getCatalogFacets, ShippingZone } from '@/lib/api-client';
+import { useStoreSeed } from '@/components/layout/StoreDataProvider';
 import { normalizePhoneDigits } from '@/lib/whatsapp';
 
 /** Store details as configured in admin Settings. Empty strings mean "not set" — never invent them. */
@@ -31,10 +32,22 @@ interface StoreNav {
 let infoCache: Promise<StoreInfo> | null = null;
 let navCache: Promise<StoreNav> | null = null;
 
+function infoFrom(res: { zones?: ShippingZone[]; origin?: unknown } | null | undefined): StoreInfo {
+  return { zones: res?.zones ?? [], origin: (res?.origin as StoreOrigin) ?? null, loaded: true, error: null };
+}
+
+function navFrom(f: CatalogFacets | null | undefined): StoreNav {
+  return {
+    categories: (f?.categories ?? []).filter((c) => (c.product_count ?? 0) > 0),
+    dressStyles: f?.dress_styles ?? [],
+    loaded: true,
+  };
+}
+
 function loadInfo(): Promise<StoreInfo> {
   if (!infoCache) {
     infoCache = apiGetShippingZones()
-      .then((res) => ({ zones: res?.zones ?? [], origin: (res?.origin as StoreOrigin) ?? null, loaded: true, error: null }))
+      .then(infoFrom)
       .catch((err: Error) => {
         infoCache = null; // retry on the next mount
         return { zones: [], origin: null, loaded: true, error: err?.message || 'Could not load store details.' };
@@ -46,11 +59,7 @@ function loadInfo(): Promise<StoreInfo> {
 function loadNav(): Promise<StoreNav> {
   if (!navCache) {
     navCache = getCatalogFacets()
-      .then((f) => ({
-        categories: (f?.categories ?? []).filter((c) => (c.product_count ?? 0) > 0),
-        dressStyles: f?.dress_styles ?? [],
-        loaded: true,
-      }))
+      .then(navFrom)
       .catch(() => {
         navCache = null;
         return { categories: [], dressStyles: [], loaded: true };
@@ -59,18 +68,28 @@ function loadNav(): Promise<StoreNav> {
   return navCache;
 }
 
-/** Live delivery zones and store contact details (shared, loaded once per page session). */
+/**
+ * Live delivery zones and store contact details: with the page when the server fetched them,
+ * otherwise loaded once per page session and shared.
+ */
 export function useStoreInfo(): StoreInfo & { reload: () => void } {
-  const [state, setState] = useState<StoreInfo>({ zones: [], origin: null, loaded: false, error: null });
+  const seeded = useStoreSeed()?.shipping;
+  const [state, setState] = useState<StoreInfo>(() =>
+    seeded ? infoFrom(seeded) : { zones: [], origin: null, loaded: false, error: null }
+  );
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    if (seeded && attempt === 0) {
+      infoCache ??= Promise.resolve(infoFrom(seeded));
+      return;
+    }
     let active = true;
     loadInfo().then((value) => active && setState(value));
     return () => {
       active = false;
     };
-  }, [attempt]);
+  }, [attempt, seeded]);
 
   return {
     ...state,
@@ -83,15 +102,22 @@ export function useStoreInfo(): StoreInfo & { reload: () => void } {
 
 /** Categories that have published products, and dress styles that exist in the catalogue. */
 export function useStoreNav(): StoreNav {
-  const [state, setState] = useState<StoreNav>({ categories: [], dressStyles: [], loaded: false });
+  const seeded = useStoreSeed()?.facets;
+  const [state, setState] = useState<StoreNav>(() =>
+    seeded ? navFrom(seeded) : { categories: [], dressStyles: [], loaded: false }
+  );
 
   useEffect(() => {
+    if (seeded) {
+      navCache ??= Promise.resolve(navFrom(seeded));
+      return;
+    }
     let active = true;
     loadNav().then((value) => active && setState(value));
     return () => {
       active = false;
     };
-  }, []);
+  }, [seeded]);
 
   return state;
 }

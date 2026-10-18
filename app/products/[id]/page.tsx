@@ -1,18 +1,17 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { ProductDetailClient } from '@/components/product/ProductDetailClient';
+import type { ApiProductDetail } from '@/lib/api-client';
 
 const BACKEND_ORIGIN = (process.env.BACKEND_ORIGIN || 'http://127.0.0.1:8000').replace(/\/$/, '');
 
-interface ProductMeta {
-  name: string;
-  description?: string | null;
-  primary_image?: string | null;
+type ProductMeta = ApiProductDetail & {
   images?: Array<{ image_url: string; is_primary?: number | boolean }>;
-}
+};
 
 /**
- * Server-side product lookup for metadata and the 404 check (the page itself loads on the client).
+ * Server-side product lookup, shared by the metadata and the page (Next.js runs the fetch once),
+ * so the page is sent with the product already in it; the client then refreshes stock.
  * Returns 'missing' only when the API says the product does not exist; network errors return null.
  */
 async function lookupProduct(idOrSlug: string): Promise<ProductMeta | 'missing' | null> {
@@ -64,6 +63,7 @@ export async function generateMetadata({ params }: { params: { id: string } }): 
 }
 
 export default async function ProductDetailPage({ params }: { params: { id: string } }) {
-  if ((await lookupProduct(params.id)) === 'missing') notFound();
-  return <ProductDetailClient id={decodeURIComponent(params.id)} />;
+  const product = await lookupProduct(params.id);
+  if (product === 'missing') notFound();
+  return <ProductDetailClient id={decodeURIComponent(params.id)} initial={product} />;
 }
