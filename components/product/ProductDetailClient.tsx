@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useCart, MAX_QUANTITY_PER_LINE } from '@/context/CartContext';
 import { useWishlist } from '@/context/WishlistContext';
 import { ImageGallery } from '@/components/product/ImageGallery';
+import { ShareProduct } from '@/components/product/ShareProduct';
 import { VariantSelector, OptionState } from '@/components/product/VariantSelector';
 import { StickyMobileBar } from '@/components/product/StickyMobileBar';
 import { ProductTabs } from '@/components/product/ProductTabs';
@@ -278,9 +279,12 @@ export function ProductDetailClient({ id }: { id: string }) {
               )}
             </div>
 
-            <h1 className="font-integral text-2xl sm:text-4xl text-black leading-tight uppercase font-black">
-              {product.name}
-            </h1>
+            <div className="flex items-start justify-between gap-3">
+              <h1 className="min-w-0 font-integral text-2xl sm:text-4xl text-black leading-tight uppercase font-black">
+                {product.name}
+              </h1>
+              <ShareProduct name={product.name} slug={product.slug} price={displayPrice} />
+            </div>
 
             {/* Star Rating (only from approved reviews) */}
             {product.reviewCount > 0 ? (

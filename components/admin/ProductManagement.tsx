@@ -102,6 +102,11 @@ function flashDealEnd(value: string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/** Wide screens: one row per variant (Size, Colour, Swatch, SKU, Price, Stock, Alert, Remove). */
+const VARIANT_GRID = 'lg:grid-cols-[minmax(0,8rem)_minmax(0,7rem)_2.5rem_minmax(0,1fr)_minmax(0,7rem)_minmax(0,5rem)_minmax(0,5rem)_2rem]';
+const VARIANT_FIELD = 'flex min-w-0 flex-col gap-1';
+/** Field names are shown on the phone/tablet cards; the header row names them on wide screens. */
+const VARIANT_LABEL = 'text-xs text-[#6b7280] lg:sr-only';
 const NEW_VARIANT: VariantForm = {
   sku: '',
   size: '',
@@ -845,139 +850,149 @@ export function ProductManagement() {
               </p>
             )}
 
-            <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
-              <table className="w-full min-w-[820px] text-left text-[13px]">
-                <thead className="bg-[#fafafa] text-[11px] font-semibold uppercase tracking-wide text-[#6b7280]">
-                  <tr>
-                    <th className="px-2 py-2">Size</th>
-                    <th className="px-2 py-2">Colour</th>
-                    <th className="px-2 py-2">Swatch</th>
-                    <th className="px-2 py-2">SKU</th>
-                    <th className="px-2 py-2">Variant price (₦)</th>
-                    <th className="px-2 py-2">Stock</th>
-                    <th className="px-2 py-2">Low-stock alert</th>
-                    <th className="px-2 py-2">
-                      <span className="sr-only">Remove</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {form.variants.map((v, idx) => {
-                    const rowError = errors[`variant_${idx}`];
-                    const label = `Variant ${idx + 1}`;
-                    const sizes = v.size && !SIZES.includes(v.size) ? [...SIZES, v.size] : SIZES;
-                    return (
-                      <React.Fragment key={v.id ?? `new-${idx}`}>
-                        <tr className="border-t border-[#f3f4f6] align-middle">
-                          <td className="p-2">
-                            <select
-                              aria-label={`${label} size`}
-                              value={v.size}
-                              onChange={(e) => updateVariant(idx, { size: e.target.value })}
-                              className={`${inputClass} h-8 w-32 py-1`}
-                              aria-invalid={rowError ? true : undefined}
-                            >
-                              <option value="">Choose…</option>
-                              {sizes.map((s) => (
-                                <option key={s} value={s}>
-                                  {s}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="p-2">
-                            <input
-                              aria-label={`${label} colour name`}
-                              value={v.color_name}
-                              onChange={(e) => updateVariant(idx, { color_name: e.target.value })}
-                              placeholder="e.g. Navy"
-                              className={`${inputClass} h-8 w-28 py-1`}
-                              aria-invalid={rowError ? true : undefined}
-                            />
-                          </td>
-                          <td className="p-2">
-                            <input
-                              type="color"
-                              aria-label={`${label} colour swatch`}
-                              value={v.color_hex}
-                              onChange={(e) => updateVariant(idx, { color_hex: e.target.value })}
-                              className="h-8 w-10 cursor-pointer rounded border border-[#d1d5db] bg-white p-0.5"
-                            />
-                          </td>
-                          <td className="p-2">
-                            <input
-                              aria-label={`${label} SKU`}
-                              value={v.sku}
-                              onChange={(e) => updateVariant(idx, { sku: e.target.value.toUpperCase() })}
-                              placeholder="Auto"
-                              className={`${inputClass} h-8 w-36 py-1 font-mono`}
-                            />
-                          </td>
-                          <td className="p-2">
+            {/* One row per variant on wide screens; a small form card per variant on phones and tablets. */}
+            <div className="rounded-lg border border-[#e5e7eb]">
+              <div
+                aria-hidden="true"
+                className={`hidden rounded-t-lg bg-[#fafafa] px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-[#6b7280] lg:grid ${VARIANT_GRID}`}
+              >
+                <span>Size</span>
+                <span>Colour</span>
+                <span>Swatch</span>
+                <span>SKU</span>
+                <span>Price (₦)</span>
+                <span>Stock</span>
+                <span>Low-stock alert</span>
+                <span />
+              </div>
+              <ul>
+                {form.variants.map((v, idx) => {
+                  const rowError = errors[`variant_${idx}`];
+                  const label = `Variant ${idx + 1}`;
+                  const sizes = v.size && !SIZES.includes(v.size) ? [...SIZES, v.size] : SIZES;
+                  const removeButton = (
+                    <button
+                      type="button"
+                      onClick={() => removeVariant(idx)}
+                      disabled={form.variants.length === 1}
+                      aria-label={`Remove ${label.toLowerCase()}`}
+                      title={form.variants.length === 1 ? 'A product needs at least one variant' : 'Remove variant'}
+                      className="rounded p-2 text-[#6b7280] outline-none hover:bg-red-50 hover:text-red-600 focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40 disabled:opacity-30 lg:p-1.5"
+                    >
+                      <Trash2 className="size-4 lg:size-3.5" aria-hidden="true" />
+                    </button>
+                  );
+                  return (
+                    <li key={v.id ?? `new-${idx}`} className="border-t border-[#f3f4f6] p-3 first:border-t-0 lg:px-2 lg:py-2">
+                      <div className="mb-2 flex items-center justify-between lg:hidden">
+                        <span className="text-[13px] font-semibold text-[#111827]">{label}</span>
+                        {removeButton}
+                      </div>
+                      <div className={`grid grid-cols-2 gap-3 sm:grid-cols-3 lg:items-center lg:gap-2 ${VARIANT_GRID}`}>
+                        <label className={VARIANT_FIELD}>
+                          <span className={VARIANT_LABEL}>Size</span>
+                          <select
+                            aria-label={`${label} size`}
+                            value={v.size}
+                            onChange={(e) => updateVariant(idx, { size: e.target.value })}
+                            className={`${inputClass} h-9 w-full py-1 lg:h-8`}
+                            aria-invalid={rowError ? true : undefined}
+                          >
+                            <option value="">Choose…</option>
+                            {sizes.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className={VARIANT_FIELD}>
+                          <span className={VARIANT_LABEL}>Colour</span>
+                          <input
+                            aria-label={`${label} colour name`}
+                            value={v.color_name}
+                            onChange={(e) => updateVariant(idx, { color_name: e.target.value })}
+                            placeholder="e.g. Navy"
+                            className={`${inputClass} h-9 w-full py-1 lg:h-8`}
+                            aria-invalid={rowError ? true : undefined}
+                          />
+                        </label>
+                        <label className={VARIANT_FIELD}>
+                          <span className={VARIANT_LABEL}>Swatch</span>
+                          <input
+                            type="color"
+                            aria-label={`${label} colour swatch`}
+                            value={v.color_hex}
+                            onChange={(e) => updateVariant(idx, { color_hex: e.target.value })}
+                            className="h-9 w-full cursor-pointer rounded border border-[#d1d5db] bg-white p-0.5 lg:h-8 lg:w-10"
+                          />
+                        </label>
+                        <label className={VARIANT_FIELD}>
+                          <span className={VARIANT_LABEL}>SKU</span>
+                          <input
+                            aria-label={`${label} SKU`}
+                            value={v.sku}
+                            onChange={(e) => updateVariant(idx, { sku: e.target.value.toUpperCase() })}
+                            placeholder="Auto"
+                            className={`${inputClass} h-9 w-full py-1 font-mono lg:h-8`}
+                          />
+                        </label>
+                        <label className={VARIANT_FIELD}>
+                          <span className={VARIANT_LABEL}>Price (₦)</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            step="0.01"
+                            aria-label={`${label} price`}
+                            value={v.price_override}
+                            onChange={(e) => updateVariant(idx, { price_override: e.target.value })}
+                            placeholder="Product price"
+                            className={`${inputClass} h-9 w-full py-1 lg:h-8`}
+                          />
+                        </label>
+                        {v.id ? (
+                          <div className={VARIANT_FIELD}>
+                            <span className={VARIANT_LABEL}>Stock</span>
+                            <span className="flex h-9 items-center font-semibold tabular-nums lg:h-8" title="Change stock on the Inventory page">
+                              {v.stock_quantity}
+                            </span>
+                          </div>
+                        ) : (
+                          <label className={VARIANT_FIELD}>
+                            <span className={VARIANT_LABEL}>Starting stock</span>
                             <input
                               type="number"
-                              min={0}
-                              step="0.01"
-                              aria-label={`${label} price`}
-                              value={v.price_override}
-                              onChange={(e) => updateVariant(idx, { price_override: e.target.value })}
-                              placeholder="Product price"
-                              className={`${inputClass} h-8 w-28 py-1`}
-                            />
-                          </td>
-                          <td className="p-2">
-                            {v.id ? (
-                              <span className="inline-block w-16 tabular-nums font-semibold" title="Change stock on the Inventory page">
-                                {v.stock_quantity}
-                              </span>
-                            ) : (
-                              <input
-                                type="number"
-                                min={0}
-                                step={1}
-                                aria-label={`${label} starting stock`}
-                                value={v.stock_quantity}
-                                onChange={(e) => updateVariant(idx, { stock_quantity: e.target.value })}
-                                className={`${inputClass} h-8 w-20 py-1`}
-                              />
-                            )}
-                          </td>
-                          <td className="p-2">
-                            <input
-                              type="number"
+                              inputMode="numeric"
                               min={0}
                               step={1}
-                              aria-label={`${label} low-stock alert level`}
-                              value={v.low_stock_threshold}
-                              onChange={(e) => updateVariant(idx, { low_stock_threshold: e.target.value })}
-                              className={`${inputClass} h-8 w-20 py-1`}
+                              aria-label={`${label} starting stock`}
+                              value={v.stock_quantity}
+                              onChange={(e) => updateVariant(idx, { stock_quantity: e.target.value })}
+                              className={`${inputClass} h-9 w-full py-1 lg:h-8`}
                             />
-                          </td>
-                          <td className="p-2 text-right">
-                            <button
-                              type="button"
-                              onClick={() => removeVariant(idx)}
-                              disabled={form.variants.length === 1}
-                              aria-label={`Remove ${label.toLowerCase()}`}
-                              title={form.variants.length === 1 ? 'A product needs at least one variant' : 'Remove variant'}
-                              className="rounded p-1.5 text-[#6b7280] outline-none hover:bg-red-50 hover:text-red-600 focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40 disabled:opacity-30"
-                            >
-                              <Trash2 className="size-3.5" aria-hidden="true" />
-                            </button>
-                          </td>
-                        </tr>
-                        {rowError && (
-                          <tr>
-                            <td colSpan={8} className="px-2 pb-2 text-xs text-red-600">
-                              {rowError}
-                            </td>
-                          </tr>
+                          </label>
                         )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        <label className={VARIANT_FIELD}>
+                          <span className={VARIANT_LABEL}>Low-stock alert</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            step={1}
+                            aria-label={`${label} low-stock alert level`}
+                            value={v.low_stock_threshold}
+                            onChange={(e) => updateVariant(idx, { low_stock_threshold: e.target.value })}
+                            className={`${inputClass} h-9 w-full py-1 lg:h-8`}
+                          />
+                        </label>
+                        <div className="hidden justify-end lg:flex">{removeButton}</div>
+                      </div>
+                      {rowError && <p className="mt-2 text-xs text-red-600">{rowError}</p>}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
             <p className="text-xs text-[#6b7280]">Variant price is optional; leave it blank to use the product price.</p>
           </fieldset>

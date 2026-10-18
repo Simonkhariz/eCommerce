@@ -230,6 +230,8 @@ function TrackOrderContent() {
   };
 
   const currentStage = order ? getStageIndex(rawStatus, order.payment_status || '') : 0;
+  // A delivered order has finished every step, including the last one.
+  const isFinished = rawStatus === 'delivered' || rawStatus === 'completed';
 
   const steps = [
     { title: 'Order placed', tooltip: 'Your order was received and the items reserved.' },
@@ -465,7 +467,9 @@ function TrackOrderContent() {
                   <h3 className="text-sm font-bold text-black">
                     Delivery progress
                   </h3>
-                  <p className="text-xs text-neutral-600">Step {currentStage + 1} of {steps.length} &bull; {steps[currentStage]?.title}</p>
+                  <p className="text-xs text-neutral-600">
+                    {isFinished ? 'All steps complete' : `Step ${currentStage + 1} of ${steps.length}`} &bull; {steps[currentStage]?.title}
+                  </p>
                 </div>
 
               </div>
@@ -484,8 +488,8 @@ function TrackOrderContent() {
                 {/* Steps */}
                 <ol className="grid grid-cols-1 sm:grid-cols-5 gap-3 sm:gap-2 relative z-10" aria-label="Order progress">
                   {steps.map((step, idx) => {
-                    const isDone = idx < currentStage;
-                    const isCurrent = idx === currentStage;
+                    const isDone = idx < currentStage || (isFinished && idx === currentStage);
+                    const isCurrent = idx === currentStage && !isFinished;
                     return (
                       <li
                         key={step.title}

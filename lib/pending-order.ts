@@ -30,12 +30,20 @@ export function savePendingOrder(order: PendingOrder): void {
   }
 }
 
+/**
+ * How long this device keeps asking about an unpaid order. Its payment deadline is not used:
+ * a WhatsApp transfer extends it on the server, and the store can confirm a transfer after it.
+ * The server answers "paid" or "cancelled" well before this.
+ */
+const PENDING_ORDER_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
 export function readPendingOrder(): PendingOrder | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PendingOrder;
-    if (parsed.expiresAt && new Date(parsed.expiresAt.replace(' ', 'T')).getTime() <= Date.now()) {
+    const created = new Date(String(parsed.createdAt ?? '').replace(' ', 'T')).getTime();
+    if (Number.isFinite(created) && Date.now() - created > PENDING_ORDER_MAX_AGE_MS) {
       localStorage.removeItem(KEY);
       return null;
     }

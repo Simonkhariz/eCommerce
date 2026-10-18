@@ -148,7 +148,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
             onClick={onClose}
             disabled={busy}
             aria-label="Close"
-            className="-m-1 rounded-md p-1 text-[#6b7280] outline-none hover:bg-black/[0.05] hover:text-[#111827] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/50 disabled:opacity-40"
+            className="-m-2 rounded-md p-2 text-[#6b7280] outline-none hover:bg-black/[0.05] hover:text-[#111827] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/50 disabled:opacity-40"
           >
             <X className="size-4" aria-hidden="true" />
           </button>

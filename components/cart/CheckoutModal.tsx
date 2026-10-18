@@ -70,7 +70,7 @@ const fieldClass =
 const labelClass = 'text-xs font-semibold text-neutral-700 block mb-1';
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose }) => {
-  const { items, appliedPromo } = useCart();
+  const { items, appliedPromo, settlePendingOrder } = useCart();
   const { user, addresses } = useAuth();
   const { supportPhone, paymentMethods } = useStoreSupport();
 
@@ -152,8 +152,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
     apiGetOrder(pending.orderNumber, token ? { token } : undefined)
       .then((o: any) => {
         if (o.order_status !== 'pending_payment') {
-          clearPendingOrder(pending.orderNumber);
+          // Paid meanwhile (e.g. a WhatsApp transfer the store confirmed): take its items out
+          // of the cart instead of only forgetting the order.
           setStep('details');
+          setOrder(null);
+          void settlePendingOrder().then((outcome) => {
+            if (outcome === 'paid') onClose();
+            else clearPendingOrder(pending.orderNumber);
+          });
           return;
         }
         setOrder({

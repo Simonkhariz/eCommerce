@@ -24,6 +24,8 @@ interface ToastMessage {
   showCartAction?: boolean;
 }
 
+export type PendingOrderOutcome = 'none' | 'paid' | 'cancelled' | 'pending' | 'unknown';
+
 /** Per-line maximum, matching the server's checkout limit. */
 export const MAX_QUANTITY_PER_LINE = 20;
 
@@ -48,6 +50,11 @@ interface CartContextType {
   /** Subtotal minus discount. Delivery is calculated at checkout from the delivery address. */
   total: number;
   totalQuantity: number;
+  /**
+   * Ask the server now about the unpaid order placed from this cart; when it has been paid,
+   * its items leave the cart.
+   */
+  settlePendingOrder: () => Promise<PendingOrderOutcome>;
   toast: ToastMessage | null;
   hideToast: () => void;
 }
@@ -138,6 +145,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [cartNotices, setCartNotices] = useState<string[]>([]);
   const [isRevalidating, setIsRevalidating] = useState(false);
   const serverSyncReady = useRef(false);
+  /** Counts cart changes, so a finished save knows whether a newer change is still unsaved. */
+  const cartChange = useRef(0);
   const itemsRef = useRef<CartItem[]>([]);
   itemsRef.current = items;
 
@@ -164,14 +173,20 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     (async () => {
       writeStorage('shopco_cart', null); // legacy key from the mock build
       const local = readJson<CartItem[]>(cartStorageKey, []);
-      let next = Array.isArray(local) ? local : [];
+      const localItems = Array.isArray(local) ? local : [];
+      let next = localItems;
 
       if (isCustomer) {
         const guest = readJson<CartItem[]>('shopco_cart_guest', []);
-        next = mergeCarts(next, Array.isArray(guest) ? guest : []);
+        const guestItems = Array.isArray(guest) ? guest : [];
+        next = mergeCarts(localItems, guestItems);
         try {
           const saved = await apiGetSavedCart();
-          next = mergeCarts(saved.map(fromSavedLine), next);
+          // The account's saved cart is the truth: paid orders are taken out of it on the
+          // server. This device's copy only adds changes it had not managed to save yet,
+          // otherwise it would put the items of a paid order back.
+          const unsaved = readJson<boolean>(`${cartStorageKey}_unsaved`, false) === true;
+          next = mergeCarts(mergeCarts(saved.map(fromSavedLine), unsaved ? localItems : []), guestItems);
           writeStorage('shopco_cart_guest', null);
           serverSyncReady.current = true;
         } catch {
@@ -197,7 +212,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Only write to the account once its saved cart was read, so an offline device never
     // overwrites a fuller cart saved from another device.
-    if (!isCustomer || !serverSyncReady.current) return;
+    if (!isCustomer) return;
+    const unsavedKey = `${cartStorageKey}_unsaved`;
+    writeStorage(unsavedKey, 'true');
+    const change = ++cartChange.current;
+    if (!serverSyncReady.current) return;
     const timer = setTimeout(() => {
       const lines = items
         .filter((i) => typeof i.variantId === 'number')
@@ -205,6 +224,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       apiSaveCart(lines)
         .then(() => {
           serverSyncReady.current = true;
+          // Only when nothing changed while this save was on its way.
+          if (change === cartChange.current) writeStorage(unsavedKey, null);
         })
         .catch(() => {
           // Saved locally; the next change retries.
@@ -324,9 +345,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // transfer the store confirms later, or a gateway tab closed before it redirected back.
   // When this device sees that order paid, its items leave the cart (anything added since stays).
   const lastPendingCheck = useRef(0);
-  const checkPendingOrder = useCallback(async () => {
+  const checkPendingOrder = useCallback(async (force = false): Promise<PendingOrderOutcome> => {
     const pending = readPendingOrder();
-    if (!pending || Date.now() - lastPendingCheck.current < PENDING_CHECK_INTERVAL_MS) return;
+    if (!pending) return 'none';
+    if (!force && Date.now() - lastPendingCheck.current < PENDING_CHECK_INTERVAL_MS) return 'pending';
     lastPendingCheck.current = Date.now();
     try {
       const res = await apiVerifyPayment(pending.orderNumber, readGuestToken(pending.orderNumber));
@@ -339,11 +361,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           writeStorage(PROMO_STORAGE_KEY, null);
         }
         clearPendingOrder(pending.orderNumber);
-      } else if (orderStatus === 'cancelled') {
-        clearPendingOrder(pending.orderNumber);
+        return 'paid';
       }
+      if (orderStatus === 'cancelled') {
+        clearPendingOrder(pending.orderNumber);
+        return 'cancelled';
+      }
+      return 'pending';
     } catch {
       // Offline or no access from this device: try again on the next visit.
+      return 'unknown';
     }
   }, []);
 
@@ -351,7 +378,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!isLoaded) return;
     checkPendingOrder();
     const onVisible = () => {
-      if (document.visibilityState === 'visible') checkPendingOrder();
+      if (document.visibilityState === 'visible') void checkPendingOrder();
     };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
@@ -505,6 +532,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         discountAmount,
         total,
         totalQuantity,
+        settlePendingOrder: () => checkPendingOrder(true),
         toast,
         hideToast,
       }}
