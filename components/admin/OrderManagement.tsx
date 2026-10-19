@@ -28,6 +28,7 @@ import { ManualPaymentModal } from '@/components/admin/ManualPaymentModal';
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All orders' },
   { value: 'attention', label: 'Needs attention' },
+  { value: 'payment_claimed', label: 'Customer says paid' },
   { value: 'awaiting_whatsapp', label: 'Awaiting WhatsApp payment' },
   ...Object.entries(ORDER_STATUS).map(([value, s]) => ({ value, label: s.label })),
 ];
@@ -114,7 +115,13 @@ export function OrderManagement() {
           onRetry={reload}
           hasData={!!data}
           empty={items.length === 0}
-          emptyTitle={filters.status === 'attention' ? 'No orders need attention' : 'No orders found'}
+          emptyTitle={
+            filters.status === 'attention'
+              ? 'No orders need attention'
+              : filters.status === 'payment_claimed'
+                ? 'No payments waiting to be checked'
+                : 'No orders found'
+          }
           emptyDescription={
             filters.search || filters.status !== 'all' ? 'Try a different search or status.' : 'Orders appear here as soon as customers check out.'
           }
@@ -180,6 +187,11 @@ export function OrderManagement() {
                     </td>
                     <td>
                       <StatusPill label={ps.label} tone={ps.tone} />
+                      {o.order_status === 'pending_payment' && o.customer_marked_paid_at && (
+                        <span className="mt-1 block text-xs font-medium text-amber-800" title={`Marked as paid ${formatDate(o.customer_marked_paid_at)}`}>
+                          Customer says paid
+                        </span>
+                      )}
                     </td>
                     <td className="text-[#4b5563]">{o.payment_provider ? gatewayLabel(o.payment_provider) : '—'}</td>
                     <td className="whitespace-nowrap text-right">

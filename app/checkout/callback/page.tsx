@@ -9,7 +9,7 @@ import { CheckmarkBadge01Icon, AlertCircleIcon, Clock01Icon, ArrowRight01Icon } 
 import { Printer, Download } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import { formatPrice } from '@/lib/currency';
-import { apiVerifyPayment, apiGetOrder, apiInitializePayment, PaymentVerificationResponse } from '@/lib/api-client';
+import { apiVerifyPayment, apiGetOrder, apiInitializePayment, apiMarkPaymentSent, PaymentVerificationResponse } from '@/lib/api-client';
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptUrl, formatSupportPhone } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useCart } from '@/context/CartContext';
@@ -218,6 +218,8 @@ function CheckoutCallbackContent() {
     setPollIndex(0);
     const status = await verify(token);
     if (status !== 'successful') {
+      // Not confirmed yet: let the store know the transfer was sent (it alerts the admin).
+      if (status === 'pending') await apiMarkPaymentSent(orderNumber, token).catch(() => null);
       setAwaitingFlash(true);
       setTimeout(() => setAwaitingFlash(false), 3000);
     }

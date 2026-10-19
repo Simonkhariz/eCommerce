@@ -30,6 +30,7 @@ $ordersCreated = [];
 $emails = [];
 $t->cleanup(function () use ($t, &$ordersCreated, &$emails): void {
     foreach ($ordersCreated as $num) {
+        $t->sql("DELETE FROM `email_outbox` WHERE `dedup_key` LIKE ?", 's', ["payment_claimed:{$num}:%"]);
         $t->sql("DELETE FROM `orders` WHERE `order_number` = ?", 's', [$num]);
     }
     foreach ($emails as $email) {
@@ -101,6 +102,23 @@ $wa = $t->http('POST', "/checkout/orders/{$onum}/initialize-payment", ['headers'
 $t->check('WhatsApp payment attempt opens', 'whatsapp', TestKit::get($wa, 'data.provider'));
 $hours = (int) $t->scalar("SELECT TIMESTAMPDIFF(HOUR, NOW(), `expires_at`) FROM `orders` WHERE `order_number` = ?", 's', [$onum]);
 $t->ok('WhatsApp attempt reserves the order for about a day', $hours >= 23, "hours={$hours}");
+
+$t->section('"Mark as paid" for a WhatsApp transfer alerts the store, never pays the order');
+$t->check('mark as paid without access -> 404', 404, $t->http('POST', "/checkout/orders/{$onum}/payment-sent", ['json' => []])['status']);
+$claim = $t->http('POST', "/checkout/orders/{$onum}/payment-sent", ['headers' => ["X-Guest-Access-Token: {$token}"], 'json' => []]);
+$t->check('mark as paid 200', 200, $claim['status']);
+$t->check('claim recorded', true, TestKit::get($claim, 'data.recorded'));
+$t->ok('claim time stored on the order', $t->scalar("SELECT `customer_marked_paid_at` FROM `orders` WHERE `order_number` = ?", 's', [$onum]) !== null);
+$t->check('order still awaiting payment', 'pending_payment', $t->scalar("SELECT `order_status` FROM `orders` WHERE `order_number` = ?", 's', [$onum]));
+$t->check('payment still unconfirmed', 'pending', TestKit::get($t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => ["X-Guest-Access-Token: {$token}"]]), 'data.status'));
+$adminEmail = strtolower((string) $t->scalar("SELECT `email` FROM `users` WHERE `id` = ?", 'i', [(int) $admin['id']]));
+$t->check('store admin emailed', 1, (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `template` = 'payment_claimed' AND `recipient_email` = ? AND `dedup_key` LIKE ?", 'ss', [$adminEmail, "payment_claimed:{$onum}:%"]));
+$t->check('history notes the claim', 1, (int) $t->scalar("SELECT COUNT(*) FROM `order_status_history` h JOIN `orders` o ON o.id = h.order_id WHERE o.order_number = ? AND h.comment LIKE 'Customer marked%'", 's', [$onum]));
+$t->check('tapping again: 200', 200, $t->http('POST', "/checkout/orders/{$onum}/payment-sent", ['headers' => ["X-Guest-Access-Token: {$token}"], 'json' => []])['status']);
+$t->check('tapping again sends no second email', 1, (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `template` = 'payment_claimed' AND `recipient_email` = ? AND `dedup_key` LIKE ?", 'ss', [$adminEmail, "payment_claimed:{$onum}:%"]));
+$claimedList = $t->http('GET', '/admin/orders?status=payment_claimed&per_page=100', ['jar' => $admin['jar']]);
+$t->ok('admin "Customer says paid" list shows the order', in_array($onum, array_column((array) TestKit::get($claimedList, 'data.items'), 'order_number'), true));
+$t->ok('admin order shows when it was marked', TestKit::get($t->http('GET', "/admin/orders/{$onum}", ['jar' => $admin['jar']]), 'data.customer_marked_paid_at') !== null);
 
 // -----------------------------------------------------------------------------
 $t->section('Magic link links guest orders; saved cart and wishlist');

@@ -195,6 +195,14 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
         </div>
       </div>
 
+      {order.order_status === 'pending_payment' && order.customer_marked_paid_at && (
+        <Notice tone="warning">
+          <strong>Customer says they have paid.</strong> They marked their WhatsApp transfer as paid on{' '}
+          {formatDateTime(order.customer_marked_paid_at)}. Check that {formatPrice(num(order.grand_total))} has arrived in your
+          account, then use <strong>Record manual payment</strong> with the transfer reference.
+        </Notice>
+      )}
+
       {order.requires_attention && (
         <Notice tone="danger">
           <strong>Needs attention.</strong> {order.attention_reason || 'Check the payments on this order.'}

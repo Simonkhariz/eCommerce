@@ -22,6 +22,7 @@ import {
   apiInitializePayment,
   apiGetOrder,
   apiVerifyPayment,
+  apiMarkPaymentSent,
   CheckoutQuoteResponse,
 } from '@/lib/api-client';
 import { buildWhatsAppInvoiceUrl } from '@/lib/whatsapp';
@@ -414,7 +415,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
         onClose();
         return;
       }
-      setAwaitingNote('The store has not confirmed your transfer yet. Once they do, tap "Mark as paid" again to see your receipt.');
+      // Not confirmed yet: let the store know the transfer was sent (it alerts the admin).
+      const sent = await apiMarkPaymentSent(order.order_number, order.guest_access_token).catch(() => null);
+      if (sent?.expires_at) setOrder((prev) => (prev ? { ...prev, expires_at: sent.expires_at } : prev));
+      setAwaitingNote(
+        sent?.recorded
+          ? 'We have told the store you paid. Once they confirm your transfer, tap "Mark as paid" again to see your receipt.'
+          : 'The store has not confirmed your transfer yet. Once they do, tap "Mark as paid" again to see your receipt.'
+      );
       setAwaitingFlash(true);
       setTimeout(() => setAwaitingFlash(false), 3000);
     } catch (err: any) {

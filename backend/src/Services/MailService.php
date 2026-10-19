@@ -109,6 +109,39 @@ class MailService
         return $this->queue($payload['recipient'], 'payment_verified', $data, 'payment_verified:' . $data['order_number']);
     }
 
+    /**
+     * Alert the store's admins that a customer marked a WhatsApp transfer as paid.
+     * One email per order and admin, however often the customer taps the button.
+     * Goes to the active admin accounts, or the store contact email when there are none.
+     *
+     * @return int Number of emails queued
+     */
+    public function sendPaymentClaimedToAdmins(string $orderNumber, string $claimedAt): int
+    {
+        $payload = $this->orderPayload($orderNumber);
+        if ($payload === null) {
+            return 0;
+        }
+        $data = $payload['data'];
+        $data['claimed_at'] = $claimedAt;
+
+        $recipients = array_column($this->db->fetchAll(
+            "SELECT `email` FROM `users` WHERE `role` IN ('admin', 'super_admin') AND `status` = 'active'"
+        ), 'email');
+        if ($recipients === []) {
+            $contact = $this->db->fetchOne("SELECT `value` FROM `store_settings` WHERE `key_name` = 'store_contact_email'");
+            $recipients = [trim((string) ($contact['value'] ?? ''))];
+        }
+
+        $queued = 0;
+        foreach (array_unique(array_map('strtolower', $recipients)) as $email) {
+            if ($this->queue($email, 'payment_claimed', $data, "payment_claimed:{$data['order_number']}:{$email}")) {
+                $queued++;
+            }
+        }
+        return $queued;
+    }
+
     public function sendShipmentTracking(array $order, array $shipment): bool
     {
         $payload = $this->orderPayload((string) ($order['order_number'] ?? ''));

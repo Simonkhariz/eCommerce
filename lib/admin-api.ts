@@ -98,6 +98,8 @@ export interface AdminOrderListItem {
   expires_at: string | null;
   requires_attention: boolean;
   attention_reason: string | null;
+  /** The customer tapped "Mark as paid" for a WhatsApp transfer (not a confirmation). */
+  customer_marked_paid_at?: string | null;
   payment_provider: string | null;
   payment_reference: string | null;
   payment_record_status: string | null;

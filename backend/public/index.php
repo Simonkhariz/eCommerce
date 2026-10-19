@@ -130,6 +130,7 @@ $router->get('/api/v1/checkout/shipping-zones', [CheckoutController::class, 'shi
 $router->get('/api/v1/checkout/orders/{orderNumber}', [CheckoutController::class, 'show']);
 $router->post('/api/v1/checkout/orders/{orderNumber}/initialize-payment', [CheckoutController::class, 'initializePayment']);
 $router->get('/api/v1/checkout/orders/{orderNumber}/verify-payment', [CheckoutController::class, 'verifyPayment']);
+$router->post('/api/v1/checkout/orders/{orderNumber}/payment-sent', [CheckoutController::class, 'markPaymentSent']);
 
 // --- Payment Webhook Routes ---
 $router->post('/api/v1/webhooks/kora', [PaymentWebhookController::class, 'handleKora']);

@@ -9,6 +9,7 @@ use App\Database\Database;
 use App\Middleware\JsonBodyMiddleware;
 use App\Services\CheckoutService;
 use App\Services\KoraService;
+use App\Services\MailService;
 use App\Services\MonnifyService;
 use App\Services\PaymentAttempts;
 use App\Services\PaymentMethods;
@@ -605,6 +606,72 @@ class CheckoutController
      * Whether the caller may access an order: its signed-in owner, the holder of the
      * guest access token, or (when allowed) someone who knows the full checkout email.
      */
+    /**
+     * The customer says they sent the WhatsApp transfer ("Mark as paid"). This only alerts the
+     * store (orders list, header bell, email); the order is paid once an admin confirms it.
+     * POST /api/v1/checkout/orders/{orderNumber}/payment-sent
+     */
+    public function markPaymentSent(array $params): void
+    {
+        $orderNumber = trim($params['orderNumber'] ?? '');
+        $order = $orderNumber === '' ? null : $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$orderNumber]);
+        if ($order === null) {
+            Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
+        }
+
+        RateLimiter::attempt('payment_claim', RequestContext::clientIp(), 30, 600);
+        $body = JsonBodyMiddleware::getBody();
+        if (!$this->canViewOrder($order, false, true, (string) ($body['guest_access_token'] ?? ''))) {
+            Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
+        }
+
+        if ($order['order_status'] !== 'pending_payment') {
+            Response::success(['order_number' => $orderNumber, 'recorded' => false, 'order_status' => $order['order_status']], 'This order is no longer awaiting payment.');
+        }
+        $attempt = $this->db->fetchOne(
+            "SELECT `id` FROM `payments` WHERE `order_id` = ? AND `provider` = 'whatsapp' AND `status` = 'pending' LIMIT 1",
+            'i',
+            [(int) $order['id']]
+        );
+        if ($attempt === null) {
+            Response::error('Send the invoice on WhatsApp first, then mark the order as paid.', 409, 'NO_WHATSAPP_PAYMENT');
+        }
+
+        $firstClaim = $order['customer_marked_paid_at'] === null;
+        // Keep the items reserved while the store checks the transfer (never shortens it).
+        $this->db->executeUpdate(
+            "UPDATE `orders`
+             SET `customer_marked_paid_at` = COALESCE(`customer_marked_paid_at`, NOW()),
+                 `expires_at` = GREATEST(COALESCE(`expires_at`, NOW()), DATE_ADD(NOW(), INTERVAL ? MINUTE))
+             WHERE `id` = ? AND `order_status` = 'pending_payment'",
+            'ii',
+            [PaymentAttempts::manualWindowMinutes(), (int) $order['id']]
+        );
+        $fresh = $this->db->fetchOne("SELECT `customer_marked_paid_at`, `expires_at` FROM `orders` WHERE `id` = ?", 'i', [(int) $order['id']]);
+
+        if ($firstClaim) {
+            try {
+                $this->db->insert(
+                    "INSERT INTO `order_status_history` (`order_id`, `previous_status`, `new_status`, `comment`, `changed_by_user_id`)
+                     VALUES (?, 'pending_payment', 'pending_payment', ?, NULL)",
+                    'is',
+                    [(int) $order['id'], 'Customer marked the WhatsApp transfer as paid. Check the bank and confirm the payment.']
+                );
+                MailService::getInstance()->sendPaymentClaimedToAdmins($orderNumber, (string) $fresh['customer_marked_paid_at']);
+            } catch (Throwable $e) {
+                error_log('[Payment claim alert] ' . $e->getMessage());
+            }
+        }
+
+        Response::success([
+            'order_number' => $orderNumber,
+            'recorded' => true,
+            'order_status' => 'pending_payment',
+            'customer_marked_paid_at' => $fresh['customer_marked_paid_at'],
+            'expires_at' => $fresh['expires_at'],
+        ], 'Thanks! The store has been told and will confirm your transfer.');
+    }
+
     private function canViewOrder(array $order, bool $allowEmailMatch, bool $enforceCsrf = false, string $bodyToken = ''): bool
     {
         $currentUser = $this->resolveOptionalUser($enforceCsrf);

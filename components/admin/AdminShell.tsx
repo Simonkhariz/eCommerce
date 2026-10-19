@@ -17,24 +17,57 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '/admin';
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [attentionCount, setAttentionCount] = useState<number | null>(null);
+  const [alerts, setAlerts] = useState<{ claimed: number; attention: number } | null>(null);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const alertsRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Close the mobile drawer on navigation.
+  // Close the mobile drawer and the alerts menu on navigation.
   useEffect(() => {
     setDrawerOpen(false);
+    setAlertsOpen(false);
   }, [pathname]);
 
-  // Orders flagged for attention (late / duplicate / mismatched payments), refreshed on navigation.
+  // Bell: WhatsApp transfers customers marked as paid (to check and confirm) and orders flagged
+  // for attention (late / duplicate / mismatched payments). Refreshed on navigation and every
+  // minute while the admin is open, so a new "Mark as paid" shows up without reloading.
   useEffect(() => {
     let cancelled = false;
-    adminGetOrders({ status: 'attention', per_page: 1 })
-      .then((res) => !cancelled && setAttentionCount(res.pagination.total))
-      .catch(() => !cancelled && setAttentionCount(null));
+    const load = () => {
+      if (document.visibilityState === 'hidden') return;
+      Promise.all([adminGetOrders({ status: 'payment_claimed', per_page: 1 }), adminGetOrders({ status: 'attention', per_page: 1 })])
+        .then(([claimed, attention]) => {
+          if (!cancelled) setAlerts({ claimed: claimed.pagination.total, attention: attention.pagination.total });
+        })
+        .catch(() => !cancelled && setAlerts(null));
+    };
+    load();
+    const timer = setInterval(load, 60_000);
+    document.addEventListener('visibilitychange', load);
     return () => {
       cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', load);
     };
   }, [pathname]);
+
+  useEffect(() => {
+    if (!alertsOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (!alertsRef.current?.contains(e.target as Node)) setAlertsOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAlertsOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [alertsOpen]);
+
+  const alertTotal = alerts ? alerts.claimed + alerts.attention : 0;
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -122,19 +155,44 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               <span className="sr-only">(opens in a new tab)</span>
             </Link>
 
-            <Link
-              href="/admin/orders?status=attention"
-              aria-label={attentionCount ? `${attentionCount} orders need attention` : 'Orders needing attention'}
-              title="Orders needing attention"
-              className="relative rounded-md p-2.5 outline-none sm:p-1.5 transition-colors hover:bg-black/[0.05] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
-            >
-              <AdminIcon name="bell" />
-              {!!attentionCount && (
-                <span className="absolute -right-0.5 -top-0.5 flex min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white">
-                  {attentionCount > 99 ? '99+' : attentionCount}
-                </span>
+            <div ref={alertsRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setAlertsOpen((o) => !o)}
+                aria-expanded={alertsOpen}
+                aria-haspopup="true"
+                aria-label={alertTotal ? `${alertTotal} order alerts` : 'Order alerts'}
+                title="Order alerts"
+                className="relative rounded-md p-2.5 outline-none sm:p-1.5 transition-colors hover:bg-black/[0.05] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
+              >
+                <AdminIcon name="bell" />
+                {alertTotal > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white">
+                    {alertTotal > 99 ? '99+' : alertTotal}
+                  </span>
+                )}
+              </button>
+              {alertsOpen && (
+                <div className="absolute right-0 top-full z-[60] mt-2 w-[min(18rem,calc(100vw-1.5rem))] rounded-xl border border-[#e5e7eb] bg-white p-1 text-[13px] shadow-lg">
+                  {[
+                    { href: '/admin/orders?status=payment_claimed', title: 'Customers say they have paid', hint: 'WhatsApp transfers to check and confirm', count: alerts?.claimed },
+                    { href: '/admin/orders?status=attention', title: 'Orders need attention', hint: 'Late, duplicate or mismatched payments', count: alerts?.attention },
+                  ].map((a) => (
+                    <Link key={a.href} href={a.href} className="flex items-start justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-[#f3f4f6]">
+                      <span className="min-w-0">
+                        <span className="block font-semibold text-[#111827]">{a.title}</span>
+                        <span className="block text-xs text-[#6b7280]">{a.hint}</span>
+                      </span>
+                      <span
+                        className={`mt-0.5 shrink-0 rounded-full px-2 text-xs font-bold leading-5 ${a.count ? 'bg-red-600 text-white' : 'bg-[#f3f4f6] text-[#6b7280]'}`}
+                      >
+                        {a.count ?? '–'}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
               )}
-            </Link>
+            </div>
 
             <Link
               href="/admin/settings"

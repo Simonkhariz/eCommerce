@@ -1148,6 +1148,25 @@ export async function apiInitializePayment(
   );
 }
 
+/**
+ * "Mark as paid" for a WhatsApp transfer: tells the store to check and confirm it. This never
+ * marks the order paid; the store does that once the money has arrived.
+ */
+export async function apiMarkPaymentSent(
+  orderNumber: string,
+  guestAccessToken?: string
+): Promise<{ order_number: string; recorded: boolean; order_status: string; customer_marked_paid_at?: string | null; expires_at?: string | null }> {
+  const headers: Record<string, string> = {};
+  if (guestAccessToken) {
+    headers['X-Guest-Access-Token'] = guestAccessToken;
+  }
+  return fetchFromApi(`/checkout/orders/${encodeURIComponent(orderNumber)}/payment-sent`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ guest_access_token: guestAccessToken }),
+  });
+}
+
 export interface PaymentVerificationResponse {
   order_number: string;
   provider_reference: string;

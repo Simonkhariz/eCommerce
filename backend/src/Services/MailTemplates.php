@@ -28,6 +28,7 @@ final class MailTemplates
         'order_cancelled',
         'refund_processed',
         'marketing_broadcast',
+        'payment_claimed',
     ];
 
     private string $frontendUrl;
@@ -69,6 +70,7 @@ final class MailTemplates
             'refund_processed' => $this->refundProcessed($p),
             'marketing_broadcast' => $this->marketingBroadcast($p),
             'magic_link' => $this->magicLink($p),
+            'payment_claimed' => $this->paymentClaimed($p),
             default => throw new InvalidArgumentException("Unknown email template '{$template}'."),
         };
     }
@@ -196,6 +198,47 @@ final class MailTemplates
         $text = "Hi {$this->firstName($p)},\n\nOrder {$num} has been cancelled.\n"
             . ($reason !== '' ? "Reason: {$reason}\n" : '')
             . ($paid ? "Your payment of {$this->money($p['amount_paid'] ?? 0, $p['currency'] ?? 'NGN')} will be refunded.\n" : "No payment was taken for this order.\n")
+            . $this->footerText();
+
+        return compact('subject', 'html', 'text');
+    }
+
+    /**
+     * To the store's admins: a customer tapped "Mark as paid" for a WhatsApp transfer.
+     * The order is not paid until an admin checks the bank and confirms it.
+     */
+    private function paymentClaimed(array $p): array
+    {
+        $num = (string) $p['order_number'];
+        $amount = $this->money($p['grand_total'] ?? 0, $p['currency'] ?? 'NGN');
+        $subject = "Customer says order {$num} is paid ({$amount})";
+        $address = is_array($p['address'] ?? null) ? $p['address'] : [];
+        $adminUrl = $this->frontendUrl . '/admin/orders/' . rawurlencode($num);
+
+        $rows = [
+            ['Order', $num],
+            ['Amount to check for', $amount],
+            ['Customer', trim((string) ($p['customer_name'] ?? ''))],
+            ['Phone', trim((string) ($address['phone'] ?? ''))],
+            ['Marked as paid', !empty($p['claimed_at']) ? $this->dateTime((string) $p['claimed_at']) : ''],
+        ];
+
+        $html = $this->layout(
+            'A customer says they have paid',
+            '<p style="margin:0 0 16px">The customer for order <strong>' . $this->e($num) . '</strong> tapped "Mark as paid" for a WhatsApp transfer. '
+            . 'Check that <strong>' . $this->e($amount) . '</strong> has arrived in your account, then confirm the payment in admin with the transfer reference. '
+            . 'Nothing is marked paid until you do.</p>'
+            . $this->keyValueTable($rows)
+            . $this->itemsTable($p)
+            . $this->button($adminUrl, 'Open the order in admin')
+        );
+
+        $text = "The customer for order {$num} tapped \"Mark as paid\" for a WhatsApp transfer.\n"
+            . "Check that {$amount} has arrived in your account, then confirm the payment in admin with the transfer reference.\n"
+            . "Nothing is marked paid until you do.\n\n"
+            . $this->keyValueText($rows) . "\n"
+            . $this->itemsText($p)
+            . "\nOpen the order: {$adminUrl}\n"
             . $this->footerText();
 
         return compact('subject', 'html', 'text');

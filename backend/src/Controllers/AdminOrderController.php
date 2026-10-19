@@ -57,6 +57,9 @@ class AdminOrderController
             // Customer chose "Pay via WhatsApp" and the admin has not confirmed the transfer yet.
             $where[] = "o.order_status = 'pending_payment' AND EXISTS (
                 SELECT 1 FROM `payments` pw WHERE pw.order_id = o.id AND pw.provider = 'whatsapp' AND pw.status = 'pending')";
+        } elseif ($status === 'payment_claimed') {
+            // The customer tapped "Mark as paid" for a WhatsApp transfer; the admin has not confirmed it yet.
+            $where[] = "o.order_status = 'pending_payment' AND o.customer_marked_paid_at IS NOT NULL";
         } elseif ($status !== '' && $status !== 'all') {
             $where[] = "o.order_status = ?";
             $params[] = $status;
@@ -85,7 +88,7 @@ class AdminOrderController
         $sql = "SELECT o.id, o.order_number, o.user_id, o.guest_email, o.order_status, o.payment_status,
                        o.currency, o.subtotal, o.shipping_fee, o.discount_amount, o.grand_total,
                        o.shipping_zone_snapshot, o.shipping_address_snapshot, o.created_at, o.updated_at,
-                       o.expires_at, o.requires_attention, o.attention_reason,
+                       o.expires_at, o.requires_attention, o.attention_reason, o.customer_marked_paid_at,
                        COALESCE(cu.email, o.guest_email) AS customer_email,
                        p.provider as payment_provider, p.provider_reference as payment_reference, p.status as payment_record_status,
                        s.carrier, s.tracking_number, s.tracking_url, s.status as shipment_status, s.shipped_at, s.delivered_at,
