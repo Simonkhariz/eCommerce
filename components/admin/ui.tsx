@@ -560,7 +560,6 @@ export function DataState({
  */
 export function Table({ children, minWidth = 720 }: { children: React.ReactNode; minWidth?: number }) {
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [stacked, setStacked] = useState(false);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -583,23 +582,53 @@ export function Table({ children, minWidth = 720 }: { children: React.ReactNode;
         });
       });
     };
+    // Cards whenever the table would not fit: narrower than its minimum width, or content
+    // wider than the space (a long email, an action button). The width the table needed is
+    // remembered, so it only turns back into a table once there is room for it. (Measuring
+    // right after switching is unreliable: browsers settle a table's width a frame later.)
+    let stacked = false;
+    let needed = minWidth;
+    const layout = () => {
+      const width = wrap.clientWidth;
+      if (!stacked) {
+        if (width < minWidth || wrap.scrollWidth > width + 1) {
+          needed = Math.max(minWidth, wrap.scrollWidth);
+          stacked = true;
+          wrap.setAttribute('data-stacked', '');
+        }
+      } else if (width >= needed) {
+        // Try the table again; the size observer re-checks it once it has been laid out.
+        stacked = false;
+        wrap.removeAttribute('data-stacked');
+      }
+    };
     labelCells();
+    layout();
 
-    // Rows change when data loads, pages change or a row expands.
-    const rows = new MutationObserver(labelCells);
-    rows.observe(wrap, { childList: true, subtree: true });
-    const size = new ResizeObserver(() => setStacked(wrap.clientWidth < minWidth));
+    // Rows change when data loads, pages change or a row expands: the content may now fit.
+    const rows = new MutationObserver(() => {
+      labelCells();
+      needed = minWidth;
+      layout();
+    });
+    rows.observe(wrap, { childList: true, subtree: true, characterData: true });
+    // The space changes (window, sidebar) or the content's width does (web fonts, images).
+    const size = new ResizeObserver(layout);
     size.observe(wrap);
+    const table = wrap.querySelector('table');
+    if (table) size.observe(table);
+    document.fonts?.addEventListener('loadingdone', layout);
     return () => {
       rows.disconnect();
       size.disconnect();
+      document.fonts?.removeEventListener('loadingdone', layout);
     };
   }, [minWidth]);
 
   return (
     // `relative` keeps visually-hidden labels inside the scroll area; without it they are
     // positioned against the page and make phones zoom out to the table's full width.
-    <div ref={wrapRef} className="admin-table relative w-full overflow-x-auto" data-stacked={stacked || undefined}>
+    <div ref={wrapRef} className="admin-table relative w-full overflow-x-auto">
       <table
         className="w-full border-collapse text-left text-[13px] [&_td]:border-t [&_td]:border-[#f3f4f6] [&_td]:px-4 [&_td]:py-2.5 [&_td]:align-middle [&_th]:whitespace-nowrap [&_th]:bg-[#f9fafb] [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-normal [&_th]:text-[#4b5563]"
         style={{ minWidth }}

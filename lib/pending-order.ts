@@ -65,6 +65,48 @@ export function clearPendingOrder(orderNumber?: string): void {
   }
 }
 
+const SETTLED_KEY = 'shopco_settled_orders';
+
+/**
+ * Paid orders whose items this device already took out of the cart, so opening the receipt
+ * again (or a later background check) never removes items added after the payment.
+ */
+export function isOrderSettled(orderNumber: string): boolean {
+  try {
+    const list = JSON.parse(localStorage.getItem(SETTLED_KEY) || '[]');
+    return Array.isArray(list) && list.includes(orderNumber);
+  } catch {
+    return false;
+  }
+}
+
+export function markOrderSettled(orderNumber: string): void {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SETTLED_KEY) || '[]');
+    const list = Array.isArray(raw) ? raw.filter((n) => n !== orderNumber) : [];
+    localStorage.setItem(SETTLED_KEY, JSON.stringify([...list, orderNumber].slice(-30)));
+  } catch {
+    // ignore
+  }
+}
+
+/** The customer sent the WhatsApp invoice for this order, so checkout offers "Mark as paid". */
+export function markInvoiceSent(orderNumber: string): void {
+  try {
+    localStorage.setItem(`shopco_whatsapp_invoice_${orderNumber}`, String(Date.now()));
+  } catch {
+    // ignore
+  }
+}
+
+export function wasInvoiceSent(orderNumber: string): boolean {
+  try {
+    return localStorage.getItem(`shopco_whatsapp_invoice_${orderNumber}`) !== null;
+  } catch {
+    return false;
+  }
+}
+
 /** Guest access tokens are kept per order on this device only (never in URLs). */
 export function saveGuestToken(orderNumber: string, token: string): void {
   try {

@@ -13,7 +13,7 @@ import {
   getProductDetail,
 } from '@/lib/api-client';
 import { useAuth } from '@/context/AuthContext';
-import { clearPendingOrder, readGuestToken, readPendingOrder } from '@/lib/pending-order';
+import { clearPendingOrder, isOrderSettled, markOrderSettled, readGuestToken, readPendingOrder } from '@/lib/pending-order';
 
 interface ToastMessage {
   id: string;
@@ -25,6 +25,12 @@ interface ToastMessage {
 }
 
 export type PendingOrderOutcome = 'none' | 'paid' | 'cancelled' | 'pending' | 'unknown';
+
+/** A line of a paid order, as the order API returns it. */
+export interface PaidOrderLine {
+  variant_id: number | null;
+  quantity: number;
+}
 
 /** Per-line maximum, matching the server's checkout limit. */
 export const MAX_QUANTITY_PER_LINE = 20;
@@ -55,6 +61,11 @@ interface CartContextType {
    * its items leave the cart.
    */
   settlePendingOrder: () => Promise<PendingOrderOutcome>;
+  /**
+   * The payment for this order is verified (receipt page): take its items out of the cart,
+   * once per order. `lines` are the order's own items when the page could load them.
+   */
+  completePaidOrder: (orderNumber: string, lines?: PaidOrderLine[]) => void;
   toast: ToastMessage | null;
   hideToast: () => void;
 }
@@ -145,6 +156,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [cartNotices, setCartNotices] = useState<string[]>([]);
   const [isRevalidating, setIsRevalidating] = useState(false);
   const serverSyncReady = useRef(false);
+  const loadedRef = useRef(false);
+  loadedRef.current = isLoaded;
   /** Counts cart changes, so a finished save knows whether a newer change is still unsaved. */
   const cartChange = useRef(0);
   const itemsRef = useRef<CartItem[]>([]);
@@ -341,9 +354,55 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     writeStorage(PROMO_STORAGE_KEY, null);
   };
 
+  // A paid order's items leave the cart exactly once per order on this device (anything added
+  // since stays). Before the cart has loaded, the order waits and is applied right after
+  // loading, so the freshly loaded cart can't bring the paid items back.
+  const paidWhileLoading = useRef<Array<{ orderNumber: string; lines?: PaidOrderLine[] }>>([]);
+  const applyPaidOrder = useCallback((orderNumber: string, lines?: PaidOrderLine[]) => {
+    if (isOrderSettled(orderNumber)) {
+      clearPendingOrder(orderNumber);
+      return;
+    }
+    const pending = readPendingOrder();
+    // The order's own items when known (also covers paying again from the orders page);
+    // otherwise the cart this order was placed from.
+    const signature = lines?.length
+      ? lines.filter((l) => l.variant_id).map((l) => `${l.variant_id}:${l.quantity}`).join('|')
+      : pending?.orderNumber === orderNumber
+        ? pending.cartSignature
+        : '';
+    if (!signature) return;
+    markOrderSettled(orderNumber);
+    clearPendingOrder(orderNumber);
+    const remaining = removeOrderedLines(itemsRef.current, signature);
+    itemsRef.current = remaining;
+    setItems(remaining);
+    if (remaining.length === 0) {
+      setAppliedPromo(null);
+      writeStorage(PROMO_STORAGE_KEY, null);
+    }
+  }, []);
+
+  const completePaidOrder = useCallback(
+    (orderNumber: string, lines?: PaidOrderLine[]) => {
+      if (!loadedRef.current) {
+        paidWhileLoading.current.push({ orderNumber, lines });
+        return;
+      }
+      applyPaidOrder(orderNumber, lines);
+    },
+    [applyPaidOrder]
+  );
+
+  useEffect(() => {
+    if (!isLoaded || paidWhileLoading.current.length === 0) return;
+    const queued = paidWhileLoading.current;
+    paidWhileLoading.current = [];
+    queued.forEach((o) => applyPaidOrder(o.orderNumber, o.lines));
+  }, [isLoaded, applyPaidOrder]);
+
   // An order placed from this cart can be paid away from the payment return page: a WhatsApp
   // transfer the store confirms later, or a gateway tab closed before it redirected back.
-  // When this device sees that order paid, its items leave the cart (anything added since stays).
   const lastPendingCheck = useRef(0);
   const checkPendingOrder = useCallback(async (force = false): Promise<PendingOrderOutcome> => {
     const pending = readPendingOrder();
@@ -354,13 +413,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await apiVerifyPayment(pending.orderNumber, readGuestToken(pending.orderNumber));
       const orderStatus = String(res.order_status || '');
       if (res.status === 'successful' && orderStatus !== 'cancelled') {
-        const remaining = removeOrderedLines(itemsRef.current, pending.cartSignature);
-        setItems(remaining);
-        if (remaining.length === 0) {
-          setAppliedPromo(null);
-          writeStorage(PROMO_STORAGE_KEY, null);
-        }
-        clearPendingOrder(pending.orderNumber);
+        completePaidOrder(pending.orderNumber);
         return 'paid';
       }
       if (orderStatus === 'cancelled') {
@@ -372,7 +425,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Offline or no access from this device: try again on the next visit.
       return 'unknown';
     }
-  }, []);
+  }, [completePaidOrder]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -402,7 +455,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       // Legacy lines saved before variants were tracked: resolve the exact variant or drop them.
       const resolved: CartItem[] = [];
+      /** Checked line id -> the id it had when the check started. */
+      const startedAs = new Map<string, string>();
       for (const item of current) {
+        startedAs.set(item.id, item.id);
         if (typeof item.variantId === 'number') {
           resolved.push(item);
           continue;
@@ -416,6 +472,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           );
           if (match) {
             resolved.push({ ...item, id: lineKey(match.id), variantId: match.id, sku: match.sku });
+            startedAs.set(lineKey(match.id), item.id);
           } else {
             notices.push(`${item.name} (${item.size} / ${item.color.name}) is no longer offered and was removed. Please choose another option.`);
           }
@@ -459,7 +516,21 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
 
-      setItems(mergeCarts([], next));
+      // Apply the results to the cart as it is now, not as it was when the check started:
+      // a paid order may have left the cart meanwhile, or the shopper changed something.
+      const checked = new Map(next.map((item) => [startedAs.get(item.id) ?? item.id, item]));
+      const checkedIds = new Set(current.map((item) => item.id));
+      setItems((prev) =>
+        mergeCarts(
+          [],
+          prev.flatMap((item) => {
+            if (!checkedIds.has(item.id)) return [item]; // added during the check
+            const live = checked.get(item.id);
+            if (!live) return []; // no longer available
+            return [{ ...live, quantity: Math.min(item.quantity, live.maxStock ?? item.quantity, MAX_QUANTITY_PER_LINE) }];
+          })
+        )
+      );
       if (notices.length > 0) {
         setCartNotices(notices);
       }
@@ -533,6 +604,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         total,
         totalQuantity,
         settlePendingOrder: () => checkPendingOrder(true),
+        completePaidOrder,
         toast,
         hideToast,
       }}

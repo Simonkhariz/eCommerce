@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
 import { HugeiconsIcon } from '@hugeicons/react';
@@ -20,6 +21,7 @@ import {
   apiCreateCheckoutOrder,
   apiInitializePayment,
   apiGetOrder,
+  apiVerifyPayment,
   CheckoutQuoteResponse,
 } from '@/lib/api-client';
 import { buildWhatsAppInvoiceUrl } from '@/lib/whatsapp';
@@ -30,6 +32,8 @@ import {
   readGuestToken,
   readPendingOrder,
   saveGuestToken,
+  markInvoiceSent,
+  wasInvoiceSent,
   savePendingOrder,
 } from '@/lib/pending-order';
 import { NIGERIAN_STATES } from '@/lib/nigeria';
@@ -85,6 +89,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
   const [isInitializingPayment, setIsInitializingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodId | null>(null);
+  // WhatsApp: once the invoice is sent the button becomes "Mark as paid".
+  const [invoiceSent, setInvoiceSent] = useState(false);
+  const [isCheckingPaid, setIsCheckingPaid] = useState(false);
+  const [awaitingFlash, setAwaitingFlash] = useState(false);
+  const [awaitingNote, setAwaitingNote] = useState<string | null>(null);
+  const router = useRouter();
+
+  const orderNumber = order?.order_number;
+  useEffect(() => {
+    setInvoiceSent(orderNumber ? wasInvoiceSent(orderNumber) : false);
+    setAwaitingNote(null);
+  }, [orderNumber]);
 
   // One key per checkout attempt: a double click or a retry after a dropped response
   // returns the same order instead of creating (and reserving stock for) a second one.
@@ -157,8 +173,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
           setStep('details');
           setOrder(null);
           void settlePendingOrder().then((outcome) => {
-            if (outcome === 'paid') onClose();
-            else clearPendingOrder(pending.orderNumber);
+            if (outcome === 'paid') {
+              router.push(`/checkout/callback?order=${encodeURIComponent(pending.orderNumber)}`);
+              onClose();
+            } else clearPendingOrder(pending.orderNumber);
           });
           return;
         }
@@ -362,6 +380,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
       if (selectedMethod === 'whatsapp') {
         if (whatsappTab) whatsappTab.location.href = whatsappInvoice;
         else window.location.href = whatsappInvoice;
+        markInvoiceSent(order.order_number);
+        setInvoiceSent(true);
         if (res.expires_at) {
           setOrder((prev) => (prev ? { ...prev, expires_at: res.expires_at } : prev));
         }
@@ -377,6 +397,30 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
       whatsappTab?.close();
       setPaymentError(err?.message || 'We could not start the payment. Please try again or choose another payment method.');
       setIsInitializingPayment(false);
+    }
+  };
+
+  // The store confirms WhatsApp transfers by hand. Once it has, "Mark as paid" opens the
+  // receipt (which also empties the cart); until then it says the payment is awaited.
+  const handleMarkPaid = async () => {
+    if (!order) return;
+    setIsCheckingPaid(true);
+    setPaymentError(null);
+    try {
+      const res = await apiVerifyPayment(order.order_number, order.guest_access_token);
+      if (res.status === 'successful' || res.order_status === 'cancelled') {
+        // The receipt page shows the confirmed payment (or explains an expired order).
+        router.push(`/checkout/callback?order=${encodeURIComponent(order.order_number)}`);
+        onClose();
+        return;
+      }
+      setAwaitingNote('The store has not confirmed your transfer yet. Once they do, tap "Mark as paid" again to see your receipt.');
+      setAwaitingFlash(true);
+      setTimeout(() => setAwaitingFlash(false), 3000);
+    } catch (err: any) {
+      setPaymentError(err?.message || 'We could not check the payment right now. Please try again.');
+    } finally {
+      setIsCheckingPaid(false);
     }
   };
 
@@ -684,25 +728,51 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={handlePayOrder}
-              disabled={isInitializingPayment || !selectedMethod}
-              className={`w-full text-white font-bold py-3.5 rounded-full text-sm transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60 ${
-                selectedMethod ? methodAccent[selectedMethod] : 'bg-black'
-              }`}
-            >
-              {isInitializingPayment ? (
-                <span>Opening secure payment…</span>
-              ) : selectedMethod === 'whatsapp' ? (
-                <span>Send invoice on WhatsApp ({formatPrice(order.grand_total)})</span>
-              ) : (
-                <>
-                  <span>Pay {formatPrice(order.grand_total)}</span>
-                  <HugeiconsIcon icon={ArrowRight01Icon} size={15} aria-hidden="true" />
-                </>
-              )}
-            </button>
+            {selectedMethod === 'whatsapp' && invoiceSent ? (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleMarkPaid}
+                  disabled={isCheckingPaid || isInitializingPayment}
+                  className={`w-full text-white font-bold py-3.5 rounded-full text-sm transition-colors shadow-md disabled:opacity-60 ${
+                    awaitingFlash ? 'bg-amber-600' : methodAccent.whatsapp
+                  }`}
+                >
+                  {isCheckingPaid ? 'Checking…' : awaitingFlash ? 'Awaiting confirmation' : 'Mark as paid'}
+                </button>
+                <p className="text-xs text-neutral-700 text-center" role="status" aria-live="polite">
+                  {awaitingNote ?? 'Sent the transfer? Tap "Mark as paid". Your receipt opens once the store confirms it.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={handlePayOrder}
+                  disabled={busy || isCheckingPaid}
+                  className="w-full text-xs text-neutral-700 underline hover:no-underline disabled:opacity-50"
+                >
+                  {isInitializingPayment ? 'Opening WhatsApp…' : 'Send the invoice again'}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handlePayOrder}
+                disabled={isInitializingPayment || !selectedMethod}
+                className={`w-full text-white font-bold py-3.5 rounded-full text-sm transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60 ${
+                  selectedMethod ? methodAccent[selectedMethod] : 'bg-black'
+                }`}
+              >
+                {isInitializingPayment ? (
+                  <span>Opening secure payment…</span>
+                ) : selectedMethod === 'whatsapp' ? (
+                  <span>Send invoice on WhatsApp ({formatPrice(order.grand_total)})</span>
+                ) : (
+                  <>
+                    <span>Pay {formatPrice(order.grand_total)}</span>
+                    <HugeiconsIcon icon={ArrowRight01Icon} size={15} aria-hidden="true" />
+                  </>
+                )}
+              </button>
+            )}
 
             <div className="flex items-center justify-between gap-2 text-xs">
               <button type="button" onClick={startOver} disabled={busy} className="text-neutral-700 underline hover:no-underline disabled:opacity-50">

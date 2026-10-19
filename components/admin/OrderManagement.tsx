@@ -160,7 +160,7 @@ export function OrderManagement() {
                         {o.order_number}
                       </Link>
                       {o.requires_attention && (
-                        <span className="mt-1 flex max-w-[240px] items-start gap-1 text-xs font-medium text-red-700">
+                        <span className="mt-1 flex max-w-[190px] items-start gap-1 text-xs font-medium text-red-700">
                           <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
                           <span>Needs attention{o.attention_reason ? `: ${o.attention_reason}` : ''}</span>
                         </span>
@@ -168,7 +168,9 @@ export function OrderManagement() {
                     </td>
                     <td>
                       <span className="block text-[#111827]">{name || '—'}</span>
-                      <span className="block text-xs text-[#6b7280]">{o.customer_email || o.guest_email || ''}</span>
+                      <span className="block max-w-[200px] truncate text-xs text-[#6b7280]" title={o.customer_email || o.guest_email || undefined}>
+                        {o.customer_email || o.guest_email || ''}
+                      </span>
                     </td>
                     <td className="whitespace-nowrap text-[#4b5563]">{formatDate(o.created_at)}</td>
                     <td className="text-right tabular-nums">{num(o.total_quantity) || num(o.items_count)}</td>
@@ -179,11 +181,11 @@ export function OrderManagement() {
                     <td>
                       <StatusPill label={ps.label} tone={ps.tone} />
                     </td>
-                    <td className="whitespace-nowrap text-[#4b5563]">{o.payment_provider ? gatewayLabel(o.payment_provider) : '—'}</td>
+                    <td className="text-[#4b5563]">{o.payment_provider ? gatewayLabel(o.payment_provider) : '—'}</td>
                     <td className="whitespace-nowrap text-right">
                       {awaitingWhatsApp(o) ? (
-                        <Button size="sm" variant="primary" onClick={() => setPaying(o)}>
-                          Confirm payment
+                        <Button size="sm" variant="primary" onClick={() => setPaying(o)} title="Confirm the WhatsApp payment">
+                          Confirm<span className="sr-only"> payment for order {o.order_number}</span>
                         </Button>
                       ) : (
                         <Link

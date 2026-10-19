@@ -13,7 +13,7 @@ import { apiVerifyPayment, apiGetOrder, apiInitializePayment, PaymentVerificatio
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptUrl, formatSupportPhone } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useCart } from '@/context/CartContext';
-import { clearPendingOrder, readGuestToken, readPendingOrder, saveGuestToken } from '@/lib/pending-order';
+import { clearPendingOrder, markInvoiceSent, readGuestToken, saveGuestToken, wasInvoiceSent } from '@/lib/pending-order';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 
 type ViewState = 'checking' | 'paid' | 'pending' | 'failed' | 'cancelled' | 'late' | 'error';
@@ -38,7 +38,7 @@ function CheckoutCallbackContent() {
     orderNumber = parts.length >= 4 ? `ORD-${parts[2]}-${parts[3]}` : '';
   }
 
-  const { clearCart } = useCart();
+  const { completePaidOrder } = useCart();
   const { supportPhone, paymentMethods } = useStoreSupport();
 
   const [token, setToken] = useState<string | undefined>(undefined);
@@ -53,7 +53,13 @@ function CheckoutCallbackContent() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [isSavingJpeg, setIsSavingJpeg] = useState(false);
+  const [invoiceSent, setInvoiceSent] = useState(false);
+  const [awaitingFlash, setAwaitingFlash] = useState(false);
   const celebrated = useRef(false);
+
+  useEffect(() => {
+    if (orderNumber) setInvoiceSent(wasInvoiceSent(orderNumber));
+  }, [orderNumber]);
 
   // Guest access key: from this device (never trust a URL token beyond reading a legacy link once).
   useEffect(() => {
@@ -98,13 +104,15 @@ function CheckoutCallbackContent() {
             setView('late');
           } else {
             setView('paid');
-            await loadOrder(accessToken);
-            // The cart is emptied only now that payment is verified, and only if it is the
-            // cart this order was placed from.
-            if (readPendingOrder()?.orderNumber === orderNumber) {
-              clearCart();
-              clearPendingOrder(orderNumber);
-            }
+            const paidOrder = await loadOrder(accessToken);
+            // The cart is emptied only now that payment is verified: the order's items leave it
+            // (once per order, so reopening this receipt never removes items added later).
+            completePaidOrder(
+              orderNumber,
+              Array.isArray(paidOrder?.items)
+                ? paidOrder.items.map((it: any) => ({ variant_id: it.variant_id ? Number(it.variant_id) : null, quantity: Number(it.quantity) }))
+                : undefined
+            );
             if (!celebrated.current) {
               celebrated.current = true;
               try {
@@ -123,6 +131,7 @@ function CheckoutCallbackContent() {
           setView('pending');
           loadOrder(accessToken);
         }
+        return res.status;
       } catch (err: any) {
         setView('error');
         setMessage(
@@ -130,11 +139,12 @@ function CheckoutCallbackContent() {
             ? 'We could not open this order from this device. Enter the access key from your order confirmation, or use "Track order" with your email.'
             : err?.message || 'We could not check the payment right now.'
         );
+        return null;
       } finally {
         setIsRefreshing(false);
       }
     },
-    [orderNumber, reference, loadOrder, clearCart]
+    [orderNumber, reference, loadOrder, completePaidOrder]
   );
 
   // First check once the access key (if any) has been read.
@@ -188,6 +198,8 @@ function CheckoutCallbackContent() {
         );
         if (whatsappTab) whatsappTab.location.href = url;
         else window.location.href = url;
+        markInvoiceSent(orderNumber);
+        setInvoiceSent(true);
         setIsRetrying(false);
         return;
       }
@@ -197,6 +209,17 @@ function CheckoutCallbackContent() {
       whatsappTab?.close();
       setRetryError(err?.message || 'We could not start the payment. Please try another method.');
       setIsRetrying(false);
+    }
+  };
+
+  // WhatsApp transfers are confirmed by the store by hand: "Mark as paid" asks the server, which
+  // opens the receipt once the store has confirmed, and otherwise says it is still awaited.
+  const handleMarkPaid = async () => {
+    setPollIndex(0);
+    const status = await verify(token);
+    if (status !== 'successful') {
+      setAwaitingFlash(true);
+      setTimeout(() => setAwaitingFlash(false), 3000);
     }
   };
 
@@ -222,7 +245,7 @@ function CheckoutCallbackContent() {
   const receiptDate = paidAt || order?.created_at || null;
   const formatDate = (value: string) =>
     new Date(value.replace(' ', 'T')).toLocaleString('en-NG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const providerName = (p?: string) => (p === 'monnify' ? 'Monnify' : p === 'kora' ? 'Kora' : p === 'manual' ? 'Bank transfer' : p || 'Payment gateway');
+  const providerName = (p?: string) => (p === 'monnify' ? 'Monnify' : p === 'kora' ? 'Kora' : p === 'manual' ? 'Bank transfer' : p === 'whatsapp' ? 'WhatsApp transfer' : p || 'Payment gateway');
 
   const retryPanel = (
     <div className="text-left space-y-2 rounded-2xl border border-neutral-200 p-4">
@@ -243,16 +266,34 @@ function CheckoutCallbackContent() {
         ))}
       </fieldset>
       {retryError && <p role="alert" className="text-sm text-red-700">{retryError}</p>}
-      <button
-        type="button"
-        onClick={handleRetryPayment}
-        disabled={isRetrying || !retryMethod}
-        className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm disabled:opacity-50"
-      >
-        {isRetrying ? 'Opening payment…' : retryMethod === 'whatsapp' ? 'Send invoice on WhatsApp' : 'Pay now'}
-      </button>
+      {retryMethod === 'whatsapp' && invoiceSent ? (
+        <>
+          <button
+            type="button"
+            onClick={handleMarkPaid}
+            disabled={isRefreshing}
+            className={`w-full text-white font-semibold py-3 rounded-full text-sm disabled:opacity-60 ${awaitingFlash ? 'bg-amber-600' : 'bg-[#1DA851] hover:bg-[#178a43]'}`}
+          >
+            {isRefreshing ? 'Checking…' : awaitingFlash ? 'Awaiting confirmation' : 'Mark as paid'}
+          </button>
+          <button type="button" onClick={handleRetryPayment} disabled={isRetrying} className="w-full text-xs text-neutral-700 underline hover:no-underline disabled:opacity-50">
+            Send the invoice again
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={handleRetryPayment}
+          disabled={isRetrying || !retryMethod}
+          className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm disabled:opacity-50"
+        >
+          {isRetrying ? 'Opening payment…' : retryMethod === 'whatsapp' ? 'Send invoice on WhatsApp' : 'Pay now'}
+        </button>
+      )}
     </div>
   );
+
+  const awaitingWhatsApp = result?.provider === 'whatsapp';
 
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-4 py-16 bg-[#F9F9F9]">
@@ -441,15 +482,21 @@ function CheckoutCallbackContent() {
             </div>
             <div>
               <h1 className="text-2xl font-extrabold text-black">
-                {result?.status === 'not_started' ? 'Payment not started yet' : 'Waiting for your payment to clear'}
+                {result?.status === 'not_started'
+                  ? 'Payment not started yet'
+                  : awaitingWhatsApp
+                    ? 'Awaiting confirmation'
+                    : 'Waiting for your payment to clear'}
               </h1>
               <p className="text-sm text-neutral-700 mt-1">Order <strong className="font-mono text-black">{orderNumber}</strong></p>
             </div>
             <p className="text-sm text-neutral-700 max-w-sm mx-auto">
-              {message ||
-                (pollIndex < POLL_DELAYS.length
-                  ? 'Card payments usually confirm within seconds; bank transfers can take a few minutes. This page updates automatically.'
-                  : 'Still processing. Bank transfers can take a few minutes to arrive. You can check again, or come back later: we will email you once it is confirmed.')}
+              {awaitingWhatsApp
+                ? 'The store confirms WhatsApp transfers by hand. Once they have, tap "Mark as paid" to see your receipt. We will also email you.'
+                : message ||
+                  (pollIndex < POLL_DELAYS.length
+                    ? 'Card payments usually confirm within seconds; bank transfers can take a few minutes. This page updates automatically.'
+                    : 'Still processing. Bank transfers can take a few minutes to arrive. You can check again, or come back later: we will email you once it is confirmed.')}
             </p>
             {pollIndex < POLL_DELAYS.length && (
               <p className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-900 rounded-full text-xs font-medium border border-amber-200">
@@ -458,17 +505,28 @@ function CheckoutCallbackContent() {
               </p>
             )}
             <div className="flex flex-col gap-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setPollIndex(0);
-                  verify(token);
-                }}
-                disabled={isRefreshing}
-                className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm disabled:opacity-60"
-              >
-                {isRefreshing ? 'Checking…' : 'Check again'}
-              </button>
+              {awaitingWhatsApp ? (
+                <button
+                  type="button"
+                  onClick={handleMarkPaid}
+                  disabled={isRefreshing}
+                  className={`w-full text-white font-semibold py-3 rounded-full text-sm disabled:opacity-60 ${awaitingFlash ? 'bg-amber-600' : 'bg-[#1DA851] hover:bg-[#178a43]'}`}
+                >
+                  {isRefreshing ? 'Checking…' : awaitingFlash ? 'Awaiting confirmation' : 'Mark as paid'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPollIndex(0);
+                    verify(token);
+                  }}
+                  disabled={isRefreshing}
+                  className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm disabled:opacity-60"
+                >
+                  {isRefreshing ? 'Checking…' : 'Check again'}
+                </button>
+              )}
               {(result?.status === 'not_started' || pollIndex >= POLL_DELAYS.length) && retryPanel}
               <a
                 href={buildWhatsAppMessageUrl(`Hello! I paid for order ${orderNumber} (reference ${result?.provider_reference || reference || 'n/a'}) and it is still pending. Can you check?`, supportPhone)}
