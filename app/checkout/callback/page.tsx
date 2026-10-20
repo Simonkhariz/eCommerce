@@ -107,9 +107,13 @@ function CheckoutCallbackContent() {
             const paidOrder = await loadOrder(accessToken);
             // The cart is emptied only now that payment is verified: the order's items leave it
             // (once per order, so reopening this receipt never removes items added later).
+            // The order's own items are used for a payment made in the last two days; an older
+            // receipt only clears the cart it was placed from (never items bought again since).
+            const paidAtMs = new Date(String(res.verified_at || paidOrder?.payment?.verified_at || '').replace(' ', 'T')).getTime();
+            const recent = Number.isFinite(paidAtMs) && Date.now() - paidAtMs < 2 * 24 * 60 * 60 * 1000;
             completePaidOrder(
               orderNumber,
-              Array.isArray(paidOrder?.items)
+              recent && Array.isArray(paidOrder?.items)
                 ? paidOrder.items.map((it: any) => ({ variant_id: it.variant_id ? Number(it.variant_id) : null, quantity: Number(it.quantity) }))
                 : undefined
             );
@@ -123,6 +127,8 @@ function CheckoutCallbackContent() {
             }
           }
         } else if (orderStatus === 'cancelled') {
+          // Closed without payment: checkout should start a new order, not resume this one.
+          clearPendingOrder(orderNumber);
           setView('cancelled');
         } else if (res.status === 'failed') {
           setView('failed');
@@ -567,11 +573,31 @@ function CheckoutCallbackContent() {
             <div className="w-16 h-16 bg-neutral-100 text-neutral-700 rounded-full flex items-center justify-center mx-auto">
               <HugeiconsIcon icon={Clock01Icon} size={36} aria-hidden="true" />
             </div>
-            <h1 className="text-2xl font-extrabold text-black">This order has expired</h1>
+            <h1 className="text-2xl font-extrabold text-black">{awaitingWhatsApp ? 'This order was cancelled' : 'This order has expired'}</h1>
             <p className="text-sm text-neutral-700 max-w-sm mx-auto">
-              Order <strong className="font-mono">{orderNumber}</strong> wasn&apos;t paid in time, so its items were released. Your cart
-              is still here: place the order again to pay.
+              {awaitingWhatsApp ? (
+                <>
+                  The store did not receive a transfer for order <strong className="font-mono">{orderNumber}</strong>, so it was
+                  cancelled and its items were released. Your cart is still here: place the order again to pay.
+                </>
+              ) : (
+                <>
+                  Order <strong className="font-mono">{orderNumber}</strong> wasn&apos;t paid in time, so its items were released. Your cart
+                  is still here: place the order again to pay.
+                </>
+              )}
             </p>
+            {awaitingWhatsApp && (
+              <a
+                href={buildWhatsAppMessageUrl(`Hello! Order ${orderNumber} was cancelled, but I sent the transfer. Here is my bank receipt.`, supportPhone)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100 font-semibold py-3 rounded-full text-sm flex items-center justify-center gap-2"
+              >
+                <WhatsAppIcon className="w-4 h-4 text-[#128C7E]" />
+                <span>I sent the transfer: message the store</span>
+              </a>
+            )}
             <Link
               href="/cart"
               onClick={() => clearPendingOrder(orderNumber)}

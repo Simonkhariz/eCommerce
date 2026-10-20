@@ -638,15 +638,19 @@ class CheckoutController
         }
 
         $firstClaim = $order['customer_marked_paid_at'] === null;
-        // Keep the items reserved while the store checks the transfer (never shortens it).
-        $this->db->executeUpdate(
-            "UPDATE `orders`
-             SET `customer_marked_paid_at` = COALESCE(`customer_marked_paid_at`, NOW()),
-                 `expires_at` = GREATEST(COALESCE(`expires_at`, NOW()), DATE_ADD(NOW(), INTERVAL ? MINUTE))
-             WHERE `id` = ? AND `order_status` = 'pending_payment'",
-            'ii',
-            [PaymentAttempts::manualWindowMinutes(), (int) $order['id']]
-        );
+        if ($firstClaim) {
+            // Keep the items reserved while the store checks the transfer (never shortens it).
+            // Only the first tap does this: tapping again can't hold the stock any longer, so an
+            // order that is never paid still expires and its items go back on sale.
+            $this->db->executeUpdate(
+                "UPDATE `orders`
+                 SET `customer_marked_paid_at` = NOW(),
+                     `expires_at` = GREATEST(COALESCE(`expires_at`, NOW()), DATE_ADD(NOW(), INTERVAL ? MINUTE))
+                 WHERE `id` = ? AND `order_status` = 'pending_payment' AND `customer_marked_paid_at` IS NULL",
+                'ii',
+                [PaymentAttempts::manualWindowMinutes(), (int) $order['id']]
+            );
+        }
         $fresh = $this->db->fetchOne("SELECT `customer_marked_paid_at`, `expires_at` FROM `orders` WHERE `id` = ?", 'i', [(int) $order['id']]);
 
         if ($firstClaim) {

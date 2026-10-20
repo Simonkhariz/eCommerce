@@ -218,9 +218,34 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [authLoading, isCustomer, cartStorageKey]);
 
+  // Other tabs of the shop: when one changes the cart (an item added, or a paid order taken
+  // out on the receipt page), every other tab takes the same cart instead of keeping (and
+  // later saving back) its own older copy.
+  const fromOtherTab = useRef(false);
+  useEffect(() => {
+    if (!isLoaded) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === cartStorageKey) {
+        const next = readJson<CartItem[]>(cartStorageKey, []);
+        fromOtherTab.current = true;
+        itemsRef.current = Array.isArray(next) ? next : [];
+        setItems(itemsRef.current);
+      } else if (e.key === PROMO_STORAGE_KEY && e.newValue === null) {
+        setAppliedPromo(null);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [isLoaded, cartStorageKey]);
+
   // Persist locally on every change; for customers also save to the account (debounced).
   useEffect(() => {
     if (!isLoaded) return;
+    if (fromOtherTab.current) {
+      // Already stored (and saved to the account) by the tab that made the change.
+      fromOtherTab.current = false;
+      return;
+    }
     writeStorage(cartStorageKey, JSON.stringify(items));
 
     // Only write to the account once its saved cart was read, so an offline device never

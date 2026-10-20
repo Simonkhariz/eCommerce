@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, ChevronRight, Download } from 'lucide-react';
-import { type AdminOrderListItem, adminDownloadExport, adminGetOrders, errorMessage } from '@/lib/admin-api';
+import { type AdminOrderListItem, adminDownloadExport, adminGetOrders, adminUpdateOrderStatus, errorMessage } from '@/lib/admin-api';
 import { ORDER_STATUS, formatDate, formatPrice, gatewayLabel, num, orderStatus, paymentStatus } from '@/lib/admin-format';
 import {
   Button,
@@ -19,6 +19,7 @@ import {
   Toolbar,
   redirectIfSignedOut,
   useAdminData,
+  useConfirm,
   useDebouncedValue,
   useToast,
   useUrlFilters,
@@ -45,7 +46,38 @@ function awaitingWhatsApp(o: AdminOrderListItem): boolean {
 export function OrderManagement() {
   const toast = useToast();
   const router = useRouter();
+  const confirm = useConfirm();
   const [paying, setPaying] = useState<AdminOrderListItem | null>(null);
+  const [cancelling, setCancelling] = useState<string | null>(null);
+
+  // WhatsApp transfer that never arrived: cancel straight from the list.
+  const cancelUnpaid = async (o: AdminOrderListItem) => {
+    const ok = await confirm({
+      title: `Cancel ${o.order_number}?`,
+      tone: 'danger',
+      confirmLabel: 'Cancel order',
+      cancelLabel: 'Keep order',
+      message: (
+        <>
+          {o.customer_marked_paid_at && (
+            <p className="mb-2 font-semibold">The customer marked this transfer as paid. Check your bank first: cancel only if the money has not arrived.</p>
+          )}
+          <p>The reserved items go back on sale and the customer gets an email saying the order was cancelled and no payment was taken.</p>
+        </>
+      ),
+    });
+    if (!ok) return;
+    setCancelling(o.order_number);
+    try {
+      await adminUpdateOrderStatus(o.order_number, 'cancelled', 'Cancelled by the store: the WhatsApp transfer was not received.');
+      toast.success(`${o.order_number} cancelled.`);
+      reload();
+    } catch (err) {
+      if (!redirectIfSignedOut(err)) toast.error(errorMessage(err));
+    } finally {
+      setCancelling(null);
+    }
+  };
   const [filters, setFilters] = useUrlFilters({ status: 'all', search: '', page: '1' });
   const [searchText, setSearchText] = useState(filters.search);
   const debouncedSearch = useDebouncedValue(searchText, 350);
@@ -196,9 +228,21 @@ export function OrderManagement() {
                     <td className="text-[#4b5563]">{o.payment_provider ? gatewayLabel(o.payment_provider) : '—'}</td>
                     <td className="whitespace-nowrap text-right">
                       {awaitingWhatsApp(o) ? (
-                        <Button size="sm" variant="primary" onClick={() => setPaying(o)} title="Confirm the WhatsApp payment">
-                          Confirm<span className="sr-only"> payment for order {o.order_number}</span>
-                        </Button>
+                        <span className="inline-flex gap-1.5">
+                          <Button size="sm" variant="primary" onClick={() => setPaying(o)} title="The transfer arrived: record the payment">
+                            Confirm<span className="sr-only"> payment for order {o.order_number}</span>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => cancelUnpaid(o)}
+                            disabled={cancelling === o.order_number}
+                            title="No transfer arrived: cancel the order"
+                          >
+                            {cancelling === o.order_number ? 'Cancelling…' : 'Cancel'}
+                            <span className="sr-only"> order {o.order_number}</span>
+                          </Button>
+                        </span>
                       ) : (
                         <Link
                           href={href}

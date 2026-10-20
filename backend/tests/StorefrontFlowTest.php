@@ -114,7 +114,10 @@ $t->check('payment still unconfirmed', 'pending', TestKit::get($t->http('GET', "
 $adminEmail = strtolower((string) $t->scalar("SELECT `email` FROM `users` WHERE `id` = ?", 'i', [(int) $admin['id']]));
 $t->check('store admin emailed', 1, (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `template` = 'payment_claimed' AND `recipient_email` = ? AND `dedup_key` LIKE ?", 'ss', [$adminEmail, "payment_claimed:{$onum}:%"]));
 $t->check('history notes the claim', 1, (int) $t->scalar("SELECT COUNT(*) FROM `order_status_history` h JOIN `orders` o ON o.id = h.order_id WHERE o.order_number = ? AND h.comment LIKE 'Customer marked%'", 's', [$onum]));
+$t->sql("UPDATE `orders` SET `expires_at` = DATE_ADD(NOW(), INTERVAL 2 HOUR) WHERE `order_number` = ?", 's', [$onum]);
+$expiresBefore = (string) $t->scalar("SELECT `expires_at` FROM `orders` WHERE `order_number` = ?", 's', [$onum]);
 $t->check('tapping again: 200', 200, $t->http('POST', "/checkout/orders/{$onum}/payment-sent", ['headers' => ["X-Guest-Access-Token: {$token}"], 'json' => []])['status']);
+$t->check('tapping again does not hold the stock longer', $expiresBefore, (string) $t->scalar("SELECT `expires_at` FROM `orders` WHERE `order_number` = ?", 's', [$onum]));
 $t->check('tapping again sends no second email', 1, (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `template` = 'payment_claimed' AND `recipient_email` = ? AND `dedup_key` LIKE ?", 'ss', [$adminEmail, "payment_claimed:{$onum}:%"]));
 $claimedList = $t->http('GET', '/admin/orders?status=payment_claimed&per_page=100', ['jar' => $admin['jar']]);
 $t->ok('admin "Customer says paid" list shows the order', in_array($onum, array_column((array) TestKit::get($claimedList, 'data.items'), 'order_number'), true));
@@ -143,6 +146,10 @@ $t->section('Cancelling releases the stock');
 $cancel = $t->http('PATCH', "/admin/orders/{$onum}/status", ['jar' => $admin['jar'], 'csrf' => $admin['csrf'], 'json' => ['status' => 'cancelled', 'comment' => 'Storefront test cleanup']]);
 $t->check('admin cancels the unpaid order', 200, $cancel['status']);
 $t->check('cancelling restores stock', $stock, (int) $t->scalar("SELECT `stock_quantity` FROM `product_variants` WHERE `id` = ?", 'i', [$vid]));
+$claimedAfter = $t->http('GET', '/admin/orders?status=payment_claimed&per_page=100', ['jar' => $admin['jar']]);
+$t->ok('a cancelled claim leaves the "Customer says paid" list', !in_array($onum, array_column((array) TestKit::get($claimedAfter, 'data.items'), 'order_number'), true));
+$t->check('customer then sees the order cancelled', 'cancelled', TestKit::get($t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => ["X-Guest-Access-Token: {$token}"]]), 'data.order_status'));
+$t->check('mark as paid after cancelling records nothing', false, TestKit::get($t->http('POST', "/checkout/orders/{$onum}/payment-sent", ['headers' => ["X-Guest-Access-Token: {$token}"], 'json' => []]), 'data.recorded'));
 
 // -----------------------------------------------------------------------------
 $t->section('Reviews: moderated, verified purchase decided by the server');

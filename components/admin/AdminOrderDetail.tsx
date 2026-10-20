@@ -120,6 +120,9 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
       cancelLabel: 'Keep order',
       message: (
         <>
+          {order.order_status === 'pending_payment' && order.customer_marked_paid_at && (
+            <p className="mb-2 font-semibold">The customer marked their WhatsApp transfer as paid. Check your bank first: cancel only if the money has not arrived.</p>
+          )}
           <p>The reserved stock goes back on sale and the customer is told the order was cancelled.</p>
           {paid && (
             <p className="mt-2 font-semibold">
