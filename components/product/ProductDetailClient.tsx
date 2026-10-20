@@ -54,64 +54,71 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
   const { addToCart } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
 
-  const loadRelated = useCallback(async (mapped: Product) => {
-    try {
-      const relatedRes = await getProducts({ category: mapped.category, per_page: 5 });
-      setRelatedProducts(
-        relatedRes.items
-          .filter((item) => String(item.id) !== mapped.id && item.slug !== mapped.slug)
-          .slice(0, 4)
-          .map(mapApiProductToStorefront)
-      );
-    } catch {
-      // Non-blocking for related products
-    }
-  }, []);
+  const loadRelated = useCallback(
+    (mapped: Product) =>
+      getProducts({ category: mapped.category, per_page: 5 }).then(
+        (relatedRes) =>
+          setRelatedProducts(
+            relatedRes.items
+              .filter((item) => String(item.id) !== mapped.id && item.slug !== mapped.slug)
+              .slice(0, 4)
+              .map(mapApiProductToStorefront)
+          ),
+        () => {
+          // Non-blocking for related products
+        }
+      ),
+    []
+  );
 
   // Load (or, when the server already sent it, quietly refresh) the product from the API.
+  // State changes only once the API has answered; "loading" is set by the caller.
   const loadProduct = useCallback(
-    async (background = false) => {
-      if (!id) return;
-      if (!background) {
-        setLoading(true);
-        setError(null);
-      }
-
-      try {
-        const mapped = mapApiProductToStorefront(await getProductDetail(id));
-        setProduct(mapped);
-        if (background) {
-          // Keep the shopper's choice when it still exists.
-          setSelectedColor((color) => (mapped.variants?.some((v) => v.color.name === color?.name) ? color : firstChoice(mapped)?.color ?? null));
-          setSelectedSize((size) => (mapped.variants?.some((v) => v.size === size) ? size : firstChoice(mapped)?.size ?? null));
-        } else {
-          setQuantity(1);
-          setSelectedColor(firstChoice(mapped)?.color ?? null);
-          setSelectedSize(firstChoice(mapped)?.size ?? null);
-          void loadRelated(mapped);
-        }
-      } catch (err: any) {
-        if (background) return; // The server copy is still on screen.
-        const is404 = err.statusCode === 404 || err.errorCode === 'RESOURCE_NOT_FOUND';
-        setError({
-          notFound: is404,
-          message: is404
-            ? `Product "${id}" was not found or is no longer available.`
-            : err.message || 'We could not load this product.',
-        });
-      } finally {
-        if (!background) setLoading(false);
-      }
-    },
+    (background = false) =>
+      getProductDetail(id)
+        .then(
+          (detail) => {
+            const mapped = mapApiProductToStorefront(detail);
+            setProduct(mapped);
+            if (background) {
+              // Keep the shopper's choice when it still exists.
+              setSelectedColor((color) => (mapped.variants?.some((v) => v.color.name === color?.name) ? color : firstChoice(mapped)?.color ?? null));
+              setSelectedSize((size) => (mapped.variants?.some((v) => v.size === size) ? size : firstChoice(mapped)?.size ?? null));
+            } else {
+              setQuantity(1);
+              setSelectedColor(firstChoice(mapped)?.color ?? null);
+              setSelectedSize(firstChoice(mapped)?.size ?? null);
+              void loadRelated(mapped);
+            }
+          },
+          (err: any) => {
+            if (background) return; // The server copy is still on screen.
+            const is404 = err.statusCode === 404 || err.errorCode === 'RESOURCE_NOT_FOUND';
+            setError({
+              notFound: is404,
+              message: is404 ? `Product "${id}" was not found or is no longer available.` : err.message || 'We could not load this product.',
+            });
+          }
+        )
+        .finally(() => {
+          if (!background) setLoading(false);
+        }),
     [id, loadRelated]
   );
+
+  // "Try again" after a failed load.
+  const retryLoad = () => {
+    setLoading(true);
+    setError(null);
+    void loadProduct();
+  };
 
   useEffect(() => {
     if (initialProduct) {
       void loadRelated(initialProduct);
       void loadProduct(true);
     } else {
-      void loadProduct();
+      void loadProduct(); // `loading` starts as true when there is no server copy
     }
   }, [initialProduct, loadProduct, loadRelated]);
 
@@ -243,7 +250,7 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
           {error.message} Please check your connection and try again.
         </p>
         <button
-          onClick={() => void loadProduct()}
+          onClick={retryLoad}
           className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold px-8 py-3.5 rounded-full text-sm transition-all shadow-md"
         >
           <HugeiconsIcon icon={RefreshIcon} size={16} />

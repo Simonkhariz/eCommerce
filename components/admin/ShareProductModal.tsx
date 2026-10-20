@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Copy, Mail, Share2 } from 'lucide-react';
 import { formatPrice } from '@/lib/admin-format';
 import { normalizePhoneDigits } from '@/lib/whatsapp';
@@ -21,15 +21,17 @@ export function ShareProductModal({ product, onClose }: { product: ShareableProd
   const toast = useToast();
   const [phone, setPhone] = useState('');
   const [phoneError, setPhoneError] = useState<string | undefined>();
-  const [canNativeShare, setCanNativeShare] = useState(false);
-
-  useEffect(() => {
+  // A fresh number field for each product shared.
+  const [formFor, setFormFor] = useState(product?.slug);
+  if (product?.slug !== formFor) {
+    setFormFor(product?.slug);
     setPhone('');
     setPhoneError(undefined);
-    setCanNativeShare(typeof navigator !== 'undefined' && typeof navigator.share === 'function');
-  }, [product?.slug]);
+  }
 
   if (!product) return null;
+  // Only rendered in the browser once a product is chosen, so navigator is available here.
+  const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
 
   const url = `${window.location.origin}/products/${encodeURIComponent(product.slug)}`;
   const message = `${product.name} – ${formatPrice(product.price)}\n${url}`;

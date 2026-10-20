@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { Product } from '@/types';
 import { ProductCard } from '@/components/ui/ProductCard';
@@ -13,6 +13,24 @@ interface FlashDealsProps {
   endsAt?: string | null;
   /** Called once when the countdown reaches zero (the deals are over). */
   onExpired?: () => void;
+}
+
+// A shared one-second clock, read with useSyncExternalStore: null on the server and while
+// hydrating (so no time-dependent markup is rendered there), then the current time.
+let clockNow = 0;
+function subscribeClock(onTick: () => void) {
+  clockNow = Date.now();
+  const timer = setInterval(() => {
+    clockNow = Date.now();
+    onTick();
+  }, 1000);
+  return () => clearInterval(timer);
+}
+const subscribeNever = () => () => {};
+const readClock = () => clockNow || (clockNow = Date.now());
+
+function useClock(running: boolean): number | null {
+  return useSyncExternalStore(running ? subscribeClock : subscribeNever, running ? readClock : () => null, () => null);
 }
 
 function parseEnd(value: string | null | undefined): number | null {
@@ -33,15 +51,8 @@ function splitRemaining(ms: number) {
 
 export const FlashDeals: React.FC<FlashDealsProps> = ({ products, endsAt, onExpired }) => {
   const endTs = parseEnd(endsAt);
-  // null until mounted, so server and first client render match (no time-dependent markup).
-  const [now, setNow] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (endTs === null) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [endTs]);
+  // null until hydrated, so server and first client render match (no time-dependent markup).
+  const now = useClock(endTs !== null);
 
   const expired = endTs !== null && now !== null && now >= endTs;
 

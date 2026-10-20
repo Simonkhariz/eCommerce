@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useRef, useState } from 'react';
+import Image from 'next/image';
 import { ImageOff, Plus, Upload } from 'lucide-react';
+import { canOptimizeImage } from '@/lib/image';
 import { apiUploadProductImage } from '@/lib/api-client';
 import { AdminCategory, adminDeactivateCategory, adminGetCategories, adminSaveCategory, errorMessage, fieldErrors } from '@/lib/admin-api';
 import {
@@ -336,7 +338,17 @@ function CategoryThumb({ src, className }: { src: string | null; className: stri
       </span>
     );
   }
-  return <img src={src} alt="" onError={() => setFailed(true)} className={`${className} shrink-0 rounded-md border border-[#e5e7eb] object-cover`} />;
+  return (
+    <Image
+      src={src}
+      alt=""
+      width={32}
+      height={32}
+      unoptimized={!canOptimizeImage(src)}
+      onError={() => setFailed(true)}
+      className={`${className} shrink-0 rounded-md border border-[#e5e7eb] object-cover`}
+    />
+  );
 }
 
 /** Form preview under the image field; says so plainly when the address doesn't load. */
@@ -346,7 +358,16 @@ function ImagePreview({ src, onRemove }: { src: string; onRemove: () => void }) 
     <div className="flex items-center gap-3 rounded-lg border border-[#e5e7eb] bg-[#f9fafb] p-2">
       <div className="relative size-16 shrink-0 overflow-hidden rounded-md border border-[#e5e7eb] bg-white">
         {state !== 'failed' ? (
-          <img src={src} alt="Category image preview" onLoad={() => setState('ok')} onError={() => setState('failed')} className="size-full object-cover" />
+          <Image
+            src={src}
+            alt="Category image preview"
+            fill
+            sizes="64px"
+            unoptimized={!canOptimizeImage(src)}
+            onLoad={() => setState('ok')}
+            onError={() => setState('failed')}
+            className="object-cover"
+          />
         ) : (
           <span className="flex size-full items-center justify-center text-[#9ca3af]" aria-hidden="true">
             <ImageOff className="size-5" />

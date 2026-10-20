@@ -160,28 +160,14 @@ export function AdminCustomers() {
 function CustomerDetailModal({ customerId, onClose, onChanged }: { customerId: number | null; onClose: () => void; onChanged: () => void }) {
   const toast = useToast();
   const confirm = useConfirm();
-  const [detail, setDetail] = useState<CustomerDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const load = React.useCallback(async (id: number) => {
-    setLoading(true);
-    setError(null);
-    try {
-      setDetail(await adminGetCustomer(id));
-    } catch (err) {
-      if (redirectIfSignedOut(err)) return;
-      setError(errorMessage(err, 'Could not load this customer.'));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    setDetail(null);
-    if (customerId !== null) load(customerId);
-  }, [customerId, load]);
+  const { data, loading, error, reload } = useAdminData<CustomerDetail | null>(
+    async () => (customerId !== null ? adminGetCustomer(customerId) : null),
+    [customerId]
+  );
+  // Only the customer that is open (never the previous one while the next loads).
+  const detail = data && data.customer.id === customerId ? data : null;
 
   const customer = detail?.customer;
   const isSuspended = customer?.status === 'suspended';
@@ -208,7 +194,7 @@ function CustomerDetailModal({ customerId, onClose, onChanged }: { customerId: n
     try {
       await adminUpdateCustomerStatus(customer.id, next);
       toast.success(next === 'suspended' ? 'Customer suspended and signed out.' : 'Customer reactivated.');
-      await load(customer.id);
+      await reload();
       onChanged();
     } catch (err) {
       if (redirectIfSignedOut(err)) return;
@@ -239,7 +225,7 @@ function CustomerDetailModal({ customerId, onClose, onChanged }: { customerId: n
         ) : undefined
       }
     >
-      <DataState loading={loading} error={error} onRetry={() => customerId !== null && load(customerId)} empty={false}>
+      <DataState loading={loading} error={error} onRetry={reload} empty={false}>
         {customer && detail && (
           <div className="space-y-5">
             <DetailList

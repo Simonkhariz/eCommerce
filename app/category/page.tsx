@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FilterState, Product } from '@/types';
@@ -21,12 +21,22 @@ function CatalogContent() {
 
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [facets, setFacets] = useState<CatalogFacets | null>(null);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const requestRef = useRef(0);
+  // One request per address (filters, page) and per "Try again"; only its answer is shown.
+  const [retries, setRetries] = useState(0);
+  const requestKey = `${queryKey}#${retries}`;
+  const [answer, setAnswer] = useState<{
+    key: string;
+    products: Product[];
+    totalCount: number;
+    totalPages: number;
+    error: string | null;
+  } | null>(null);
+  // While the next page loads, the previous results stay on screen.
+  const loading = answer?.key !== requestKey;
+  const products = answer?.products ?? [];
+  const totalCount = answer?.totalCount ?? 0;
+  const totalPages = answer?.totalPages ?? 1;
+  const error = loading ? null : (answer?.error ?? null);
 
   useEffect(() => {
     getCatalogFacets()
@@ -34,13 +44,9 @@ function CatalogContent() {
       .catch(() => setFacets({ categories: [], colors: [], sizes: [], dress_styles: [], price: { min: 0, max: 0 } }));
   }, []);
 
-  // One request per URL change; responses from superseded requests are ignored.
-  const fetchProducts = useCallback(async () => {
-    const requestId = ++requestRef.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await getProducts({
+  useEffect(() => {
+    let current = true; // a newer request makes this answer irrelevant
+    getProducts({
         category: filters.category || undefined,
         search: filters.searchQuery.trim() || undefined,
         min_price: filters.minPrice ?? undefined,
@@ -53,25 +59,26 @@ function CatalogContent() {
         sort: apiSortFor(filters.sortBy),
         page: filters.page,
         per_page: PAGE_SIZE,
-      });
-      if (requestId !== requestRef.current) return;
-      setProducts(response.items.map(mapApiProductToStorefront));
-      setTotalCount(response.pagination.total);
-      setTotalPages(Math.max(1, response.pagination.total_pages));
-    } catch (err: any) {
-      if (requestId !== requestRef.current) return;
-      setError(err?.message || 'The catalogue could not be loaded.');
-      setProducts([]);
-      setTotalCount(0);
-      setTotalPages(1);
-    } finally {
-      if (requestId === requestRef.current) setLoading(false);
-    }
-  }, [filters]);
-
-  useEffect(() => {
-    fetchProducts();
-  }, [fetchProducts]);
+    }).then(
+      (response) => {
+        if (!current) return;
+        setAnswer({
+          key: requestKey,
+          products: response.items.map(mapApiProductToStorefront),
+          totalCount: response.pagination.total,
+          totalPages: Math.max(1, response.pagination.total_pages),
+          error: null,
+        });
+      },
+      (err: any) => {
+        if (!current) return;
+        setAnswer({ key: requestKey, products: [], totalCount: 0, totalPages: 1, error: err?.message || 'The catalogue could not be loaded.' });
+      }
+    );
+    return () => {
+      current = false;
+    };
+  }, [filters, requestKey]);
 
   const navigate = (next: FilterState, scrollTop = false) => {
     router.push(buildCatalogUrl(next), { scroll: false });
@@ -133,7 +140,7 @@ function CatalogContent() {
           onOpenMobileFilters={() => setIsMobileDrawerOpen(true)}
           loading={loading}
           error={error}
-          onRetry={fetchProducts}
+          onRetry={() => setRetries((n) => n + 1)}
           onPageChange={handlePageChange}
           totalPages={totalPages}
         />

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ApiUser,
   ApiAddress,
@@ -42,6 +43,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const router = useRouter();
   const [user, setUser] = useState<ApiUser | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [addresses, setAddresses] = useState<ApiAddress[]>([]);
@@ -57,20 +59,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const refreshUser = useCallback(async () => {
-    try {
-      const res = await apiGetMe();
-      setUser(res.user);
-      if (res.user) {
-        loadAddresses();
-      }
-    } catch {
-      setUser(null);
-      setAddresses([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [loadAddresses]);
+  // State changes only once the server has answered (never synchronously).
+  const refreshUser = useCallback(
+    () =>
+      apiGetMe()
+        .then(
+          (res) => {
+            setUser(res.user);
+            if (res.user) loadAddresses();
+          },
+          () => {
+            setUser(null);
+            setAddresses([]);
+          }
+        )
+        .finally(() => setIsLoading(false)),
+    [loadAddresses]
+  );
 
   // Initial session hydration from HttpOnly cookie
   useEffect(() => {
@@ -93,7 +98,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Admin accounts get an admin-scoped session cookie and belong in the admin dashboard,
     // not the storefront customer session.
     if (res.user?.role === 'admin' || res.user?.role === 'super_admin') {
-      window.location.href = '/admin';
+      router.push('/admin');
       return;
     }
 

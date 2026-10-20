@@ -55,48 +55,42 @@ function SearchBox({ onNavigate, autoFocus = false, inputClassName = '' }: Searc
   const inputId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const requestId = useRef(0);
 
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
-  const [results, setResults] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const term = query.trim();
+  // The highlighted suggestion starts over whenever the text changes.
   const [active, setActive] = useState(-1);
+  const [activeFor, setActiveFor] = useState(query);
+  if (query !== activeFor) {
+    setActiveFor(query);
+    setActive(-1);
+  }
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus();
   }, [autoFocus]);
 
-  // Debounced lookup; a newer request always wins over an older, slower one.
+  // Debounced lookup; only the answer for the current text is used. While it loads, the
+  // previous suggestions stay visible.
+  const [answer, setAnswer] = useState<{ term: string; results: Product[]; failed: boolean } | null>(null);
   useEffect(() => {
-    const term = query.trim();
-    setActive(-1);
-    if (!term) {
-      requestId.current++;
-      setResults([]);
-      setLoading(false);
-      setFailed(false);
-      return;
-    }
-    const id = ++requestId.current;
-    setLoading(true);
-    const timer = window.setTimeout(async () => {
-      try {
-        const res = await getProducts({ search: term, per_page: 5 });
-        if (id !== requestId.current) return;
-        setResults(res.items.map(mapApiProductToStorefront));
-        setFailed(false);
-      } catch {
-        if (id !== requestId.current) return;
-        setResults([]);
-        setFailed(true);
-      } finally {
-        if (id === requestId.current) setLoading(false);
-      }
+    if (!term) return;
+    let current = true;
+    const timer = window.setTimeout(() => {
+      getProducts({ search: term, per_page: 5 }).then(
+        (res) => current && setAnswer({ term, results: res.items.map(mapApiProductToStorefront), failed: false }),
+        () => current && setAnswer({ term, results: [], failed: true })
+      );
     }, 250);
-    return () => window.clearTimeout(timer);
-  }, [query]);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [term]);
+  const loading = term !== '' && answer?.term !== term;
+  const results = term ? (answer?.results ?? []) : [];
+  const failed = term !== '' && !loading && Boolean(answer?.failed);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -106,7 +100,6 @@ function SearchBox({ onNavigate, autoFocus = false, inputClassName = '' }: Searc
     return () => document.removeEventListener('mousedown', onDown);
   }, []);
 
-  const term = query.trim();
   const showPanel = open && term !== '';
   // Options: each product, then "view all results".
   const optionCount = results.length + (term ? 1 : 0);
@@ -397,11 +390,13 @@ export const Header: React.FC = () => {
   const profileMenuId = useId();
 
   // Close transient menus on navigation.
-  useEffect(() => {
+  const [menusFor, setMenusFor] = useState(pathname);
+  if (pathname !== menusFor) {
+    setMenusFor(pathname);
     setIsMobileMenuOpen(false);
     setIsMobileSearchOpen(false);
     setIsProfileMenuOpen(false);
-  }, [pathname]);
+  }
 
   useEffect(() => {
     router.prefetch('/cart');

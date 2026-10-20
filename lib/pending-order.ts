@@ -7,6 +7,27 @@ import type { CartItem } from '@/types';
 
 const KEY = 'shopco_pending_order';
 
+/** Fired on this tab whenever one of these values changes (other tabs get the 'storage' event). */
+const CHANGE_EVENT = 'shopco-order-data';
+
+function notifyChange(): void {
+  try {
+    window.dispatchEvent(new Event(CHANGE_EVENT));
+  } catch {
+    // not in a browser
+  }
+}
+
+/** For useSyncExternalStore: call back when an order value stored on this device changes. */
+export function subscribeToOrderData(onChange: () => void): () => void {
+  window.addEventListener('storage', onChange);
+  window.addEventListener(CHANGE_EVENT, onChange);
+  return () => {
+    window.removeEventListener('storage', onChange);
+    window.removeEventListener(CHANGE_EVENT, onChange);
+  };
+}
+
 export interface PendingOrder {
   orderNumber: string;
   /** Cart contents the order was created from (variant:quantity list). */
@@ -25,6 +46,7 @@ export function cartSignature(items: CartItem[]): string {
 export function savePendingOrder(order: PendingOrder): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(order));
+    notifyChange();
   } catch {
     // Storage unavailable: checkout still works, it just won't resume.
   }
@@ -60,6 +82,7 @@ export function clearPendingOrder(orderNumber?: string): void {
       if (current && current.orderNumber !== orderNumber) return;
     }
     localStorage.removeItem(KEY);
+    notifyChange();
   } catch {
     // ignore
   }
@@ -94,6 +117,7 @@ export function markOrderSettled(orderNumber: string): void {
 export function markInvoiceSent(orderNumber: string): void {
   try {
     localStorage.setItem(`shopco_whatsapp_invoice_${orderNumber}`, String(Date.now()));
+    notifyChange();
   } catch {
     // ignore
   }
@@ -112,6 +136,7 @@ export function saveGuestToken(orderNumber: string, token: string): void {
   try {
     localStorage.setItem(`shopco_guest_token_${orderNumber}`, token);
     localStorage.setItem('shopco_latest_order_number', orderNumber);
+    notifyChange();
   } catch {
     // ignore
   }

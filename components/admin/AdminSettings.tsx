@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import {
   type PaymentMethodId,
@@ -141,14 +141,12 @@ export function AdminSettings() {
     saved[s.key] = s.value ?? '';
   });
 
-  useEffect(() => {
-    if (!data) return;
-    const initial: Record<string, string> = {};
-    data.editable.forEach((s) => {
-      initial[s.key] = s.value ?? '';
-    });
-    setValues(initial);
-  }, [data]);
+  // The form starts from the saved settings each time they (re)load.
+  const [valuesFor, setValuesFor] = useState<typeof data>(null);
+  if (data && data !== valuesFor) {
+    setValuesFor(data);
+    setValues(saved);
+  }
 
   const changed = Object.keys(values).filter((key) => values[key] !== saved[key]);
 

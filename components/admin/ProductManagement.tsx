@@ -17,6 +17,7 @@ import { adminGetCategories, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { formatPrice, num } from '@/lib/admin-format';
 import { slugify } from '@/components/admin/AdminCategories';
 import { ShareProductModal, type ShareableProduct } from '@/components/admin/ShareProductModal';
+import { AdminImage } from '@/components/admin/AdminImage';
 import {
   Button,
   Checkbox,
@@ -509,14 +510,13 @@ export function ProductManagement() {
                   <tr key={p.id}>
                     <td>
                       <div className="flex items-center gap-3">
-                        <img
-                          src={p.primary_image || PRODUCT_IMAGE_PLACEHOLDER}
+                        <AdminImage
+                          src={p.primary_image}
+                          fallback={PRODUCT_IMAGE_PLACEHOLDER}
                           alt=""
+                          width={44}
+                          height={44}
                           className="size-11 shrink-0 rounded-lg border border-[#e5e7eb] bg-[#f9fafb] object-cover"
-                          onError={(e) => {
-                            e.currentTarget.onerror = null;
-                            e.currentTarget.src = PRODUCT_IMAGE_PLACEHOLDER;
-                          }}
                         />
                         <div className="min-w-0">
                           <p className="max-w-[260px] truncate font-medium text-[#111827]" title={p.name}>
@@ -796,15 +796,16 @@ export function ProductManagement() {
                     key={`${img.image_url}-${idx}`}
                     className={`flex flex-col gap-1.5 rounded-lg border p-1.5 ${img.is_primary ? 'border-[#111827]' : 'border-[#e5e7eb]'}`}
                   >
-                    <img
-                      src={img.image_url}
-                      alt={img.alt_text || `Photo ${idx + 1}`}
-                      className="aspect-square w-full rounded-md bg-[#f9fafb] object-cover"
-                      onError={(e) => {
-                        e.currentTarget.onerror = null;
-                        e.currentTarget.src = PRODUCT_IMAGE_PLACEHOLDER;
-                      }}
-                    />
+                    <div className="relative aspect-square w-full overflow-hidden rounded-md bg-[#f9fafb]">
+                      <AdminImage
+                        src={img.image_url}
+                        fallback={PRODUCT_IMAGE_PLACEHOLDER}
+                        alt={img.alt_text || `Photo ${idx + 1}`}
+                        fill
+                        sizes="(max-width: 640px) 50vw, 160px"
+                        className="object-cover"
+                      />
+                    </div>
                     <div className="flex items-center justify-between gap-1">
                       <label className="flex items-center gap-1.5 text-xs text-[#374151]">
                         <input

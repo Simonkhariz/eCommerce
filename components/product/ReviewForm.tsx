@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { useAuth } from '@/context/AuthContext';
 import { ApiError, apiSubmitReview } from '@/lib/api-client';
@@ -38,16 +38,20 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
   const ids = useId();
 
   // Fresh form each time it opens; prefill from the signed-in customer.
-  useEffect(() => {
-    if (!open) return;
-    setName(user?.full_name ?? '');
-    setEmail(user?.email ?? '');
-    setRating(0);
-    setTitle('');
-    setComment('');
-    setErrors({});
-    setDoneMessage(null);
-  }, [open, user]);
+  const formKey = open ? `open:${user?.id ?? 'guest'}` : 'closed';
+  const [formFor, setFormFor] = useState('closed');
+  if (formKey !== formFor) {
+    setFormFor(formKey);
+    if (open) {
+      setName(user?.full_name ?? '');
+      setEmail(user?.email ?? '');
+      setRating(0);
+      setTitle('');
+      setComment('');
+      setErrors({});
+      setDoneMessage(null);
+    }
+  }
 
   const pickRating = (value: number, focus = false) => {
     setRating(value);

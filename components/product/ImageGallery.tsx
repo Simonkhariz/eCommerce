@@ -19,9 +19,12 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, productName 
   const count = images.length;
   const hasMany = count > 1;
 
-  useEffect(() => {
+  // Back to the first photo when the photos change (another product or colour).
+  const [indexFor, setIndexFor] = useState(images);
+  if (images !== indexFor) {
+    setIndexFor(images);
     setSelectedIndex(0);
-  }, [images]);
+  }
 
   const altFor = (idx: number) => (count > 1 ? `${productName}, photo ${idx + 1} of ${count}` : productName);
   const show = (idx: number) => setSelectedIndex(((idx % count) + count) % count);

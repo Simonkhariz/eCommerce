@@ -36,9 +36,20 @@ export function HomeClient({ initial = null }: { initial?: HomepageData | null }
     }
   }, []);
 
+  // No server copy (the API was down when the page was built): load it in the browser.
   useEffect(() => {
-    if (!initial) loadHomepage();
-  }, [initial, loadHomepage]);
+    if (initial) return;
+    let current = true;
+    getHomepageData()
+      .then(
+        (data) => current && setHomepageData(data),
+        () => current && setError(true)
+      )
+      .finally(() => current && setLoading(false));
+    return () => {
+      current = false;
+    };
+  }, [initial]);
 
   const newArrivals: Product[] = homepageData ? homepageData.new_arrivals.map(mapApiProductToStorefront) : [];
   const topSelling: Product[] = homepageData ? homepageData.top_selling.map(mapApiProductToStorefront) : [];

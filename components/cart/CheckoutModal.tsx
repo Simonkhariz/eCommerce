@@ -34,9 +34,9 @@ import {
   readPendingOrder,
   saveGuestToken,
   markInvoiceSent,
-  wasInvoiceSent,
   savePendingOrder,
 } from '@/lib/pending-order';
+import { useInvoiceSent } from '@/lib/use-order-data';
 import { NIGERIAN_STATES } from '@/lib/nigeria';
 import { Dialog } from '@/components/ui/Dialog';
 
@@ -74,68 +74,90 @@ const fieldClass =
   'w-full bg-[#F0F0F0] rounded-xl px-3.5 py-2.5 text-sm text-black placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-black';
 const labelClass = 'text-xs font-semibold text-neutral-700 block mb-1';
 
+interface CheckoutForm {
+  fullName: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  notes: string;
+  selectedZoneId: number | undefined;
+}
+
+const EMPTY_FORM: CheckoutForm = { fullName: '', email: '', phone: '', address: '', city: '', state: '', notes: '', selectedZoneId: undefined };
+
+/**
+ * Checkout window. The delivery details typed in it are kept when the shopper closes and
+ * reopens it; everything else (step, resumed order, quote, errors) starts fresh on each open.
+ */
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose }) => {
-  const { items, appliedPromo, settlePendingOrder } = useCart();
   const { user, addresses } = useAuth();
+  const [formData, setFormData] = useState<CheckoutForm>(EMPTY_FORM);
+
+  // Prefill from the signed-in customer and their default address, once per account and
+  // address, never overwriting what was typed. Adjusted while rendering (React's pattern for
+  // state that follows a changing input), so the fields are filled on the first paint.
+  const defaultAddr = addresses.find((a) => a.is_default) || addresses[0];
+  const prefillKey = user ? `${user.id}:${defaultAddr?.id ?? ''}` : '';
+  const [prefilledFor, setPrefilledFor] = useState('');
+  if (prefillKey !== prefilledFor) {
+    setPrefilledFor(prefillKey);
+    if (user) {
+      setFormData((prev) => ({
+        ...prev,
+        fullName: prev.fullName || defaultAddr?.recipient_name || user.full_name || '',
+        email: prev.email || user.email || '',
+        phone: prev.phone || defaultAddr?.phone || user.phone || '',
+        address: prev.address || defaultAddr?.street_address || '',
+        city: prev.city || defaultAddr?.city || '',
+        state: prev.state || (defaultAddr?.state && NIGERIAN_STATES.includes(defaultAddr.state) ? defaultAddr.state : ''),
+      }));
+    }
+  }
+
+  if (!isOpen) return null;
+  return <CheckoutSession onClose={onClose} formData={formData} setFormData={setFormData} />;
+};
+
+function CheckoutSession({
+  onClose,
+  formData,
+  setFormData,
+}: {
+  onClose: () => void;
+  formData: CheckoutForm;
+  setFormData: React.Dispatch<React.SetStateAction<CheckoutForm>>;
+}) {
+  const { items, appliedPromo, settlePendingOrder } = useCart();
+  const { user } = useAuth();
   const { supportPhone, paymentMethods } = useStoreSupport();
 
   const [step, setStep] = useState<'details' | 'payment'>('details');
-  const [isQuoting, setIsQuoting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [quote, setQuote] = useState<CheckoutQuoteResponse | null>(null);
   const [order, setOrder] = useState<PayableOrder | null>(null);
   const [copiedToken, setCopiedToken] = useState(false);
   const [isInitializingPayment, setIsInitializingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethodId | null>(null);
-  // WhatsApp: once the invoice is sent the button becomes "Mark as paid".
-  const [invoiceSent, setInvoiceSent] = useState(false);
+  // The shopper's choice; until they pick, the store's default method.
+  const [chosenMethod, setSelectedMethod] = useState<PaymentMethodId | null>(null);
+  const selectedMethod = chosenMethod ?? (((paymentMethods.find((m) => m.is_default) || paymentMethods[0])?.id as PaymentMethodId | undefined) ?? null);
   const [isCheckingPaid, setIsCheckingPaid] = useState(false);
   const [awaitingFlash, setAwaitingFlash] = useState(false);
-  const [awaitingNote, setAwaitingNote] = useState<string | null>(null);
   const router = useRouter();
 
+  // WhatsApp: once the invoice is sent the button becomes "Mark as paid" (remembered on this device).
   const orderNumber = order?.order_number;
-  useEffect(() => {
-    setInvoiceSent(orderNumber ? wasInvoiceSent(orderNumber) : false);
-    setAwaitingNote(null);
-  }, [orderNumber]);
+  const invoiceSent = useInvoiceSent(orderNumber);
+  // The "awaiting confirmation" note belongs to the order it was shown for.
+  const [awaitingNoteFor, setAwaitingNoteFor] = useState<{ orderNumber: string; text: string } | null>(null);
+  const awaitingNote = awaitingNoteFor && awaitingNoteFor.orderNumber === orderNumber ? awaitingNoteFor.text : null;
 
   // One key per checkout attempt: a double click or a retry after a dropped response
   // returns the same order instead of creating (and reserving stock for) a second one.
   const idempotencyKeyRef = useRef<string | null>(null);
-  // Only the latest quote request may update the screen.
-  const quoteRequestRef = useRef(0);
   const dialogRef = useRef<HTMLDivElement>(null);
-
-  const defaultAddr = addresses.find((a) => a.is_default) || addresses[0];
-
-  const [formData, setFormData] = useState({
-    fullName: '',
-    email: '',
-    phone: '',
-    address: '',
-    city: '',
-    state: '',
-    notes: '',
-    selectedZoneId: undefined as number | undefined,
-  });
-
-  // Prefill from the signed-in customer and their default address (never overwrites typing).
-  useEffect(() => {
-    if (!user) return;
-    setFormData((prev) => ({
-      ...prev,
-      fullName: prev.fullName || defaultAddr?.recipient_name || user.full_name || '',
-      email: prev.email || user.email || '',
-      phone: prev.phone || defaultAddr?.phone || user.phone || '',
-      address: prev.address || defaultAddr?.street_address || '',
-      city: prev.city || defaultAddr?.city || '',
-      state: prev.state || (defaultAddr?.state && NIGERIAN_STATES.includes(defaultAddr.state) ? defaultAddr.state : ''),
-    }));
-  }, [user, defaultAddr]);
 
   const busy = isSubmitting || isInitializingPayment;
 
@@ -144,26 +166,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
     onClose();
   }, [busy, onClose]);
 
-  // Default payment method once the store's methods load.
+  // On open: resume this cart's unpaid order if there is one (otherwise the details step).
   useEffect(() => {
-    if (!selectedMethod && paymentMethods.length > 0) {
-      const def = paymentMethods.find((m) => m.is_default) || paymentMethods[0];
-      setSelectedMethod(def.id as PaymentMethodId);
-    }
-  }, [paymentMethods, selectedMethod]);
-
-  // On open: resume this cart's unpaid order if there is one, otherwise start at the details step.
-  useEffect(() => {
-    if (!isOpen) return;
-    setSubmitError(null);
-    setPaymentError(null);
-
     const pending = readPendingOrder();
-    if (!pending || pending.cartSignature !== cartSignature(items)) {
-      setStep('details');
-      setOrder(null);
-      return;
-    }
+    if (!pending || pending.cartSignature !== cartSignature(items)) return;
 
     const token = readGuestToken(pending.orderNumber);
     apiGetOrder(pending.orderNumber, token ? { token } : undefined)
@@ -206,15 +212,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
       });
     // Only when the modal opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, []);
 
   // The Dialog handles Escape, focus trapping and scroll locking. When the step changes,
   // move focus to the first field of the new step (skipping the close button).
   useEffect(() => {
-    if (!isOpen) return;
     const firstField = dialogRef.current?.querySelector<HTMLElement>('input, select, button:not([data-close])');
     firstField?.focus({ preventScroll: true });
-  }, [isOpen, step, order]);
+  }, [step, order]);
 
   const checkoutItems = useCallback(
     () =>
@@ -227,38 +232,34 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
   );
 
   // Server quote for the chosen state: authoritative prices, discount and delivery fee.
-  const fetchQuote = useCallback(async () => {
-    if (items.length === 0 || !formData.state) {
-      setQuote(null);
-      return;
-    }
-    const requestId = ++quoteRequestRef.current;
-    setIsQuoting(true);
-    setQuoteError(null);
-
-    try {
-      const quoteData = await apiGetCheckoutQuote({
-        items: checkoutItems(),
-        shipping_address: { state: formData.state, country: 'Nigeria' },
-        shipping_zone_id: formData.selectedZoneId,
-        coupon_code: appliedPromo?.code,
-      });
-      if (requestId !== quoteRequestRef.current) return;
-      setQuote(quoteData);
-    } catch (err: any) {
-      if (requestId !== quoteRequestRef.current) return;
-      setQuote(null);
-      setQuoteError(err?.message || 'We could not calculate delivery for this address.');
-    } finally {
-      if (requestId === quoteRequestRef.current) setIsQuoting(false);
-    }
-  }, [items.length, checkoutItems, formData.state, formData.selectedZoneId, appliedPromo?.code]);
+  // One request per distinct question; only the answer to the current one counts.
+  const quoteRequest =
+    step === 'details' && items.length > 0 && formData.state
+      ? JSON.stringify({
+          items: checkoutItems(),
+          shipping_address: { state: formData.state, country: 'Nigeria' },
+          shipping_zone_id: formData.selectedZoneId,
+          coupon_code: appliedPromo?.code,
+        })
+      : null;
+  const [quoteAnswer, setQuoteAnswer] = useState<{ request: string; quote: CheckoutQuoteResponse | null; error: string | null } | null>(null);
 
   useEffect(() => {
-    if (isOpen && step === 'details') fetchQuote();
-  }, [isOpen, step, fetchQuote]);
+    if (!quoteRequest) return;
+    let current = true;
+    apiGetCheckoutQuote(JSON.parse(quoteRequest)).then(
+      (quote) => current && setQuoteAnswer({ request: quoteRequest, quote, error: null }),
+      (err: any) => current && setQuoteAnswer({ request: quoteRequest, quote: null, error: err?.message || 'We could not calculate delivery for this address.' })
+    );
+    return () => {
+      current = false;
+    };
+  }, [quoteRequest]);
 
-  if (!isOpen) return null;
+  const isQuoting = quoteRequest !== null && quoteAnswer?.request !== quoteRequest;
+  // While a new quote loads, the last one stays on screen (the order button waits for it).
+  const quote = formData.state && items.length > 0 ? (quoteAnswer?.quote ?? null) : null;
+  const quoteError = !isQuoting && quoteRequest !== null ? (quoteAnswer?.error ?? null) : null;
 
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -382,7 +383,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
         if (whatsappTab) whatsappTab.location.href = whatsappInvoice;
         else window.location.href = whatsappInvoice;
         markInvoiceSent(order.order_number);
-        setInvoiceSent(true);
         if (res.expires_at) {
           setOrder((prev) => (prev ? { ...prev, expires_at: res.expires_at } : prev));
         }
@@ -418,11 +418,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
       // Not confirmed yet: let the store know the transfer was sent (it alerts the admin).
       const sent = await apiMarkPaymentSent(order.order_number, order.guest_access_token).catch(() => null);
       if (sent?.expires_at) setOrder((prev) => (prev ? { ...prev, expires_at: sent.expires_at } : prev));
-      setAwaitingNote(
-        sent?.recorded
+      setAwaitingNoteFor({
+        orderNumber: order.order_number,
+        text: sent?.recorded
           ? 'We have told the store you paid. Once they confirm your transfer, tap "Mark as paid" again to see your receipt.'
-          : 'The store has not confirmed your transfer yet. Once they do, tap "Mark as paid" again to see your receipt.'
-      );
+          : 'The store has not confirmed your transfer yet. Once they do, tap "Mark as paid" again to see your receipt.',
+      });
       setAwaitingFlash(true);
       setTimeout(() => setAwaitingFlash(false), 3000);
     } catch (err: any) {
@@ -451,7 +452,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
 
   return (
     <Dialog
-      open={isOpen}
+      open
       onClose={handleClose}
       title={step === 'details' ? 'Checkout: delivery details' : 'Checkout: complete your payment'}
       busy={busy}

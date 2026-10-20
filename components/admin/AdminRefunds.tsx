@@ -138,13 +138,37 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
     }
   };
 
-  // Arriving from an order page with ?order=… checks it straight away.
+  // Arriving from an order page with ?order=… checks it straight away: shown as checking on
+  // the first paint, then looked up.
+  const [checkedFor, setCheckedFor] = useState('');
+  if (initialOrder.trim() && initialOrder !== checkedFor) {
+    setCheckedFor(initialOrder);
+    setOrderNumber(initialOrder);
+    setChecking(true);
+    setLookupError(null);
+    setEligibility(null);
+    setErrors({});
+  }
   useEffect(() => {
-    if (initialOrder) {
-      setOrderNumber(initialOrder);
-      check(initialOrder);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const trimmed = initialOrder.trim();
+    if (!trimmed) return;
+    let current = true;
+    adminGetRefundEligibility(trimmed)
+      .then(
+        (result) => {
+          if (!current) return;
+          setEligibility(result);
+          setForm({ ...EMPTY_FORM, amount: result.refundable_amount > 0 ? String(result.refundable_amount) : '' });
+        },
+        (err) => {
+          if (redirectIfSignedOut(err) || !current) return;
+          setLookupError(errorMessage(err, 'Could not look up this order.'));
+        }
+      )
+      .finally(() => current && setChecking(false));
+    return () => {
+      current = false;
+    };
   }, [initialOrder]);
 
   const submit = async (e: React.FormEvent) => {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { FilterState } from '@/types';
 import { CatalogFacets } from '@/lib/api-client';
 import { formatPrice } from '@/lib/currency';
@@ -48,10 +48,13 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
   const [maxInput, setMaxInput] = useState(filters.maxPrice?.toString() ?? '');
 
   // Keep the price inputs in step with the URL (Back/Forward, chip removal).
-  useEffect(() => {
+  const appliedPrice = `${filters.minPrice ?? ''}|${filters.maxPrice ?? ''}`;
+  const [inputsFor, setInputsFor] = useState(appliedPrice);
+  if (appliedPrice !== inputsFor) {
+    setInputsFor(appliedPrice);
     setMinInput(filters.minPrice?.toString() ?? '');
     setMaxInput(filters.maxPrice?.toString() ?? '');
-  }, [filters.minPrice, filters.maxPrice]);
+  }
 
   const toggleIn = (list: string[], value: string) =>
     list.some((v) => v.toLowerCase() === value.toLowerCase())

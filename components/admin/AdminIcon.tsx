@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 
 interface AdminIconProps {
   name: string;
@@ -22,12 +23,14 @@ export const AdminIcon: React.FC<AdminIconProps> = ({
   const w = width ?? size;
   const h = height ?? size;
 
+  // SVG icons are served as they are (nothing to resize).
   return (
-    <img
+    <Image
       src={`/admin/${name}.svg`}
       alt={alt}
       width={w}
       height={h}
+      unoptimized
       className={`block shrink-0 ${className}`}
       style={{ width: w, height: h, ...style }}
     />

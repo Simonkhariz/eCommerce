@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { adminAssignShipment, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { Button, Field, Modal, TextInput, redirectIfSignedOut, useToast } from '@/components/admin/ui';
 
@@ -23,14 +23,17 @@ export function ShipOrderModal({ orderNumber, onClose, onShipped }: ShipOrderMod
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  // A fresh form each time it opens for an order.
+  const [formFor, setFormFor] = useState(orderNumber);
+  if (orderNumber !== formFor) {
+    setFormFor(orderNumber);
     if (orderNumber) {
       setCarrier('');
       setTrackingNumber('');
       setTrackingUrl('');
       setErrors({});
     }
-  }, [orderNumber]);
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

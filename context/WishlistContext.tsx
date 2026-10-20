@@ -42,10 +42,12 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const isCustomer = !!user && user.role === 'customer';
   const [wishlist, setWishlist] = useState<Product[]>([]);
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
-  const [isHydrated, setIsHydrated] = useState(false);
+  // Which identity's wishlist is loaded (guest or a customer key); stays null until the first load.
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const serverReady = useRef(false);
 
   const wishlistStorageKey = isCustomer ? `shopco_wishlist_user_${user!.id}` : 'shopco_wishlist_guest';
+  const isHydrated = !authLoading && loadedKey === wishlistStorageKey;
 
   // Load: guests use this device; customers get their saved account wishlist merged with
   // anything saved as a guest here. Saved products come back with current prices.
@@ -53,7 +55,6 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (authLoading) return;
     let cancelled = false;
     serverReady.current = false;
-    setIsHydrated(false);
 
     (async () => {
       writeLocal('shop_co_wishlist', null); // legacy key from the mock build
@@ -77,7 +78,7 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (!cancelled) {
         setWishlist(next);
-        setIsHydrated(true);
+        setLoadedKey(wishlistStorageKey);
       }
     })();
 

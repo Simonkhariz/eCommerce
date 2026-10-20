@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { apiGetCustomerOrders } from '@/lib/api-client';
@@ -10,27 +10,26 @@ import { Package, ArrowRight, AlertCircle, Truck, ArrowLeft, Search, Mail } from
 
 export default function CustomerOrdersPage() {
   const { user, isLoading: authLoading, openAuthModal } = useAuth();
-  const [orders, setOrders] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadOrders = useCallback(() => {
-    setIsLoading(true);
-    setError(null);
-    apiGetCustomerOrders()
-      .then((data) => setOrders(data || []))
-      .catch((err) => setError(err?.message || 'Failed to load your orders.'))
-      .finally(() => setIsLoading(false));
-  }, []);
+  // One request per signed-in customer and per "Try again"; only its answer is shown.
+  const [retries, setRetries] = useState(0);
+  const requestKey = user ? `${user.id}#${retries}` : null;
+  const [answer, setAnswer] = useState<{ key: string; orders: any[]; error: string | null } | null>(null);
+  const isLoading = requestKey !== null && answer?.key !== requestKey;
+  const orders = requestKey ? (answer?.orders ?? []) : [];
+  const error = isLoading ? null : (answer?.error ?? null);
+  const loadOrders = () => setRetries((n) => n + 1);
 
   useEffect(() => {
-    if (authLoading) return;
-    if (!user) {
-      setIsLoading(false);
-      return;
-    }
-    loadOrders();
-  }, [user, authLoading, loadOrders]);
+    if (!requestKey) return;
+    let current = true;
+    apiGetCustomerOrders().then(
+      (data) => current && setAnswer({ key: requestKey, orders: data || [], error: null }),
+      (err) => current && setAnswer({ key: requestKey, orders: [], error: err?.message || 'Failed to load your orders.' })
+    );
+    return () => {
+      current = false;
+    };
+  }, [requestKey]);
 
   return (
     <div className="min-h-screen bg-[#FBFBFB] py-8 sm:py-12 px-4 sm:px-6 lg:px-8">

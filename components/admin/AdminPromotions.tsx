@@ -232,23 +232,27 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
   const [saving, setSaving] = useState(false);
   const existing = promotion && promotion !== 'new' ? promotion : null;
 
-  React.useEffect(() => {
+  // A fresh form each time the dialog opens for a promotion (or a new one).
+  const [formFor, setFormFor] = useState<Promotion | 'new' | null>(null);
+  if (promotion !== formFor) {
+    setFormFor(promotion);
     setErrors({});
-    if (!promotion) return;
-    setForm(
-      promotion === 'new'
-        ? EMPTY_FORM
-        : {
-            code: promotion.code,
-            description: promotion.description ?? '',
-            discount_percent: String(promotion.discount_percent),
-            max_uses: String(promotion.max_uses),
-            starts_at: dateOnly(promotion.starts_at),
-            expires_at: dateOnly(promotion.expires_at),
-            is_active: promotion.is_active,
-          }
-    );
-  }, [promotion]);
+    if (promotion) {
+      setForm(
+        promotion === 'new'
+          ? EMPTY_FORM
+          : {
+              code: promotion.code,
+              description: promotion.description ?? '',
+              discount_percent: String(promotion.discount_percent),
+              max_uses: String(promotion.max_uses),
+              starts_at: dateOnly(promotion.starts_at),
+              expires_at: dateOnly(promotion.expires_at),
+              is_active: promotion.is_active,
+            }
+      );
+    }
+  }
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
 

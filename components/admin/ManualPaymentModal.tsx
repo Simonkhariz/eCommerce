@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { AdminOrderDetail as OrderDetail, adminConfirmPayment, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { formatPrice, num } from '@/lib/admin-format';
 import { Button, Field, Modal, TextArea, TextInput, redirectIfSignedOut, useToast } from '@/components/admin/ui';
@@ -28,11 +28,13 @@ export function ManualPaymentModal({
 
   // Start empty for each order opened from a list.
   const orderNumber = order?.order_number;
-  useEffect(() => {
+  const [formFor, setFormFor] = useState(orderNumber);
+  if (orderNumber !== formFor) {
+    setFormFor(orderNumber);
     setReference('');
     setNote('');
     setError(undefined);
-  }, [orderNumber]);
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

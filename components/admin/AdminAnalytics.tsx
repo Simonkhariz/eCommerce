@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { AnalyticsReport, adminDownloadExport, adminGetAnalyticsReport, errorMessage } from '@/lib/admin-api';
@@ -51,12 +51,16 @@ export function AdminAnalytics() {
   );
 
   // Draft custom dates are applied with a button, so half-typed dates don't fire requests.
+  // They follow the applied dates whenever the address changes (back/forward, presets).
   const [draftStart, setDraftStart] = useState(filters.start_date);
   const [draftEnd, setDraftEnd] = useState(filters.end_date);
-  useEffect(() => {
+  const appliedDates = `${filters.start_date}|${filters.end_date}`;
+  const [draftsFor, setDraftsFor] = useState(appliedDates);
+  if (appliedDates !== draftsFor) {
+    setDraftsFor(appliedDates);
     setDraftStart(filters.start_date);
     setDraftEnd(filters.end_date);
-  }, [filters.start_date, filters.end_date]);
+  }
 
   const [exporting, setExporting] = useState<'analytics' | 'orders' | null>(null);
 

@@ -9,7 +9,7 @@
  * `dismissOnBackdrop` is false). Visuals stay with the caller via `panelClassName`.
  */
 
-import React, { useEffect, useId, useRef } from 'react';
+import React, { useEffect, useEffectEvent, useId, useRef } from 'react';
 
 type Placement = 'center' | 'left' | 'right' | 'bottom' | 'fullscreen';
 
@@ -61,10 +61,12 @@ export function Dialog({
 }: DialogProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  const busyRef = useRef(busy);
-  busyRef.current = busy;
+  // Escape always uses the latest onClose / busy without re-running the focus effect.
+  const closeOnEscape = useEffectEvent((): boolean => {
+    if (busy) return false;
+    onClose();
+    return true;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -74,9 +76,8 @@ export function Dialog({
     (first ?? panel)?.focus({ preventScroll: true });
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busyRef.current) {
-        e.stopPropagation();
-        onCloseRef.current();
+      if (e.key === 'Escape') {
+        if (closeOnEscape()) e.stopPropagation();
         return;
       }
       if (e.key !== 'Tab' || !panel) return;

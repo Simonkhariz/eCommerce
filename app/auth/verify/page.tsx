@@ -12,8 +12,12 @@ function VerifyMagicLink() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { verifyMagicLink, openAuthModal } = useAuth();
-  const [state, setState] = useState<VerifyState>('verifying');
-  const [message, setMessage] = useState<string>('');
+  // The token is read once, on arrival (it is then removed from the address bar).
+  const [token] = useState(() => searchParams.get('token') || '');
+  const [verifyState, setState] = useState<VerifyState>('verifying');
+  const [verifyMessage, setMessage] = useState<string>('');
+  const state: VerifyState = token ? verifyState : 'error';
+  const message = token ? verifyMessage : 'This sign-in link is missing its security token. Please request a new link.';
   // Sign-in tokens are single use; guard against React StrictMode running the effect twice.
   const attempted = useRef(false);
 
@@ -21,15 +25,9 @@ function VerifyMagicLink() {
     if (attempted.current) return;
     attempted.current = true;
 
-    const token = searchParams.get('token') || '';
     // Drop the token from the address bar and history as soon as it has been read.
     window.history.replaceState(null, '', '/auth/verify');
-
-    if (!token) {
-      setState('error');
-      setMessage('This sign-in link is missing its security token. Please request a new link.');
-      return;
-    }
+    if (!token) return;
 
     verifyMagicLink(token)
       .then(() => {
@@ -40,7 +38,7 @@ function VerifyMagicLink() {
         setState('error');
         setMessage(err.message || 'This sign-in link is invalid, expired, or has already been used.');
       });
-  }, [searchParams, verifyMagicLink, router]);
+  }, [token, verifyMagicLink, router]);
 
   return (
     <div className="bg-white rounded-3xl p-8 sm:p-12 text-center border border-neutral-100 shadow-sm space-y-4" role="status" aria-live="polite">

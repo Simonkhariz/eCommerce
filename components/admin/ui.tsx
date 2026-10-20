@@ -6,7 +6,7 @@
  * window.alert / window.confirm or hand-rolled overlays.
  */
 
-import React, { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Info, Loader2, RefreshCw, X } from 'lucide-react';
 import type { StatusTone } from '@/lib/order-status';
@@ -75,10 +75,12 @@ export function Modal({ open, onClose, title, description, children, footer, siz
   const titleId = useId();
   const descId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  const busyRef = useRef(busy);
-  busyRef.current = busy;
+  // Escape always uses the latest onClose / busy without re-running the focus effect.
+  const closeOnEscape = useEffectEvent((): boolean => {
+    if (busy) return false;
+    onClose();
+    return true;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -88,9 +90,8 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     (first ?? panel)?.focus();
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busyRef.current) {
+      if (e.key === 'Escape' && closeOnEscape()) {
         e.stopPropagation();
-        onCloseRef.current();
       }
       if (e.key === 'Tab' && panel) {
         const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null);
@@ -300,7 +301,18 @@ export function useToast(): ToastApi {
   return ctx;
 }
 
+/** Set by AdminUiProvider: how redirectIfSignedOut navigates (Next's router). */
+let navigateTo: ((href: string) => void) | null = null;
+
 export function AdminUiProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  useEffect(() => {
+    navigateTo = (href) => router.replace(href);
+    return () => {
+      navigateTo = null;
+    };
+  }, [router]);
+
   return (
     <ToastProvider>
       <ConfirmProvider>{children}</ConfirmProvider>
@@ -317,9 +329,9 @@ export function AdminUiProvider({ children }: { children: React.ReactNode }) {
  * Call it in catch blocks of admin actions so an expired session never looks like a broken screen.
  */
 export function redirectIfSignedOut(err: unknown): boolean {
-  if (err instanceof ApiError && err.statusCode === 401 && typeof window !== 'undefined') {
+  if (err instanceof ApiError && err.statusCode === 401 && typeof window !== 'undefined' && navigateTo) {
     const next = window.location.pathname + window.location.search;
-    window.location.assign(`/admin/login?next=${encodeURIComponent(next)}&expired=1`);
+    navigateTo(`/admin/login?next=${encodeURIComponent(next)}&expired=1`);
     return true;
   }
   return false;
@@ -374,34 +386,68 @@ export function useDebouncedValue<T>(value: T, delayMs = 300): T {
  * Returns data, loading, error and a reload() for retry buttons and after mutations.
  */
 export function useAdminData<T>(loader: () => Promise<T>, deps: React.DependencyList) {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const requestId = useRef(0);
+  // The latest loader, read only when a request starts (never during render).
   const loaderRef = useRef(loader);
-  loaderRef.current = loader;
+  useLayoutEffect(() => {
+    loaderRef.current = loader;
+  });
 
-  const load = useCallback(async () => {
-    const id = ++requestId.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await loaderRef.current();
-      if (id === requestId.current) setData(result);
-    } catch (err) {
-      if (redirectIfSignedOut(err)) return;
-      if (id === requestId.current) setError(err instanceof Error ? err.message : 'Could not load this page.');
-    } finally {
-      if (id === requestId.current) setLoading(false);
-    }
-  }, []);
+  // One request per dependency set (plain values: filters, page...) and per reload().
+  const depsKey = JSON.stringify(deps);
+  const [reloads, setReloads] = useState(0);
+  const [result, setResult] = useState<{ key: string | null; reloads: number; data: T | null; error: string | null }>({
+    key: null,
+    reloads: 0,
+    data: null,
+    error: null,
+  });
+  const waiting = useRef<Array<() => void>>([]);
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+    let current = true;
+    loaderRef
+      .current()
+      .then(
+        (data) => {
+          if (current) setResult({ key: depsKey, reloads, data, error: null });
+        },
+        (err) => {
+          if (redirectIfSignedOut(err) || !current) return;
+          const error = err instanceof Error ? err.message : 'Could not load this page.';
+          setResult((prev) => ({ key: depsKey, reloads, data: prev.data, error }));
+        }
+      )
+      .finally(() => {
+        if (!current) return;
+        const done = waiting.current;
+        waiting.current = [];
+        done.forEach((resolve) => resolve());
+      });
+    // A newer request (filters changed, reload) makes this one's answer irrelevant.
+    return () => {
+      current = false;
+    };
+  }, [depsKey, reloads]);
 
-  return { data, setData, loading, error, reload: load };
+  // Loading until the answer for the current filters and reload count has arrived; the last
+  // data stays on screen meanwhile.
+  const loading = result.key !== depsKey || result.reloads !== reloads;
+
+  const setData = useCallback((update: React.SetStateAction<T | null>) => {
+    setResult((prev) => ({ ...prev, data: typeof update === 'function' ? (update as (p: T | null) => T | null)(prev.data) : update }));
+  }, []);
+
+  /** Load again (retry buttons, after changes); resolves once the new data is in. */
+  const reload = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        waiting.current.push(resolve);
+        setReloads((n) => n + 1);
+      }),
+    []
+  );
+
+  return { data: result.data, setData, loading, error: loading ? null : result.error, reload };
 }
 
 // =============================================================================
@@ -650,12 +696,8 @@ export function Table({ children, minWidth = 720 }: { children: React.ReactNode;
 export function useClientPagination<T>(items: T[], perPage = 20) {
   const [page, setPage] = useState(1);
   const totalPages = Math.max(1, Math.ceil(items.length / perPage));
+  // Deleting the last row of the last page shows the page before it.
   const current = Math.min(page, totalPages);
-
-  // Deleting the last row of the last page moves back a page.
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
 
   return {
     pageItems: items.slice((current - 1) * perPage, current * perPage),

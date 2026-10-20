@@ -84,9 +84,11 @@ export function OrderManagement() {
   const [exporting, setExporting] = useState(false);
 
   // Keep the box in sync when the URL changes (back/forward).
-  useEffect(() => {
+  const [searchFor, setSearchFor] = useState(filters.search);
+  if (filters.search !== searchFor) {
+    setSearchFor(filters.search);
     setSearchText(filters.search);
-  }, [filters.search]);
+  }
 
   useEffect(() => {
     if (debouncedSearch.trim() !== filters.search) setFilters({ search: debouncedSearch.trim() });

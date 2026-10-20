@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ExternalLink, LogOut } from 'lucide-react';
@@ -23,10 +24,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   // Close the mobile drawer and the alerts menu on navigation.
-  useEffect(() => {
+  const [openedOn, setOpenedOn] = useState(pathname);
+  if (pathname !== openedOn) {
+    setOpenedOn(pathname);
     setDrawerOpen(false);
     setAlertsOpen(false);
-  }, [pathname]);
+  }
 
   // Bell: WhatsApp transfers customers marked as paid (to check and confirm) and orders flagged
   // for attention (late / duplicate / mismatched payments). Refreshed on navigation and every
@@ -306,7 +309,7 @@ function AdminSidebar({ pathname, onClose, closeLabel }: { pathname: string; onC
     <aside className="flex h-full w-full flex-col border-r border-[#e5e7eb] bg-[#f8f8f8]" aria-label="Admin">
       <div className="flex items-center justify-between border-b border-[#e5e7eb]/60 px-3.5 py-3.5">
         <Link href="/admin" className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40">
-          <img src="/admin/logo.svg" alt="" width={24} height={24} />
+          <Image src="/admin/logo.svg" alt="" width={24} height={24} unoptimized />
           <span className="flex flex-col">
             <span className="text-[15px] font-bold leading-none tracking-tight text-[#1f2937]">SHOP.CO</span>
             <span className="mt-0.5 text-xs leading-tight text-[#6b7280]">Store admin</span>

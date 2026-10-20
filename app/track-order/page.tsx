@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -10,12 +10,10 @@ import {
   CheckCircle2,
   Clock,
   MapPin,
-  Phone,
   AlertCircle,
   ArrowLeft,
   CreditCard,
   ArrowRight,
-  ShieldCheck,
   Copy,
   ExternalLink,
   Check,
@@ -25,6 +23,7 @@ import { formatPrice } from '@/lib/currency';
 import { apiGetOrder, apiInitializePayment } from '@/lib/api-client';
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, formatSupportPhone } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
+import { useLatestOrderNumber } from '@/lib/use-order-data';
 import { getOrderStatusDisplay, STATUS_TONE_CLASSES } from '@/lib/order-status';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { Dialog } from '@/components/ui/Dialog';
@@ -34,6 +33,26 @@ function toDate(value: string): Date {
   return new Date(String(value).replace(' ', 'T'));
 }
 
+const NOT_FOUND_MESSAGE = 'Order not found. Please verify your order number and contact details.';
+
+/**
+ * Fetch an order for the lookup form. Uses the access key given, else the one saved on this
+ * device; a key that worked is saved for next time.
+ */
+async function requestOrder(cleanNum: string, verificationOpts?: { token?: string; email?: string }) {
+  let token = verificationOpts?.token;
+  if (!token) {
+    token =
+      localStorage.getItem(`shopco_guest_token_${cleanNum}`) ||
+      (localStorage.getItem('shopco_latest_order_number') === cleanNum
+        ? localStorage.getItem('shopco_latest_guest_token') || undefined
+        : undefined);
+  }
+  const res = await apiGetOrder(cleanNum, { token, email: verificationOpts?.email });
+  if (token) localStorage.setItem(`shopco_guest_token_${cleanNum}`, token);
+  return res;
+}
+
 function TrackOrderContent() {
   const searchParams = useSearchParams();
   const queryOrder = searchParams.get('order') || searchParams.get('order_number') || '';
@@ -41,13 +60,18 @@ function TrackOrderContent() {
 
   const [orderNumber, setOrderNumber] = useState<string>(queryOrder);
   const [verificationInput, setVerificationInput] = useState<string>('');
-  const [recentOrderNumber, setRecentOrderNumber] = useState<string | null>(null);
+  // The last order placed on this device, offered when the address names no order.
+  const latestOrderNumber = useLatestOrderNumber();
+  const recentOrderNumber = queryOrder ? null : latestOrderNumber;
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isInitializingPayment, setIsInitializingPayment] = useState<string | null>(null);
-  const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
+  // null until the shopper opens or closes it; "Pay now" links (?pay=1) open it on arrival.
+  const [paymentModalChoice, setShowPaymentModal] = useState<boolean | null>(null);
   const { supportPhone, paymentMethods } = useStoreSupport();
-  const [selectedGateway, setSelectedGateway] = useState<string>('');
+  // The shopper's choice; until they pick, the store's default method.
+  const [chosenGateway, setSelectedGateway] = useState<string>('');
+  const selectedGateway = chosenGateway || (paymentMethods.find((m) => m.is_default) || paymentMethods[0])?.id || '';
   const wantsToPay = searchParams.get('pay') === '1';
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [order, setOrder] = useState<any>(null);
@@ -62,73 +86,61 @@ function TrackOrderContent() {
     }
   };
 
-  // Check for recent order in browser
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const latest = localStorage.getItem('shopco_latest_order_number');
-      if (latest && !queryOrder) {
-        setRecentOrderNumber(latest);
-      }
+  // Look up an order typed in (or the recent one).
+  const performLookup = (ordNum: string, verificationOpts?: { token?: string; email?: string }) => {
+    const cleanNum = ordNum.trim().toUpperCase();
+    if (!cleanNum) {
+      setLookupError('Please enter your order reference (e.g. ORD-...) or carrier tracking code (e.g. GIG-..., TRK-...).');
+      return;
     }
-  }, [queryOrder]);
+    setIsLoading(true);
+    setLookupError(null);
+    requestOrder(cleanNum, verificationOpts)
+      .then(
+        (res) => {
+          setOrder(res);
+          setOrderNumber(cleanNum);
+        },
+        (err: any) => {
+          setOrder(null);
+          setLookupError(err?.message || NOT_FOUND_MESSAGE);
+        }
+      )
+      .finally(() => setIsLoading(false));
+  };
 
-  // Main lookup function
-  const performLookup = useCallback(
-    async (
-      ordNum: string,
-      verificationOpts?: { token?: string; email?: string }
-    ) => {
-      const cleanNum = ordNum.trim().toUpperCase();
-      if (!cleanNum) {
-        setLookupError('Please enter your order reference (e.g. ORD-...) or carrier tracking code (e.g. GIG-..., TRK-...).');
-        return;
-      }
-
+  // An order in the address (?order=...): show it as loading straight away, then look it up.
+  const autoLookupKey = queryOrder ? `${queryOrder}|${queryToken}` : '';
+  const [autoLookupFor, setAutoLookupFor] = useState('');
+  if (autoLookupKey !== autoLookupFor) {
+    setAutoLookupFor(autoLookupKey);
+    if (autoLookupKey) {
       setIsLoading(true);
       setLookupError(null);
-
-      // Resolve guest token from explicit parameter or localStorage
-      let token = verificationOpts?.token;
-      if (!token && typeof window !== 'undefined') {
-        token =
-          localStorage.getItem(`shopco_guest_token_${cleanNum}`) ||
-          (localStorage.getItem('shopco_latest_order_number') === cleanNum
-            ? localStorage.getItem('shopco_latest_guest_token') || undefined
-            : undefined);
-      }
-
-      const finalOpts = {
-        token,
-        email: verificationOpts?.email,
-      };
-
-      try {
-        const res = await apiGetOrder(cleanNum, finalOpts);
-        setOrder(res);
-        setOrderNumber(cleanNum);
-
-        if (token && typeof window !== 'undefined') {
-          localStorage.setItem(`shopco_guest_token_${cleanNum}`, token);
-        }
-      } catch (err: any) {
-        setOrder(null);
-        setLookupError(
-          err.message ||
-            'Order not found. Please verify your order number and contact details.'
-        );
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    []
-  );
-
-  // Auto-run if query param present
-  useEffect(() => {
-    if (queryOrder) {
-      performLookup(queryOrder, { token: queryToken || undefined });
     }
-  }, [queryOrder, queryToken, performLookup]);
+  }
+  useEffect(() => {
+    const cleanNum = queryOrder.trim().toUpperCase();
+    if (!cleanNum) return;
+    let current = true;
+    requestOrder(cleanNum, { token: queryToken || undefined })
+      .then(
+        (res) => {
+          if (!current) return;
+          setOrder(res);
+          setOrderNumber(cleanNum);
+        },
+        (err: any) => {
+          if (!current) return;
+          setOrder(null);
+          setLookupError(err?.message || NOT_FOUND_MESSAGE);
+        }
+      )
+      .finally(() => current && setIsLoading(false));
+    return () => {
+      current = false;
+    };
+  }, [queryOrder, queryToken]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,11 +172,6 @@ function TrackOrderContent() {
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   };
 
-  useEffect(() => {
-    if (!selectedGateway && paymentMethods.length > 0) {
-      setSelectedGateway((paymentMethods.find((m) => m.is_default) || paymentMethods[0]).id);
-    }
-  }, [paymentMethods, selectedGateway]);
 
   const handleInitiatePayment = async (gatewayOverride?: string) => {
     if (!order) return;
@@ -193,11 +200,11 @@ function TrackOrderContent() {
         if (whatsAppInvoiceUrl && whatsappTab) {
           whatsappTab.location.href = whatsAppInvoiceUrl;
         } else if (whatsAppInvoiceUrl) {
-          window.location.href = whatsAppInvoiceUrl;
+          window.location.assign(whatsAppInvoiceUrl);
         }
         setShowPaymentModal(false);
       } else if (res.checkout_url) {
-        window.location.href = res.checkout_url;
+        window.location.assign(res.checkout_url);
       } else {
         throw new Error(`${gateway === 'kora' ? 'Kora' : 'Monnify'} did not return a valid payment URL.`);
       }
@@ -216,9 +223,7 @@ function TrackOrderContent() {
   const isOffTrack = ['cancelled', 'returned', 'refund_pending', 'refunded'].includes(rawStatus);
 
   // "Pay now" from My orders opens the payment options straight away.
-  useEffect(() => {
-    if (wantsToPay && canPay) setShowPaymentModal(true);
-  }, [wantsToPay, canPay]);
+  const showPaymentModal = paymentModalChoice ?? (wantsToPay && canPay);
 
   // Determine stage index
   const getStageIndex = (statusStr: string, paymentStatus: string) => {

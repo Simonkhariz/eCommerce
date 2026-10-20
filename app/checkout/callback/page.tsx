@@ -13,7 +13,8 @@ import { apiVerifyPayment, apiGetOrder, apiInitializePayment, apiMarkPaymentSent
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptUrl, formatSupportPhone } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useCart } from '@/context/CartContext';
-import { clearPendingOrder, markInvoiceSent, readGuestToken, saveGuestToken, wasInvoiceSent } from '@/lib/pending-order';
+import { clearPendingOrder, markInvoiceSent, readGuestToken, saveGuestToken } from '@/lib/pending-order';
+import { useGuestToken, useInvoiceSent } from '@/lib/use-order-data';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 
 type ViewState = 'checking' | 'paid' | 'pending' | 'failed' | 'cancelled' | 'late' | 'error';
@@ -41,7 +42,9 @@ function CheckoutCallbackContent() {
   const { completePaidOrder } = useCart();
   const { supportPhone, paymentMethods } = useStoreSupport();
 
-  const [token, setToken] = useState<string | undefined>(undefined);
+  // Guest access key and "invoice sent", as saved on this device (they update when saved).
+  const token = useGuestToken(orderNumber);
+  const invoiceSent = useInvoiceSent(orderNumber);
   const [view, setView] = useState<ViewState>('checking');
   const [result, setResult] = useState<PaymentVerificationResponse | null>(null);
   const [order, setOrder] = useState<any>(null);
@@ -49,27 +52,22 @@ function CheckoutCallbackContent() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pollIndex, setPollIndex] = useState(0);
   const [keyInput, setKeyInput] = useState('');
-  const [retryMethod, setRetryMethod] = useState<string>('');
+  // The shopper's choice; until they pick, the store's default method.
+  const [chosenRetryMethod, setRetryMethod] = useState<string>('');
+  const retryMethod = chosenRetryMethod || (paymentMethods.find((m) => m.is_default) || paymentMethods[0])?.id || '';
   const [isRetrying, setIsRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [isSavingJpeg, setIsSavingJpeg] = useState(false);
-  const [invoiceSent, setInvoiceSent] = useState(false);
   const [awaitingFlash, setAwaitingFlash] = useState(false);
   const celebrated = useRef(false);
 
+  // A legacy link carried the guest access key in the URL: keep it on this device only and
+  // take it out of the address bar (never trusted beyond reading it once).
   useEffect(() => {
-    if (orderNumber) setInvoiceSent(wasInvoiceSent(orderNumber));
-  }, [orderNumber]);
-
-  // Guest access key: from this device (never trust a URL token beyond reading a legacy link once).
-  useEffect(() => {
-    if (!orderNumber) return;
     const legacy = searchParams.get('token');
-    if (legacy) {
-      saveGuestToken(orderNumber, legacy);
-      window.history.replaceState(null, '', `/checkout/callback?order=${encodeURIComponent(orderNumber)}${reference ? `&reference=${encodeURIComponent(reference)}` : ''}`);
-    }
-    setToken(readGuestToken(orderNumber) ?? legacy ?? undefined);
+    if (!orderNumber || !legacy) return;
+    saveGuestToken(orderNumber, legacy);
+    window.history.replaceState(null, '', `/checkout/callback?order=${encodeURIComponent(orderNumber)}${reference ? `&reference=${encodeURIComponent(reference)}` : ''}`);
   }, [orderNumber, reference, searchParams]);
 
   const loadOrder = useCallback(
@@ -171,12 +169,6 @@ function CheckoutCallbackContent() {
     return () => clearTimeout(timer);
   }, [view, pollIndex, verify, token]);
 
-  useEffect(() => {
-    if (!retryMethod && paymentMethods.length > 0) {
-      setRetryMethod((paymentMethods.find((m) => m.is_default) || paymentMethods[0]).id);
-    }
-  }, [paymentMethods, retryMethod]);
-
   const handleRetryPayment = async () => {
     if (!orderNumber || !retryMethod) return;
     setIsRetrying(true);
@@ -205,7 +197,6 @@ function CheckoutCallbackContent() {
         if (whatsappTab) whatsappTab.location.href = url;
         else window.location.href = url;
         markInvoiceSent(orderNumber);
-        setInvoiceSent(true);
         setIsRetrying(false);
         return;
       }
@@ -327,8 +318,7 @@ function CheckoutCallbackContent() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!keyInput) return;
-                  saveGuestToken(orderNumber, keyInput);
-                  setToken(keyInput);
+                  saveGuestToken(orderNumber, keyInput); // the saved key becomes `token`
                   verify(keyInput);
                 }}
               >

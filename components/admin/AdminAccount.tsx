@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { adminGetAccount, adminUpdateAccount, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { formatDate, humanize } from '@/lib/admin-format';
 import {
@@ -37,11 +37,13 @@ export function AdminAccount() {
   const [passwordErrors, setPasswordErrors] = useState<Record<string, string>>({});
   const [savingPassword, setSavingPassword] = useState(false);
 
-  useEffect(() => {
-    if (!account) return;
+  // Fill the profile form whenever the account (re)loads.
+  const [formFor, setFormFor] = useState<typeof account>(null);
+  if (account && account !== formFor) {
+    setFormFor(account);
     setFullName(account.full_name ?? '');
     setPhone(account.phone ?? '');
-  }, [account]);
+  }
 
   const profileChanged = !!account && (fullName.trim() !== (account.full_name ?? '') || phone.trim() !== (account.phone ?? ''));
 
