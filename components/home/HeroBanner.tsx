@@ -173,7 +173,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
                 src={imageUrl}
                 alt={title}
                 fill
-                priority
+                preload
                 unoptimized={!canOptimizeImage(imageUrl)}
                 sizes="(max-width: 640px) 100vw, 512px"
                 className="object-contain object-bottom drop-shadow-xl transition-opacity duration-500"

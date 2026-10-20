@@ -1,10 +1,14 @@
 import type { Metadata } from 'next';
 import { AdminOrderDetail } from '@/components/admin/AdminOrderDetail';
 
-export function generateMetadata({ params }: { params: { number: string } }): Metadata {
-  return { title: `${decodeURIComponent(params.number)} · Store Admin` };
+type Props = { params: Promise<{ number: string }> };
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { number } = await params;
+  return { title: `${decodeURIComponent(number)} · Store Admin` };
 }
 
-export default function Page({ params }: { params: { number: string } }) {
-  return <AdminOrderDetail orderNumber={decodeURIComponent(params.number)} />;
+export default async function Page({ params }: Props) {
+  const { number } = await params;
+  return <AdminOrderDetail orderNumber={decodeURIComponent(number)} />;
 }

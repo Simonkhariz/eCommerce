@@ -35,8 +35,9 @@ function summarise(text: string | null | undefined, max = 155): string | undefin
   return clean.length <= max ? clean : `${clean.slice(0, max - 1).replace(/\s+\S*$/, '')}…`;
 }
 
-export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
-  const product = await lookupProduct(params.id);
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const product = await lookupProduct(id);
   if (!product || product === 'missing') {
     return { title: 'Product | SHOP.CO' };
   }
@@ -62,8 +63,9 @@ export async function generateMetadata({ params }: { params: { id: string } }): 
   };
 }
 
-export default async function ProductDetailPage({ params }: { params: { id: string } }) {
-  const product = await lookupProduct(params.id);
+export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const product = await lookupProduct(id);
   if (product === 'missing') notFound();
-  return <ProductDetailClient id={decodeURIComponent(params.id)} initial={product} />;
+  return <ProductDetailClient id={decodeURIComponent(id)} initial={product} />;
 }

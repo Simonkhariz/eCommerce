@@ -92,7 +92,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, productName 
           src={current}
           alt={altFor(selectedIndex)}
           fill
-          priority
+          preload
           sizes="(max-width: 1024px) 100vw, 550px"
           className="object-cover object-center transition-transform duration-200"
           style={isHovered ? { transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`, transform: 'scale(1.4)' } : undefined}

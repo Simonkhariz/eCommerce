@@ -16,7 +16,6 @@ const LEGACY_ADMIN_TABS = {
 
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
   async redirects() {
     return Object.entries(LEGACY_ADMIN_TABS).map(([tab, route]) => ({
       source: '/admin',
