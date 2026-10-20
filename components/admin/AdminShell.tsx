@@ -207,8 +207,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <div className="h-[52px] shrink-0" aria-hidden="true" />
 
         <main id="admin-main" tabIndex={-1} className="flex w-full min-w-0 flex-1 flex-col px-3 py-4 outline-none sm:px-5 sm:py-5">
-          {/* Pages keep a readable width on large screens; the overview keeps its own full-width layout. */}
-          {pathname === '/admin' ? children : <div className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col">{children}</div>}
+          {/* Pages keep a readable width on large screens; the overview may be wider (charts and
+              KPIs side by side) but still stops growing on very wide monitors. */}
+          <div className={`mx-auto flex w-full flex-1 flex-col ${pathname === '/admin' ? 'max-w-[1600px]' : 'max-w-[1280px]'}`}>{children}</div>
         </main>
       </div>
     </div>

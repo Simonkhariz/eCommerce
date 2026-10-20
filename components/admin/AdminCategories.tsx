@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState } from 'react';
-import { Plus, Upload } from 'lucide-react';
+import { ImageOff, Plus, Upload } from 'lucide-react';
 import { apiUploadProductImage } from '@/lib/api-client';
 import { AdminCategory, adminDeactivateCategory, adminGetCategories, adminSaveCategory, errorMessage, fieldErrors } from '@/lib/admin-api';
 import {
@@ -211,11 +211,7 @@ export function AdminCategories() {
                 <tr key={cat.id}>
                   <td>
                     <div className="flex items-center gap-2.5">
-                      {cat.image_url ? (
-                        <img src={cat.image_url} alt="" className="size-8 shrink-0 rounded-md border border-[#e5e7eb] object-cover" />
-                      ) : (
-                        <span className="size-8 shrink-0 rounded-md border border-dashed border-[#d1d5db] bg-[#f9fafb]" aria-hidden="true" />
-                      )}
+                      <CategoryThumb key={cat.image_url ?? ""} src={cat.image_url} className="size-8" />
                       <span className="font-medium text-[#111827]">{cat.name}</span>
                     </div>
                   </td>
@@ -287,7 +283,7 @@ export function AdminCategories() {
           </Field>
           <Field label="Image URL" error={errors.image_url} hint="Optional. Upload a JPG, PNG or WebP, or paste an image address." className="sm:col-span-2">
             {(p) => (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2">
                 <TextInput
                   {...p}
                   className="min-w-0 flex-1"
@@ -300,10 +296,14 @@ export function AdminCategories() {
                   <Upload className="size-3.5" aria-hidden="true" />
                   Upload
                 </Button>
-                {form.image_url && <img src={form.image_url} alt="Category preview" className="size-9 rounded-md border border-[#e5e7eb] object-cover" />}
               </div>
             )}
           </Field>
+          {form.image_url.trim() !== '' && (
+            <div className="sm:col-span-2">
+              <ImagePreview key={form.image_url} src={form.image_url.trim()} onRemove={() => setForm((f) => ({ ...f, image_url: '' }))} />
+            </div>
+          )}
           <Field label="Display order" error={errors.display_order} hint="Lower numbers appear first.">
             {(p) => (
               <TextInput {...p} type="number" min={0} value={form.display_order} onChange={(e) => setForm((f) => ({ ...f, display_order: e.target.value }))} />
@@ -318,6 +318,51 @@ export function AdminCategories() {
           </div>
         </form>
       </Modal>
+    </div>
+  );
+}
+
+/** Table thumbnail: the image, or an empty tile when there is none or it can't be loaded. */
+function CategoryThumb({ src, className }: { src: string | null; className: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <span
+        className={`${className} flex shrink-0 items-center justify-center rounded-md border border-dashed border-[#d1d5db] bg-[#f9fafb] text-[#9ca3af]`}
+        title={src ? 'This image can’t be loaded' : undefined}
+        aria-hidden="true"
+      >
+        {src && <ImageOff className="size-3.5" />}
+      </span>
+    );
+  }
+  return <img src={src} alt="" onError={() => setFailed(true)} className={`${className} shrink-0 rounded-md border border-[#e5e7eb] object-cover`} />;
+}
+
+/** Form preview under the image field; says so plainly when the address doesn't load. */
+function ImagePreview({ src, onRemove }: { src: string; onRemove: () => void }) {
+  const [state, setState] = useState<'loading' | 'ok' | 'failed'>('loading');
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-[#e5e7eb] bg-[#f9fafb] p-2">
+      <div className="relative size-16 shrink-0 overflow-hidden rounded-md border border-[#e5e7eb] bg-white">
+        {state !== 'failed' ? (
+          <img src={src} alt="Category image preview" onLoad={() => setState('ok')} onError={() => setState('failed')} className="size-full object-cover" />
+        ) : (
+          <span className="flex size-full items-center justify-center text-[#9ca3af]" aria-hidden="true">
+            <ImageOff className="size-5" />
+          </span>
+        )}
+      </div>
+      <p className={`min-w-0 flex-1 text-xs ${state === 'failed' ? 'text-red-700' : 'text-[#6b7280]'}`} role={state === 'failed' ? 'alert' : undefined}>
+        {state === 'failed'
+          ? 'This image can’t be loaded. Check the address or upload the picture instead.'
+          : state === 'loading'
+            ? 'Loading preview…'
+            : 'Preview of the category image.'}
+      </p>
+      <button type="button" onClick={onRemove} className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-[#4b5563] hover:bg-white hover:text-[#111827]">
+        Remove
+      </button>
     </div>
   );
 }

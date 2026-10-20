@@ -445,7 +445,7 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
                 </tr>
               </thead>
               <tbody>
-                {points.map((p) => (
+                {[...points].sort((a, b) => (a.date < b.date ? 1 : -1)).map((p) => (
                   <tr key={p.date} className="border-t border-[#f3f4f6]">
                     <td className="px-3 py-2">{formatDate(p.date)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatPrice(num(p.sales))}</td>

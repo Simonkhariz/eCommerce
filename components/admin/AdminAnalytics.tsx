@@ -259,7 +259,7 @@ function Report({ report }: { report: AnalyticsReport }) {
                 </tr>
               </thead>
               <tbody>
-                {daily.map((d) => (
+                {[...daily].sort((a, b) => (a.date < b.date ? 1 : -1)).map((d) => (
                   <tr key={d.date}>
                     <td>{formatDate(d.date)}</td>
                     <td className="text-right tabular-nums">{num(d.orders_count)}</td>
