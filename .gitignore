@@ -30,6 +30,8 @@ yarn-error.log*
 
 # TypeScript incremental build info
 *.tsbuildinfo
+# Written by Next itself (differs between `next dev` and `next build`)
+next-env.d.ts
 
 # Backend runtime data (logs contain customer PII; uploads are user content)
 backend/storage/logs/*
