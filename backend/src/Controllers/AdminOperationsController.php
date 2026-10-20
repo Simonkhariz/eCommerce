@@ -18,6 +18,7 @@ use App\Support\RateLimiter;
 use App\Support\RequestContext;
 use App\Support\Response;
 use App\Support\SessionCookie;
+use App\Support\StoreBrands;
 
 /**
  * Administrative operations: inventory, customers, payments, refunds, promotions, storefront
@@ -37,6 +38,7 @@ class AdminOperationsController
         'store_origin_address' => 'Dispatch address (where parcels ship from)',
         'store_origin_city' => 'Dispatch city',
         'store_origin_state' => 'Dispatch state',
+        'storefront_brands' => 'Brands in the scrolling strip under the homepage banner, separated by commas (only brands you sell). Leave empty to hide the strip.',
     ];
 
     public function __construct()
@@ -864,6 +866,15 @@ class AdminOperationsController
                 $changes[$key] = PhoneNumber::toInternational($value);
             } elseif ($key === 'store_name' && $value === '') {
                 $errors[$key] = 'Store name cannot be empty.';
+            } elseif ($key === 'storefront_brands') {
+                $brands = StoreBrands::parse($value);
+                if (count($brands) > 20) {
+                    $errors[$key] = 'List at most 20 brands.';
+                } elseif (array_filter($brands, static fn (string $b): bool => mb_strlen($b) > 40)) {
+                    $errors[$key] = 'Each brand name can be at most 40 characters.';
+                } else {
+                    $changes[$key] = implode(', ', $brands);
+                }
             } else {
                 $changes[$key] = $value;
             }

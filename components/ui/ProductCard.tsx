@@ -1,13 +1,17 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { Product } from '@/types';
 import { formatPrice } from '@/lib/currency';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { StarIcon, ShoppingBag01Icon, FavouriteIcon } from '@hugeicons/core-free-icons';
 import { useWishlist } from '@/context/WishlistContext';
+import { useCart } from '@/context/CartContext';
+import { getProductDetail, mapApiProductToStorefront } from '@/lib/api-client';
+import { QuickAddDialog } from '@/components/product/QuickAddDialog';
 
 interface ProductCardProps {
   product: Product;
@@ -16,14 +20,38 @@ interface ProductCardProps {
 }
 
 /**
- * Catalogue card. Size and colour are chosen on the product page, so the card's cart
- * action opens the product rather than guessing an option.
+ * Catalogue card. The cart button never guesses an option: a product with a single option in
+ * stock goes straight into the cart; otherwise a quick-add panel asks for colour and size.
  */
 export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = false }) => {
+  const router = useRouter();
   const { toggleWishlist, isInWishlist } = useWishlist();
+  const { addToCart } = useCart();
   const isFavorited = isInWishlist(product.id);
   const href = `/products/${product.slug}`;
   const soldOut = product.inStock === false;
+  const [checking, setChecking] = useState(false);
+  const [quickAdd, setQuickAdd] = useState<Product | null>(null);
+
+  const handleAdd = async () => {
+    if (soldOut) {
+      router.push(href);
+      return;
+    }
+    setChecking(true);
+    try {
+      // The options and live stock come with the product's details (the list only has names).
+      const detail = mapApiProductToStorefront(await getProductDetail(product.slug));
+      const inStock = (detail.variants ?? []).filter((v) => v.stock > 0);
+      if (inStock.length === 1) addToCart(detail, inStock[0], 1);
+      else if (inStock.length > 1) setQuickAdd(detail);
+      else router.push(href); // sold out since the list loaded: the product page says so
+    } catch {
+      router.push(href);
+    } finally {
+      setChecking(false);
+    }
+  };
 
   return (
     <article className="group relative flex flex-col h-full bg-white rounded-2xl overflow-hidden">
@@ -97,15 +125,24 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = fal
           )}
         </div>
 
-        <Link
-          href={href}
-          className="bg-black hover:bg-neutral-800 text-white rounded-full p-2.5 sm:px-3.5 sm:py-2 md:p-2.5 lg:px-3.5 lg:py-2 flex items-center justify-center gap-1 text-xs font-semibold shadow-sm hover:shadow-md transition-all shrink-0"
-          aria-label={soldOut ? `View ${product.name}` : `Choose options for ${product.name}`}
+        <button
+          type="button"
+          onClick={handleAdd}
+          disabled={checking}
+          aria-busy={checking || undefined}
+          className="bg-black hover:bg-neutral-800 text-white rounded-full p-2.5 sm:px-3.5 sm:py-2 md:p-2.5 lg:px-3.5 lg:py-2 flex items-center justify-center gap-1 text-xs font-semibold shadow-sm hover:shadow-md transition-all shrink-0 disabled:opacity-70"
+          aria-label={soldOut ? `View ${product.name}` : `Add ${product.name} to cart`}
         >
-          <HugeiconsIcon icon={ShoppingBag01Icon} size={15} aria-hidden="true" />
-          <span className="hidden sm:inline md:hidden lg:inline">{soldOut ? 'View' : 'Options'}</span>
-        </Link>
+          {checking ? (
+            <span className="block h-[15px] w-[15px] animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
+          ) : (
+            <HugeiconsIcon icon={ShoppingBag01Icon} size={15} aria-hidden="true" />
+          )}
+          <span className="hidden sm:inline md:hidden lg:inline">{soldOut ? 'View' : 'Add'}</span>
+        </button>
       </div>
+
+      {quickAdd && <QuickAddDialog product={quickAdd} onClose={() => setQuickAdd(null)} />}
     </article>
   );
 };

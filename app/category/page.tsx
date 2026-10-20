@@ -20,7 +20,11 @@ function CatalogContent() {
   const filters = useMemo(() => parseCatalogParams(new URLSearchParams(queryKey)), [queryKey]);
 
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
-  const [facets, setFacets] = useState<CatalogFacets | null>(null);
+  // Filter options for the category being shown (all products when none is chosen). The last
+  // set stays on screen while the next category's loads, so the sidebar does not flash empty.
+  const facetCategory = filters.category?.toLowerCase() ?? '';
+  const [facetAnswer, setFacetAnswer] = useState<{ category: string; facets: CatalogFacets } | null>(null);
+  const facets = facetAnswer?.facets ?? null;
   // One request per address (filters, page) and per "Try again"; only its answer is shown.
   const [retries, setRetries] = useState(0);
   const requestKey = `${queryKey}#${retries}`;
@@ -39,10 +43,14 @@ function CatalogContent() {
   const error = loading ? null : (answer?.error ?? null);
 
   useEffect(() => {
-    getCatalogFacets()
-      .then(setFacets)
-      .catch(() => setFacets({ categories: [], colors: [], sizes: [], dress_styles: [], price: { min: 0, max: 0 } }));
-  }, []);
+    let current = true;
+    getCatalogFacets(facetCategory || null)
+      .catch((): CatalogFacets => ({ categories: [], colors: [], sizes: [], dress_styles: [], price: { min: 0, max: 0 } }))
+      .then((value) => current && setFacetAnswer({ category: facetCategory, facets: value }));
+    return () => {
+      current = false;
+    };
+  }, [facetCategory]);
 
   useEffect(() => {
     let current = true; // a newer request makes this answer irrelevant
@@ -85,8 +93,12 @@ function CatalogContent() {
     if (scrollTop) window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Any filter change starts again from page 1.
-  const handleFilterChange = (patch: Partial<FilterState>) => navigate({ ...filters, ...patch, page: 1 });
+  // Any filter change starts again from page 1. Colours and sizes belong to a category, so
+  // choosing another category clears them.
+  const handleFilterChange = (patch: Partial<FilterState>) => {
+    const categoryChanged = 'category' in patch && (patch.category ?? null) !== (filters.category ?? null);
+    navigate({ ...filters, ...(categoryChanged ? { selectedColors: [], selectedSizes: [] } : {}), ...patch, page: 1 });
+  };
   const handlePageChange = (page: number) => navigate({ ...filters, page }, true);
   const handleReset = () => navigate(EMPTY_FILTERS);
 

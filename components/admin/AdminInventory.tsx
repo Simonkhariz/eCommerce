@@ -89,7 +89,8 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
   const [searchText, setSearchText] = useSearchBox(filters.search, setFilters);
 
   const { data, loading, error, reload } = useAdminData(
-    () => adminGetInventory({ filter: stockFilter, search: filters.search, page, per_page: 25 }),
+    // 50 rows: every size and colour is its own row, so a page of 25 holds only a few products.
+    () => adminGetInventory({ filter: stockFilter, search: filters.search, page, per_page: 50 }),
     [stockFilter, filters.search, page]
   );
   const rows = data?.items ?? [];

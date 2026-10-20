@@ -36,6 +36,7 @@ const LABELS: Record<string, string> = {
   store_origin_address: 'Dispatch address',
   store_origin_city: 'Dispatch city',
   store_origin_state: 'Dispatch state',
+  storefront_brands: 'Homepage brand strip',
 };
 
 const INPUT_TYPES: Record<string, string> = {
@@ -44,7 +45,7 @@ const INPUT_TYPES: Record<string, string> = {
   store_whatsapp_phone: 'tel',
 };
 
-const WIDE_KEYS = new Set(['store_name', 'store_origin_address']);
+const WIDE_KEYS = new Set(['store_name', 'store_origin_address', 'storefront_brands']);
 
 function gatewayMode(mode: string) {
   if (mode === 'live') return <StatusPill label="Live" tone="green" />;

@@ -461,13 +461,21 @@ class ProductRepository
     }
 
     /**
-     * Filter options that actually exist in the published catalogue.
+     * Filter options that actually exist in the published catalogue, or in one category of it
+     * (so a category page only offers the colours, sizes, styles and prices it really has).
      *
      * @return array{colors: array, sizes: string[], dress_styles: string[], price: array{min: float, max: float}}
      */
-    public function facets(): array
+    public function facets(?string $categorySlug = null): array
     {
         $published = "p.status = 'published' AND p.product_type = 'physical'";
+        $types = '';
+        $params = [];
+        if ($categorySlug !== null && $categorySlug !== '') {
+            $published .= ' AND p.category_id = (SELECT c.id FROM categories c WHERE c.slug = ? LIMIT 1)';
+            $types = 's';
+            $params = [$categorySlug];
+        }
 
         $colors = $this->db->fetchAll(
             "SELECT pv.color_name AS name, MIN(pv.color_hex) AS hex, COUNT(DISTINCT p.id) AS product_count
@@ -475,7 +483,9 @@ class ProductRepository
              JOIN products p ON p.id = pv.product_id
              WHERE {$published} AND pv.is_active = 1
              GROUP BY pv.color_name
-             ORDER BY product_count DESC, pv.color_name ASC"
+             ORDER BY product_count DESC, pv.color_name ASC",
+            $types,
+            $params
         );
         foreach ($colors as &$c) {
             $c['product_count'] = (int) $c['product_count'];
@@ -486,9 +496,11 @@ class ProductRepository
             "SELECT DISTINCT pv.size AS size
              FROM product_variants pv
              JOIN products p ON p.id = pv.product_id
-             WHERE {$published} AND pv.is_active = 1"
+             WHERE {$published} AND pv.is_active = 1",
+            $types,
+            $params
         );
-        $order = ['XX-Small', 'X-Small', 'XS', 'Small', 'S', 'Medium', 'M', 'Large', 'L', 'X-Large', 'XL', 'XX-Large', 'XXL', '3X-Large', '3XL', '4X-Large', '4XL', 'One Size'];
+        $order =['XX-Small', 'X-Small', 'XS', 'Small', 'S', 'Medium', 'M', 'Large', 'L', 'X-Large', 'XL', 'XX-Large', 'XXL', '3X-Large', '3XL', '4X-Large', '4XL', 'One Size'];
         $sizes = array_column($sizeRows, 'size');
         usort($sizes, static function (string $a, string $b) use ($order): int {
             $ia = array_search($a, $order, true);
@@ -508,12 +520,16 @@ class ProductRepository
         $styleRows = $this->db->fetchAll(
             "SELECT DISTINCT p.dress_style AS style FROM products p
              WHERE {$published} AND p.dress_style IS NOT NULL AND p.dress_style <> ''
-             ORDER BY p.dress_style ASC"
+             ORDER BY p.dress_style ASC",
+            $types,
+            $params
         );
 
         $price = $this->db->fetchOne(
             "SELECT COALESCE(MIN(p.base_price), 0) AS min_price, COALESCE(MAX(p.base_price), 0) AS max_price
-             FROM products p WHERE {$published}"
+             FROM products p WHERE {$published}",
+            $types,
+            $params
         );
 
         return [

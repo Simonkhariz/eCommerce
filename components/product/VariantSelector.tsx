@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useId } from 'react';
 import { ProductColor } from '@/types';
+import type { OptionState } from '@/lib/variants';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Tick02Icon,
@@ -12,8 +13,7 @@ import {
   FavouriteIcon,
 } from '@hugeicons/core-free-icons';
 
-/** 'available' = in stock, 'sold-out' = offered but no stock, 'unavailable' = not offered in this colour. */
-export type OptionState = 'available' | 'sold-out' | 'unavailable';
+export type { OptionState };
 
 interface VariantSelectorProps {
   colors: ProductColor[];
@@ -79,15 +79,17 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
   isWishlisted = false,
   onToggleWishlist,
 }) => {
+  // Unique per selector: the product page and a quick-add panel can both be on screen.
+  const uid = useId();
   return (
     <div className="space-y-6">
       {/* 1. Colour (radio group: arrow keys move and select) */}
       {colors.length > 0 && (
         <div className="pb-6 border-b border-neutral-200">
-          <p id="variant-color-label" className="text-xs font-bold text-neutral-600 uppercase tracking-wider block mb-3">
+          <p id={`${uid}-color`} className="text-xs font-bold text-neutral-600 uppercase tracking-wider block mb-3">
             Select Color: <span className="text-black font-bold normal-case">{selectedColor?.name ?? '—'}</span>
           </p>
-          <div role="radiogroup" aria-labelledby="variant-color-label" className="flex flex-wrap items-center gap-3">
+          <div role="radiogroup" aria-labelledby={`${uid}-color`} className="flex flex-wrap items-center gap-3">
             {colors.map((color, index) => {
               const isSelected = selectedColor?.name === color.name;
               const isLight = ['#ffffff', '#fff', '#fafafa', '#f5f5f5'].includes(color.hex.toLowerCase());
@@ -133,10 +135,10 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
       {/* 2. Size (radio group; sizes not made in this colour are skipped) */}
       {sizes.length > 0 && (
         <div className="pb-6 border-b border-neutral-200">
-          <p id="variant-size-label" className="text-xs font-bold text-neutral-600 uppercase tracking-wider block mb-3">
+          <p id={`${uid}-size`} className="text-xs font-bold text-neutral-600 uppercase tracking-wider block mb-3">
             Choose Size: <span className="text-black font-bold normal-case">{selectedSize ?? '—'}</span>
           </p>
-          <div role="radiogroup" aria-labelledby="variant-size-label" className="flex flex-wrap gap-2.5 sm:gap-3">
+          <div role="radiogroup" aria-labelledby={`${uid}-size`} className="flex flex-wrap gap-2.5 sm:gap-3">
             {sizes.map((size, index) => {
               const state = sizeStates[size] ?? 'unavailable';
               const isSelected = selectedSize === size;

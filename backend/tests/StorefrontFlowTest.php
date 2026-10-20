@@ -51,6 +51,28 @@ $facets = $t->http('GET', '/catalog/facets');
 $t->check('facets 200', 200, $facets['status']);
 $t->ok('facets list real sizes', (array) TestKit::get($facets, 'data.sizes') !== []);
 $t->ok('facets list categories', (array) TestKit::get($facets, 'data.categories') !== []);
+// A category's filters offer only what that category has; the category list stays complete.
+$catSlug = (string) $t->scalar(
+    "SELECT c.slug FROM categories c JOIN products p ON p.category_id = c.id AND p.status = 'published'
+     JOIN product_variants v ON v.product_id = p.id AND v.is_active = 1 GROUP BY c.id ORDER BY COUNT(*) ASC LIMIT 1"
+);
+$catFacets = $t->http('GET', '/catalog/facets?category=' . urlencode($catSlug));
+$expectSizes = array_column($t->sql(
+    "SELECT DISTINCT v.size FROM product_variants v JOIN products p ON p.id = v.product_id JOIN categories c ON c.id = p.category_id
+     WHERE c.slug = ? AND p.status = 'published' AND p.product_type = 'physical' AND v.is_active = 1",
+    's',
+    [$catSlug]
+), 'size');
+$gotSizes = (array) TestKit::get($catFacets, 'data.sizes');
+sort($expectSizes);
+$sortedGot = $gotSizes;
+sort($sortedGot);
+$t->check('category filters list only that category\'s sizes', $expectSizes, $sortedGot);
+$t->check('category filters keep the full category list', count((array) TestKit::get($facets, 'data.categories')), count((array) TestKit::get($catFacets, 'data.categories')));
+$maxInCategory = (float) $t->scalar("SELECT MAX(p.base_price) FROM products p JOIN categories c ON c.id = p.category_id WHERE c.slug = ? AND p.status = 'published' AND p.product_type = 'physical'", 's', [$catSlug]);
+$t->check('category filters price range is the category\'s', $maxInCategory, (float) TestKit::get($catFacets, 'data.price.max'));
+$none = $t->http('GET', '/catalog/facets?category=no-such-category');
+$t->ok('unknown category has no filter options', (array) TestKit::get($none, 'data.sizes') === [] && (array) TestKit::get($none, 'data.colors') === []);
 $pdp = $t->http('GET', "/products/{$slug}");
 $t->check('product detail 200', 200, $pdp['status']);
 $t->ok('product detail has variants', (array) TestKit::get($pdp, 'data.variants') !== []);

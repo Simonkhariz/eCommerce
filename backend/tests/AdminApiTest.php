@@ -118,6 +118,22 @@ $t->check('save WhatsApp number in local format', 200, $A('PUT', '/admin/setting
 $t->check('WhatsApp number is saved as +234 and used at checkout', '+2348000000404', TestKit::get($t->http('GET', '/checkout/payment-methods'), 'data.support_phone'));
 $t->check('impossible WhatsApp number refused', 422, $A('PUT', '/admin/settings', ['json' => ['store_whatsapp_phone' => '0800 000']])['status']);
 
+// Brand strip under the homepage banner.
+$oldBrands = $t->scalar("SELECT `value` FROM `store_settings` WHERE `key_name` = 'storefront_brands'");
+$t->cleanup(function () use ($t, $oldBrands): void {
+    if ($oldBrands === null) {
+        $t->sql("DELETE FROM `store_settings` WHERE `key_name` = 'storefront_brands'");
+    } else {
+        $t->sql("UPDATE `store_settings` SET `value` = ? WHERE `key_name` = 'storefront_brands'", 's', [(string) $oldBrands]);
+    }
+});
+$saved = $A('PUT', '/admin/settings', ['json' => ['storefront_brands' => ' Nike,  New   Balance,, nike , Zara ']]);
+$t->check('brand list saved tidy (spaces, blanks and repeats removed)', 'Nike, New Balance, Zara', TestKit::get($saved, 'data.storefront_brands'));
+$t->check('homepage sends the brand list', ['Nike', 'New Balance', 'Zara'], TestKit::get($t->http('GET', '/storefront/homepage'), 'data.brands'));
+$t->check('more than 20 brands refused', 422, $A('PUT', '/admin/settings', ['json' => ['storefront_brands' => implode(',', array_map(fn ($i) => "Brand {$i}", range(1, 21)))]])['status']);
+$A('PUT', '/admin/settings', ['json' => ['storefront_brands' => '']]);
+$t->check('an empty list hides the strip', [], TestKit::get($t->http('GET', '/storefront/homepage'), 'data.brands'));
+
 $t->section('Payment method switches');
 $t->cleanup(function () use ($t): void {
     $t->sql("DELETE FROM `store_settings` WHERE `key_name` IN ('payment_monnify_enabled', 'payment_kora_enabled', 'payment_whatsapp_enabled')");

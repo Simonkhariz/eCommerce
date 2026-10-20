@@ -263,6 +263,37 @@ input[type="range"]::-webkit-slider-thumb {
   }
 }
 
+/* Brand strip: two identical copies of the list slide left by one copy's width and repeat,
+   so the loop has no visible seam. Hover or keyboard focus pauses it; with reduced motion
+   it stands still and can be scrolled by hand. */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee-track {
+  animation: marquee var(--marquee-duration, 40s) linear infinite;
+}
+
+.marquee:hover .marquee-track,
+.marquee:focus-within .marquee-track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee {
+    overflow-x: auto;
+  }
+
+  .marquee-track {
+    animation: none !important;
+  }
+}
+
 /* ==========================================================================
    Clean Dedicated Receipt Print Styles - Strictly Single Page
    When printing, hides header, footer, page background, and all storefront chrome;

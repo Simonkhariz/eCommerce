@@ -10,6 +10,7 @@ use App\Repositories\ProductRepository;
 use App\Services\CheckoutService;
 use App\Support\Cache;
 use App\Support\Response;
+use App\Support\StoreBrands;
 
 /**
  * Public Storefront Catalogue Controller.
@@ -101,13 +102,17 @@ class CatalogController
     }
 
     /**
-     * GET /api/v1/catalog/facets
+     * GET /api/v1/catalog/facets[?category=slug]
      * Filter options (categories, colours, sizes, styles, price range) that exist in the catalogue.
+     * With a category, colours, sizes, styles and prices are those of that category; the
+     * category list is always the full one.
      */
     public function facets(): void
     {
-        $facets = Cache::remember('facets', function (): array {
-            $facets = $this->productRepo->facets();
+        $category = trim((string) ($_GET['category'] ?? $_GET['cat'] ?? ''));
+        $category = preg_match('/^[a-z0-9-]{1,100}$/', $category) ? $category : '';
+        $facets = Cache::remember('facets:' . $category, function () use ($category): array {
+            $facets = $this->productRepo->facets($category);
             $facets['categories'] = $this->categoryRepo->getAllActive();
             return $facets;
         }, 10); // Only admin changes affect these (and they clear the cache).
@@ -187,6 +192,8 @@ class CatalogController
             'states_served' => isset($served['*']) ? count(CheckoutService::NIGERIAN_STATES) : count($served),
         ];
 
+        $brandSetting = $db->fetchOne("SELECT `value` FROM `store_settings` WHERE `key_name` = 'storefront_brands'");
+
         // The soonest real end time among the flash deals shown (null = no countdown).
         $flashEnds = array_filter(array_column($flashDeals, 'flash_deal_ends_at'));
         sort($flashEnds);
@@ -202,6 +209,7 @@ class CatalogController
             'promotions' => $promotions,
             'banners' => $banners,
             'reviews' => $reviews,
+            'brands' => StoreBrands::parse((string) ($brandSetting['value'] ?? '')),
         ];
     }
 }

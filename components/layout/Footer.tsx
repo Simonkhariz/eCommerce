@@ -6,16 +6,9 @@ import { Mail, CheckCircle2 } from 'lucide-react';
 import { apiSubscribeNewsletter } from '@/lib/api-client';
 import { useStoreInfo, useStoreNav, whatsAppLink } from '@/lib/use-store-info';
 import { useStoreSupport } from '@/lib/use-store-support';
+import { PaymentBadges } from '@/components/layout/PaymentBadges';
 
 const linkClass = 'inline-block py-1 transition-colors hover:text-black hover:underline';
-
-/** Payment options the store actually accepts (through Kora / Monnify, or manual bank transfer). */
-const PAYMENT_BADGES = [
-  { label: 'Visa', className: 'text-blue-800' },
-  { label: 'Mastercard', className: 'text-red-700' },
-  { label: 'Verve', className: 'text-emerald-800' },
-  { label: 'Bank transfer', className: 'text-neutral-800' },
-];
 
 function NewsletterForm() {
   const inputId = useId();
@@ -238,16 +231,7 @@ export const Footer: React.FC = () => {
           <p>
             © {new Date().getFullYear()} {origin?.store_name || 'SHOP.CO'}. All rights reserved.
           </p>
-          <ul aria-label="Accepted payment methods" className="flex flex-wrap items-center justify-center gap-2">
-            {PAYMENT_BADGES.map((b) => (
-              <li
-                key={b.label}
-                className={`rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-xs font-bold tracking-wide shadow-sm ${b.className}`}
-              >
-                {b.label}
-              </li>
-            ))}
-          </ul>
+          <PaymentBadges />
         </div>
       </div>
     </footer>

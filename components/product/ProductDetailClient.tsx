@@ -7,7 +7,8 @@ import { useCart, MAX_QUANTITY_PER_LINE } from '@/context/CartContext';
 import { useWishlist } from '@/context/WishlistContext';
 import { ImageGallery } from '@/components/product/ImageGallery';
 import { ShareProduct } from '@/components/product/ShareProduct';
-import { VariantSelector, OptionState } from '@/components/product/VariantSelector';
+import { VariantSelector } from '@/components/product/VariantSelector';
+import { colorStockFor, findVariant, firstChoice, sizeAfterColorChange, sizeStatesFor, stockMessageFor } from '@/lib/variants';
 import { StickyMobileBar } from '@/components/product/StickyMobileBar';
 import { ProductTabs } from '@/components/product/ProductTabs';
 import { ProductCard } from '@/components/ui/ProductCard';
@@ -28,12 +29,6 @@ import {
   Alert02Icon,
   RefreshIcon,
 } from '@hugeicons/core-free-icons';
-
-/** Start on the first option that is actually in stock (else the first option). */
-function firstChoice(product: Product | null): ProductVariant | undefined {
-  const variants = product?.variants ?? [];
-  return variants.find((v) => v.stock > 0) ?? variants[0];
-}
 
 /**
  * Product page (client). The server page.tsx provides the metadata and the product itself
@@ -130,38 +125,15 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
 
   const variants: ProductVariant[] = useMemo(() => product?.variants ?? [], [product]);
 
-  const selectedVariant = useMemo(
-    () => variants.find((v) => v.color.name === selectedColor?.name && v.size === selectedSize) ?? null,
-    [variants, selectedColor, selectedSize]
-  );
-
+  const selectedVariant = useMemo(() => findVariant(variants, selectedColor, selectedSize), [variants, selectedColor, selectedSize]);
   // Which sizes exist (and are in stock) for the selected colour.
-  const sizeStates = useMemo(() => {
-    const states: Record<string, OptionState> = {};
-    for (const size of product?.sizes ?? []) {
-      const v = variants.find((x) => x.size === size && x.color.name === selectedColor?.name);
-      states[size] = !v ? 'unavailable' : v.stock > 0 ? 'available' : 'sold-out';
-    }
-    return states;
-  }, [product, variants, selectedColor]);
-
-  const colorInStock = useMemo(() => {
-    const map: Record<string, boolean> = {};
-    for (const v of variants) {
-      map[v.color.name] = (map[v.color.name] ?? false) || v.stock > 0;
-    }
-    return map;
-  }, [variants]);
+  const sizeStates = useMemo(() => sizeStatesFor(product?.sizes ?? [], variants, selectedColor), [product, variants, selectedColor]);
+  const colorInStock = useMemo(() => colorStockFor(variants), [variants]);
 
   const handleSelectColor = (color: ProductColor) => {
     setSelectedColor(color);
     setQuantity(1);
-    // Keep the size if it exists in the new colour, otherwise move to its best available size.
-    const forColor = variants.filter((v) => v.color.name === color.name);
-    if (!forColor.some((v) => v.size === selectedSize)) {
-      const best = forColor.find((v) => v.stock > 0) ?? forColor[0];
-      setSelectedSize(best ? best.size : null);
-    }
+    setSelectedSize(sizeAfterColorChange(variants, color, selectedSize));
   };
 
   const handleSelectSize = (size: string) => {
@@ -173,15 +145,7 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
   const maxQuantity = Math.max(1, Math.min(MAX_QUANTITY_PER_LINE, stock));
   const canPurchase = !!selectedVariant && stock > 0;
   const displayPrice = selectedVariant?.price ?? product?.price ?? 0;
-  const stockMessage = !selectedVariant
-    ? variants.length === 0
-      ? 'This product is not available to order right now.'
-      : 'Choose an available colour and size.'
-    : stock === 0
-      ? 'Sold out in this colour and size.'
-      : stock <= 5
-        ? `Only ${stock} left in this size.`
-        : null;
+  const stockMessage = stockMessageFor(selectedVariant, variants.length);
 
   const handleAddToCart = () => {
     if (!product || !selectedVariant || !canPurchase) return;

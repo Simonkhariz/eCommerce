@@ -143,6 +143,8 @@ export interface HomepageData {
   promotions: ApiPromotion[];
   banners: ApiBanner[];
   reviews?: ApiReview[];
+  /** Brands for the logo strip (admin Settings); empty hides it. */
+  brands?: string[];
 }
 
 export interface PaginationMeta {
@@ -486,8 +488,8 @@ export async function getProductDetail(idOrSlug: string | number): Promise<ApiPr
 /**
  * Filter options that exist in the published catalogue.
  */
-export async function getCatalogFacets(): Promise<CatalogFacets> {
-  return fetchFromApi<CatalogFacets>('/catalog/facets');
+export async function getCatalogFacets(category?: string | null): Promise<CatalogFacets> {
+  return fetchFromApi<CatalogFacets>(category ? `/catalog/facets?category=${encodeURIComponent(category)}` : '/catalog/facets');
 }
 
 /**

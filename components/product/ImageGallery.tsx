@@ -74,7 +74,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, productName 
                   isSelected ? 'ring-2 ring-black ring-offset-2 shadow-sm' : 'hover:opacity-80 opacity-90'
                 }`}
               >
-                <Image src={img} alt="" fill sizes="(max-width: 640px) 33vw, 152px" className="object-cover object-center" />
+                {/* The first thumbnail is the main photo again: load it with the page like the main one. */}
+                <Image src={img} alt="" fill loading={idx === 0 ? 'eager' : undefined} sizes="(max-width: 640px) 33vw, 152px" className="object-cover object-center" />
               </button>
             );
           })}

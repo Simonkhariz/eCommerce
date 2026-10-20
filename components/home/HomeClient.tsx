@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { HeroBanner } from '@/components/home/HeroBanner';
+import { BrandMarquee } from '@/components/home/BrandMarquee';
 import { FlashDeals } from '@/components/home/FlashDeals';
 import { ProductSection } from '@/components/home/ProductSection';
 import { CategoryGrid } from '@/components/home/CategoryGrid';
@@ -59,6 +60,9 @@ export function HomeClient({ initial = null }: { initial?: HomepageData | null }
     <div className="space-y-4">
       {/* 1. Hero with CMS banners, active promotion and real store numbers */}
       <HeroBanner banners={homepageData?.banners} promotions={homepageData?.promotions} stats={homepageData?.stats} />
+
+      {/* Brands the store carries (admin Settings), scrolling under the banner */}
+      <BrandMarquee brands={homepageData?.brands} />
 
       {/* Couldn't load the shop: say so plainly (never fall back to made-up products or prices) */}
       {error && (

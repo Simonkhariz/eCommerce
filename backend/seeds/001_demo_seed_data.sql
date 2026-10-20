@@ -68,12 +68,12 @@ ON DUPLICATE KEY UPDATE `discount_percent` = VALUES(`discount_percent`);
 
 -- 4. Categories
 INSERT INTO `categories` (`name`, `slug`, `description`, `image_url`, `display_order`, `is_active`) VALUES
-('T-Shirts', 't-shirts', 'Casual streetwear and premium graphic tees.', '/images/products/tshirts.jpg', 1, 1),
-('Shorts', 'shorts', 'Everyday shorts, tailored bermudas, and athletic wear.', '/images/products/shorts.jpg', 2, 1),
-('Shirts', 'shirts', 'Smart casual button-downs and formal shirts.', '/images/products/shirts.jpg', 3, 1),
-('Hoodies', 'hoodies', 'Heavyweight fleece hoodies and outerwear.', '/images/products/hoodies.jpg', 4, 1),
-('Jeans', 'jeans', 'Slim-fit, relaxed, and classic denim.', '/images/products/jeans.jpg', 5, 1),
-('Accessories', 'accessories', 'Caps, bags, belts and everyday accessories.', '/images/products/accessories.jpg', 6, 1)
+('T-Shirts', 't-shirts', 'Casual streetwear and premium graphic tees.', '/images/categories/t-shirts.webp', 1, 1),
+('Shorts', 'shorts', 'Everyday shorts, tailored bermudas, and athletic wear.', '/images/categories/shorts.webp', 2, 1),
+('Shirts', 'shirts', 'Smart casual button-downs and formal shirts.', '/images/categories/shirts.webp', 3, 1),
+('Hoodies', 'hoodies', 'Heavyweight fleece hoodies and outerwear.', '/images/categories/hoodies.webp', 4, 1),
+('Jeans', 'jeans', 'Slim-fit, relaxed, and classic denim.', '/images/categories/jeans.webp', 5, 1),
+('Accessories', 'accessories', 'Caps, bags, belts and everyday accessories.', '/images/categories/accessories.webp', 6, 1)
 ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
 
 -- 5. Products & Product Variants (Physical)
