@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { HeroBanner } from '@/components/home/HeroBanner';
 import { FlashDeals } from '@/components/home/FlashDeals';
 import { ProductSection } from '@/components/home/ProductSection';

@@ -131,11 +131,14 @@ export function wasInvoiceSent(orderNumber: string): boolean {
   }
 }
 
-/** Guest access tokens are kept per order on this device only (never in URLs). */
-export function saveGuestToken(orderNumber: string, token: string): void {
+/**
+ * Guest access tokens are kept per order on this device only (never in URLs). The order also
+ * becomes this device's latest order unless `asLatest` is false (a key typed in to look one up).
+ */
+export function saveGuestToken(orderNumber: string, token: string, asLatest = true): void {
   try {
     localStorage.setItem(`shopco_guest_token_${orderNumber}`, token);
-    localStorage.setItem('shopco_latest_order_number', orderNumber);
+    if (asLatest) localStorage.setItem('shopco_latest_order_number', orderNumber);
     notifyChange();
   } catch {
     // ignore

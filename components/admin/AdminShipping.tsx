@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { MapPin } from 'lucide-react';
 import { AdminOrderListItem, adminConfirmDelivery, adminGetOrders, errorMessage } from '@/lib/admin-api';

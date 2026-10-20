@@ -7,7 +7,7 @@ everything from an admin panel at `/admin`.
 
 | Part | Stack | Where |
 | :--- | :--- | :--- |
-| Storefront + admin UI | Next.js 14 (App Router), TypeScript, Tailwind | repository root (`app/`, `components/`, `lib/`) |
+| Storefront + admin UI | Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind | repository root (`app/`, `components/`, `lib/`) |
 | API | PHP 8.2, MySQLi, no framework | `backend/` (see [backend/README.md](backend/README.md)) |
 | Database | MySQL / MariaDB (XAMPP) | `backend/migrations/`, `backend/seeds/` |
 
@@ -19,7 +19,7 @@ is ever exposed to JavaScript.
 
 ## Run it locally
 
-Requirements: Node 18+, PHP 8.2+ (extensions `mysqli`, `curl`, `mbstring`, `openssl`, `fileinfo`),
+Requirements: Node 20.9+ (Next.js 16 needs it), PHP 8.2+ (extensions `mysqli`, `curl`, `mbstring`, `openssl`, `fileinfo`),
 MySQL running (XAMPP is fine).
 
 ```bash
@@ -98,7 +98,9 @@ npm run test:api                                       # = php backend/tests/run
 `backend/tests/run.php` creates a throw-away `shopco_test` database, migrates and seeds it, starts
 the API on port 8099 against it, runs every suite, and drops the database again; your development
 data is never touched. Run a subset with `php backend/tests/run.php Security Admin`, or keep the
-test database for debugging with `--keep`. The latest results are in
+test database for debugging with `--keep`. To point your own API at that database, set
+`SHOPCO_ENV_FILE` to the **absolute** path of `backend/.env.testing`; the API refuses to start if
+it cannot read the file, rather than falling back to your real `.env`. The latest results are in
 [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
 ---
@@ -111,5 +113,5 @@ test database for debugging with `--keep`. The latest results are in
 - Use live Kora/Monnify keys, set the webhook URLs to `https://<your-domain>/api/v1/webhooks/kora`
   and `/api/v1/webhooks/monnify`, and set `APP_ENV=production`, `FRONTEND_URL` and
   `CORS_ALLOWED_ORIGINS` in `backend/.env`.
-- Configure SMTP and schedule the two background jobs.
+- Configure SMTP and schedule the three background jobs.
 - Serve only `backend/public/` from the web server (never the whole `backend/` folder).

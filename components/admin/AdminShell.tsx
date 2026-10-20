@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -137,7 +137,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
             <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2">
               <span className="hidden shrink-0 text-sm text-[#6b7280] sm:inline">{current?.section ?? 'Admin'}</span>
-              <span className="hidden h-2.5 w-1.5 shrink-0 sm:inline" aria-hidden="true">
+              <span className="hidden shrink-0 sm:inline-flex" aria-hidden="true">
                 <AdminIcon name="breadcrumb-slash" width={7} height={11} className="-translate-y-0.5" />
               </span>
               <span aria-current="page" className="truncate text-sm font-semibold text-[#1f2937]">
@@ -223,8 +223,8 @@ function AdminSidebar({ pathname, onClose, closeLabel }: { pathname: string; onC
   const { admin, signOut } = useAdminSession();
   const [signingOut, setSigningOut] = useState(false);
 
-  // Groups open by default when they contain the current page.
-  const initialOpen = useMemo(() => {
+  // Groups open by default when they contain the page the panel was opened on.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     const open: Record<string, boolean> = {};
     ADMIN_NAV.forEach((section) =>
       section.items.forEach((item) => {
@@ -232,9 +232,7 @@ function AdminSidebar({ pathname, onClose, closeLabel }: { pathname: string; onC
       })
     );
     return open;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(initialOpen);
+  });
 
   useEffect(() => {
     ADMIN_NAV.forEach((section) =>
@@ -309,7 +307,8 @@ function AdminSidebar({ pathname, onClose, closeLabel }: { pathname: string; onC
     <aside className="flex h-full w-full flex-col border-r border-[#e5e7eb] bg-[#f8f8f8]" aria-label="Admin">
       <div className="flex items-center justify-between border-b border-[#e5e7eb]/60 px-3.5 py-3.5">
         <Link href="/admin" className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40">
-          <Image src="/admin/logo.svg" alt="" width={24} height={24} unoptimized />
+          {/* logo.svg is 34×37 (it includes a drop shadow), so 24 wide is 26 tall. */}
+          <Image src="/admin/logo.svg" alt="" width={24} height={26} unoptimized />
           <span className="flex flex-col">
             <span className="text-[15px] font-bold leading-none tracking-tight text-[#1f2937]">SHOP.CO</span>
             <span className="mt-0.5 text-xs leading-tight text-[#6b7280]">Store admin</span>

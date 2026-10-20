@@ -19,7 +19,9 @@ class Env
      * Load environment variables from a file.
      *
      * When the process environment sets SHOPCO_ENV_FILE (the test runner does), that file is
-     * loaded instead, so tests run against their own database without touching .env.
+     * loaded instead, so tests run against their own database without touching .env. If that
+     * file cannot be read the process stops: falling back to .env would point a test run at
+     * the real database.
      */
     public static function load(string $filePath): void
     {
@@ -28,7 +30,12 @@ class Env
         }
 
         $override = getenv('SHOPCO_ENV_FILE');
-        if (is_string($override) && $override !== '' && is_readable($override)) {
+        if (is_string($override) && $override !== '') {
+            if (!is_readable($override)) {
+                throw new \RuntimeException(
+                    "SHOPCO_ENV_FILE is set to '{$override}', which cannot be read from " . getcwd() . '. Use an absolute path.'
+                );
+            }
             $filePath = $override;
         }
 

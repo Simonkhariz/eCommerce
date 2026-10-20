@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useSyncExternalStore } from 'react';
+import React, { useEffect, useEffectEvent, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { Product } from '@/types';
 import { ProductCard } from '@/components/ui/ProductCard';
@@ -56,10 +56,10 @@ export const FlashDeals: React.FC<FlashDealsProps> = ({ products, endsAt, onExpi
 
   const expired = endTs !== null && now !== null && now >= endTs;
 
+  // Fires once when the countdown runs out, with the latest onExpired.
+  const notifyExpired = useEffectEvent(() => onExpired?.());
   useEffect(() => {
-    if (expired) onExpired?.();
-    // onExpired is a callback prop; firing once on the transition is what matters.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (expired) notifyExpired();
   }, [expired]);
 
   const flashProducts = products && products.length > 0 ? products.slice(0, 4) : [];

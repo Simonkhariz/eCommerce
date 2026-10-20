@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useEffectEvent, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { ApiUser, apiGetMe, apiGetSetupStatus, apiLogout } from '@/lib/api-client';
 import { LoadingState } from '@/components/admin/ui';
@@ -39,6 +39,12 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [admin, setAdmin] = useState<ApiUser | null>(null);
 
+  // Sends a signed-out visitor to sign in (or to setup), coming back to the page they asked for.
+  const leaveForSignIn = useEffectEvent((needsSetup: boolean) => {
+    router.replace(needsSetup ? '/admin/setup' : `/admin/login?next=${encodeURIComponent(pathname + window.location.search)}`);
+  });
+
+  // Only on first load: later 401s are handled by redirectIfSignedOut().
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -55,15 +61,12 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
         } catch {
           // If the status check fails, the login page explains the problem.
         }
-        const search = typeof window !== 'undefined' ? window.location.search : '';
-        router.replace(needsSetup ? '/admin/setup' : `/admin/login?next=${encodeURIComponent(pathname + search)}`);
+        if (!cancelled) leaveForSignIn(needsSetup);
       }
     })();
     return () => {
       cancelled = true;
     };
-    // Only on first load: later 401s are handled by redirectIfSignedOut().
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signOut = useCallback(async () => {

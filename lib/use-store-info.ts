@@ -1,20 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ApiCategory, apiGetShippingZones, CatalogFacets, getCatalogFacets, ShippingZone } from '@/lib/api-client';
+import { ApiCategory, apiGetShippingZones, CatalogFacets, getCatalogFacets, ShippingZone, StoreOrigin } from '@/lib/api-client';
 import { useStoreSeed } from '@/components/layout/StoreDataProvider';
 import { normalizePhoneDigits } from '@/lib/whatsapp';
 
-/** Store details as configured in admin Settings. Empty strings mean "not set" — never invent them. */
-export interface StoreOrigin {
-  store_name: string;
-  origin_city: string;
-  origin_state: string;
-  origin_address: string;
-  contact_phone: string;
-  contact_email: string;
-  whatsapp_phone?: string;
-}
+export type { StoreOrigin };
 
 interface StoreInfo {
   zones: ShippingZone[];
@@ -32,8 +23,8 @@ interface StoreNav {
 let infoCache: Promise<StoreInfo> | null = null;
 let navCache: Promise<StoreNav> | null = null;
 
-function infoFrom(res: { zones?: ShippingZone[]; origin?: unknown } | null | undefined): StoreInfo {
-  return { zones: res?.zones ?? [], origin: (res?.origin as StoreOrigin) ?? null, loaded: true, error: null };
+function infoFrom(res: { zones?: ShippingZone[]; origin?: StoreOrigin | null } | null | undefined): StoreInfo {
+  return { zones: res?.zones ?? [], origin: res?.origin ?? null, loaded: true, error: null };
 }
 
 function navFrom(f: CatalogFacets | null | undefined): StoreNav {

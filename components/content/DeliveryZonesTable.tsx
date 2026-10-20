@@ -1,6 +1,5 @@
 'use client';
 
-import React from 'react';
 import { formatPrice } from '@/lib/currency';
 import { useStoreInfo } from '@/lib/use-store-info';
 

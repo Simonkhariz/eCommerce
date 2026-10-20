@@ -1,6 +1,5 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Copy } from 'lucide-react';
 import { adminGetPayments, type PaymentRow } from '@/lib/admin-api';
@@ -17,7 +16,7 @@ import {
   Table,
   Toolbar,
   useAdminData,
-  useDebouncedValue,
+  useSearchBox,
   useToast,
   useUrlFilters,
 } from '@/components/admin/ui';
@@ -35,13 +34,7 @@ function receivedNote(p: PaymentRow): { label: string; tone: 'under' | 'over' } 
 export function AdminPayments() {
   const toast = useToast();
   const [filters, setFilters] = useUrlFilters({ gateway: 'all', status: 'all', search: '', page: '1' });
-  const [searchText, setSearchText] = useState(filters.search);
-  const debouncedSearch = useDebouncedValue(searchText);
-
-  useEffect(() => {
-    if (debouncedSearch !== filters.search) setFilters({ search: debouncedSearch });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch]);
+  const [searchText, setSearchText] = useSearchBox(filters.search, setFilters);
 
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
   const { data, loading, error, reload } = useAdminData(

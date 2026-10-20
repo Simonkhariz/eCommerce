@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useEffectEvent, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
@@ -24,8 +24,9 @@ import {
   apiVerifyPayment,
   apiMarkPaymentSent,
   CheckoutQuoteResponse,
+  errorMessage,
 } from '@/lib/api-client';
-import { buildWhatsAppInvoiceUrl } from '@/lib/whatsapp';
+import { buildWhatsAppInvoiceUrl, whatsAppItems } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
 import {
   cartSignature,
@@ -167,13 +168,13 @@ function CheckoutSession({
   }, [busy, onClose]);
 
   // On open: resume this cart's unpaid order if there is one (otherwise the details step).
-  useEffect(() => {
+  const resumePendingOrder = useEffectEvent(() => {
     const pending = readPendingOrder();
     if (!pending || pending.cartSignature !== cartSignature(items)) return;
 
     const token = readGuestToken(pending.orderNumber);
     apiGetOrder(pending.orderNumber, token ? { token } : undefined)
-      .then((o: any) => {
+      .then((o) => {
         if (o.order_status !== 'pending_payment') {
           // Paid meanwhile (e.g. a WhatsApp transfer the store confirmed): take its items out
           // of the cart instead of only forgetting the order.
@@ -189,7 +190,7 @@ function CheckoutSession({
         }
         setOrder({
           order_number: o.order_number,
-          guest_email: o.guest_email,
+          guest_email: o.guest_email ?? '',
           guest_access_token: token,
           subtotal: Number(o.subtotal),
           discount_amount: Number(o.discount_amount),
@@ -197,12 +198,7 @@ function CheckoutSession({
           grand_total: Number(o.grand_total),
           expires_at: o.expires_at,
           shipping_address: o.shipping_address_snapshot || {},
-          items: (o.items || []).map((it: any) => ({
-            name: it.item_name,
-            quantity: Number(it.quantity),
-            size: it.variant_options?.size,
-            line_total: Number(it.line_total),
-          })),
+          items: whatsAppItems(o.items),
         });
         setStep('payment');
       })
@@ -210,8 +206,9 @@ function CheckoutSession({
         clearPendingOrder(pending.orderNumber);
         setStep('details');
       });
-    // Only when the modal opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    resumePendingOrder();
   }, []);
 
   // The Dialog handles Escape, focus trapping and scroll locking. When the step changes,
@@ -249,7 +246,7 @@ function CheckoutSession({
     let current = true;
     apiGetCheckoutQuote(JSON.parse(quoteRequest)).then(
       (quote) => current && setQuoteAnswer({ request: quoteRequest, quote, error: null }),
-      (err: any) => current && setQuoteAnswer({ request: quoteRequest, quote: null, error: err?.message || 'We could not calculate delivery for this address.' })
+      (err) => current && setQuoteAnswer({ request: quoteRequest, quote: null, error: errorMessage(err, 'We could not calculate delivery for this address.') })
     );
     return () => {
       current = false;
@@ -323,7 +320,7 @@ function CheckoutSession({
         grand_total: placed.grand_total,
         expires_at: placed.expires_at,
         shipping_address: placed.shipping_address,
-        items: (placed.items || []).map((it: any) => ({
+        items: (placed.items || []).map((it) => ({
           name: it.name,
           quantity: Number(it.quantity),
           size: it.variant_options?.size,
@@ -331,8 +328,8 @@ function CheckoutSession({
         })),
       });
       setStep('payment');
-    } catch (err: any) {
-      setSubmitError(err?.message || 'We could not place your order. Please review your details and try again.');
+    } catch (err) {
+      setSubmitError(errorMessage(err, 'We could not place your order. Please review your details and try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -394,9 +391,9 @@ function CheckoutSession({
         throw new Error('The payment provider did not return a checkout page. Please try again or choose another payment method.');
       }
       window.location.href = res.checkout_url;
-    } catch (err: any) {
+    } catch (err) {
       whatsappTab?.close();
-      setPaymentError(err?.message || 'We could not start the payment. Please try again or choose another payment method.');
+      setPaymentError(errorMessage(err, 'We could not start the payment. Please try again or choose another payment method.'));
       setIsInitializingPayment(false);
     }
   };
@@ -426,8 +423,8 @@ function CheckoutSession({
       });
       setAwaitingFlash(true);
       setTimeout(() => setAwaitingFlash(false), 3000);
-    } catch (err: any) {
-      setPaymentError(err?.message || 'We could not check the payment right now. Please try again.');
+    } catch (err) {
+      setPaymentError(errorMessage(err, 'We could not check the payment right now. Please try again.'));
     } finally {
       setIsCheckingPaid(false);
     }

@@ -15,6 +15,7 @@ import {
   fieldErrors,
 } from '@/lib/admin-api';
 import { apiUploadProductImage } from '@/lib/api-client';
+import { AdminImage } from '@/components/admin/AdminImage';
 import { formatDate } from '@/lib/admin-format';
 import {
   Button,
@@ -181,8 +182,7 @@ function BannersPanel() {
               {bannerPage.map((b) => (
                 <tr key={b.id}>
                   <td>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={b.image_url} alt={b.title} className="h-12 w-20 rounded-md border border-[#e5e7eb] object-cover" />
+                    <AdminImage src={b.image_url} alt={b.title} width={80} height={48} className="h-12 w-20 rounded-md border border-[#e5e7eb] object-cover" />
                   </td>
                   <td className="max-w-[260px]">
                     <p className="truncate font-semibold text-[#111827]">{b.title}</p>
@@ -326,10 +326,7 @@ function BannerModal({ id, initial, onClose, onSaved }: { id: number | null; ini
               <ImagePlus className="size-3.5" aria-hidden="true" />
               {uploading ? 'Uploading…' : 'Upload image'}
             </Button>
-            {form.image_url && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={form.image_url} alt="Banner preview" className="h-16 w-28 rounded-md border border-[#e5e7eb] object-cover" />
-            )}
+            <AdminImage src={form.image_url} alt="Banner preview" width={112} height={64} className="h-16 w-28 rounded-md border border-[#e5e7eb] object-cover" />
           </div>
         </div>
 

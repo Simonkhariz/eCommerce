@@ -1,6 +1,6 @@
 # Test Plan & Latest Results
 
-**Last run:** 18 October 2026, branch `audit-fixes`, on Windows / XAMPP (PHP 8.2, MariaDB 10.4, Node 24, Next.js 14).
+**Last run:** 20 October 2026, branch `main`, on Windows / XAMPP (PHP 8.2, MariaDB 10.4, Node 24, Next.js 16.4 with React 19.3).
 
 This replaces the earlier "Step 16" report. That report's 47 passing checks depended on a
 development admin token and on sign-in tokens being returned by the API, both of which were
@@ -23,20 +23,24 @@ starts the API on port 8099 against it, runs every suite, then drops the databas
 
 | Check | Result |
 | :--- | :--- |
-| `tsc --noEmit` | 0 errors |
-| `next lint` | 0 errors, 7 warnings (`<img>` used for admin image previews of uploaded/pasted URLs) |
-| `next build` | compiled; 39 routes |
-| `php -l` on every backend PHP file | 0 errors |
-| API test suites (`run.php`, two consecutive runs) | **366 passed, 0 failed** |
-| Pages through the production build and the `/api/v1` proxy | 39 pages 200; unknown product and unknown URL 404; `/admin?tab=orders` → 307 `/admin/orders` |
+| `npm run typecheck` (`next typegen && tsc --noEmit`) | 0 errors; also 0 with `--noUnusedLocals --noUnusedParameters` |
+| `npm run lint` (ESLint 9: core web vitals, React Compiler and TypeScript rules; `any` and unused code are errors) | 0 problems |
+| `next build` (Turbopack) | compiled with no warnings; 39 routes |
+| API test suites (`run.php`) | **423 passed, 0 failed** |
+| Browser: real WhatsApp checkout on the production build against `shopco_test` (guest, signed in, two tabs, store cancels) | all pass |
+| Browser: card-payment return, behaviour checks of the reworked screens, admin search box / sign-in gate / setup / banners | all pass |
+| Browser: every store and admin page at 1440 px and 390 px, production build and `next dev` | no errors or warnings |
+| Image optimiser: store images, `/uploads/*` through the proxy, Unsplash | 200, served as AVIF |
 
 | Suite | Checks | What it proves |
 | :--- | ---: | :--- |
 | SecurityTest | 70 | No dev admin header; customer-only magic links that work once and are never returned; admin email gets no link; suspended users blocked; scoped HTTP-only cookies; sessions stored hashed; CSRF on mutations (admin and customer tokens not interchangeable); guest order lookup only with token or full email (no phone-suffix or tracking-number-only access, uniform 404); rate limits; SVG / disguised PHP uploads refused; CORS does not trust arbitrary origins. |
-| StorefrontFlowTest | 71 | Facets and filters; cart price/stock check; delivery quotes by state (FCT resolves, misspelt states refused); exact variant required; idempotent guest orders with stock reserved once; payment windows (24 h for manual transfer); guest orders linked after magic-link sign-in; saved cart and wishlist; cancel restores stock; reviews moderated with server-decided "verified purchase"; ratings only from approved reviews; real homepage stats; expired flash deals hidden; newsletter subscribe/unsubscribe. |
-| PaymentIntegrityTest | 68 | Nested transactions and after-commit hooks; price overrides; idempotency; promo counted once (unlimited codes work); expiry releases stock and promo exactly once; Kora signatures over raw bytes, bad signatures rejected and recorded, duplicates ignored, paid orders never moved backwards, duplicate/under/over/late payments flagged; Monnify signature mandatory, partial payments not marked paid; manual confirmation; refunds partial/full; admin routes, inventory logs, variant upserts and stale-stock protection. |
-| AdminApiTest | 88 | Every admin screen's endpoint; pagination; categories, zones, promotions, banners, settings validation and audit; full order lifecycle (unpaid → manual payment → ship → deliver), illegal transitions refused, refund caps; order emails recorded; customer suspension and admin password change revoke sessions. |
+| StorefrontFlowTest | 87 | Facets and filters; cart price/stock check; delivery quotes by state (FCT resolves, misspelt states refused); exact variant required; idempotent guest orders with stock reserved once; payment windows (24 h for manual transfer); guest orders linked after magic-link sign-in; saved cart and wishlist; cancel restores stock; reviews moderated with server-decided "verified purchase"; ratings only from approved reviews; real homepage stats; expired flash deals hidden; newsletter subscribe/unsubscribe. |
+| PaymentIntegrityTest | 72 | Nested transactions and after-commit hooks; price overrides; idempotency; promo counted once (unlimited codes work); expiry releases stock and promo exactly once; Kora signatures over raw bytes, bad signatures rejected and recorded, duplicates ignored, paid orders never moved backwards, duplicate/under/over/late payments flagged; Monnify signature mandatory, partial payments not marked paid; manual confirmation; refunds partial/full; admin routes, inventory logs, variant upserts and stale-stock protection. |
+| AdminApiTest | 95 | Every admin screen's endpoint; pagination; categories, zones, promotions, banners, settings validation and audit; full order lifecycle (unpaid → manual payment → ship → deliver), illegal transitions refused, refund caps; order emails recorded; customer suspension and admin password change revoke sessions. |
 | ReportingTest | 36 | Analytics totals equal database sums (gross, refunds, owed refunds, daily, per gateway); date ranges; dashboard and report agree; CSV exports and their filters; exports require an admin session; audit names and admin sign-in/out audited; outbox endpoints; sign-in links never stored or re-sent. |
+| CatalogScalingTest | 20 | Units sold count only paid orders (and drop again on cancel), so "best selling" lists the top seller first; unchanged lists answer 304; account and admin data are never cached; large responses are gzip-compressed. |
+| MaintenanceTest | 10 | `cleanup_database.php` removes never-paid cancelled orders with their items and closed payment attempts, and used sign-in links older than a day, and never a paid order. |
 | MailOutboxTest | 33 | SMTP protocol against a local fake server (accepted, recipient refused, unreachable); retries with backoff then give up after 5; log mode recorded as such; dedup; unsubscribed newsletter recipients skipped at send time; retry rules; templates escape customer data and use working links. |
 
 ## Bugs the new suites found (fixed before this run)

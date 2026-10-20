@@ -4,22 +4,13 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Store } from 'lucide-react';
-import { apiGetSetupStatus, apiSetupStore } from '@/lib/api-client';
+import { SetupStorePayload, apiGetSetupStatus, apiSetupStore } from '@/lib/api-client';
 import { fieldErrors } from '@/lib/admin-api';
 import { NIGERIAN_STATES } from '@/lib/nigeria';
 import { Button, Field, LoadingState, Notice, Select, TextInput } from '@/components/admin/ui';
 
-interface SetupForm {
-  name: string;
-  email: string;
-  password: string;
+interface SetupForm extends SetupStorePayload {
   confirm_password: string;
-  store_name: string;
-  contact_email: string;
-  contact_phone: string;
-  origin_address: string;
-  origin_city: string;
-  origin_state: string;
 }
 
 const EMPTY: SetupForm = {
@@ -75,8 +66,18 @@ export default function AdminSetupPage() {
 
     setSubmitting(true);
     try {
-      const { confirm_password: _unused, ...payload } = form;
-      await apiSetupStore({ ...payload, contact_email: payload.contact_email || payload.email });
+      const payload: SetupStorePayload = {
+        name: form.name,
+        email: form.email,
+        password: form.password,
+        store_name: form.store_name,
+        contact_email: form.contact_email || form.email,
+        contact_phone: form.contact_phone,
+        origin_address: form.origin_address,
+        origin_city: form.origin_city,
+        origin_state: form.origin_state,
+      };
+      await apiSetupStore(payload);
       router.replace('/admin');
     } catch (err) {
       const fields = fieldErrors(err);

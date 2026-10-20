@@ -20,8 +20,9 @@ import {
   X,
 } from 'lucide-react';
 import { formatPrice } from '@/lib/currency';
-import { apiGetOrder, apiInitializePayment } from '@/lib/api-client';
-import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, formatSupportPhone } from '@/lib/whatsapp';
+import { ApiOrder, apiGetOrder, apiInitializePayment, errorMessage } from '@/lib/api-client';
+import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, formatSupportPhone, whatsAppOrderFrom } from '@/lib/whatsapp';
+import { readGuestToken, saveGuestToken } from '@/lib/pending-order';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useLatestOrderNumber } from '@/lib/use-order-data';
 import { getOrderStatusDisplay, STATUS_TONE_CLASSES } from '@/lib/order-status';
@@ -39,17 +40,10 @@ const NOT_FOUND_MESSAGE = 'Order not found. Please verify your order number and 
  * Fetch an order for the lookup form. Uses the access key given, else the one saved on this
  * device; a key that worked is saved for next time.
  */
-async function requestOrder(cleanNum: string, verificationOpts?: { token?: string; email?: string }) {
-  let token = verificationOpts?.token;
-  if (!token) {
-    token =
-      localStorage.getItem(`shopco_guest_token_${cleanNum}`) ||
-      (localStorage.getItem('shopco_latest_order_number') === cleanNum
-        ? localStorage.getItem('shopco_latest_guest_token') || undefined
-        : undefined);
-  }
+async function requestOrder(cleanNum: string, verificationOpts?: { token?: string; email?: string }): Promise<ApiOrder> {
+  const token = verificationOpts?.token || readGuestToken(cleanNum);
   const res = await apiGetOrder(cleanNum, { token, email: verificationOpts?.email });
-  if (token) localStorage.setItem(`shopco_guest_token_${cleanNum}`, token);
+  if (token && verificationOpts?.token) saveGuestToken(cleanNum, token, false);
   return res;
 }
 
@@ -74,7 +68,7 @@ function TrackOrderContent() {
   const selectedGateway = chosenGateway || (paymentMethods.find((m) => m.is_default) || paymentMethods[0])?.id || '';
   const wantsToPay = searchParams.get('pay') === '1';
   const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [order, setOrder] = useState<any>(null);
+  const [order, setOrder] = useState<ApiOrder | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [copiedTracking, setCopiedTracking] = useState<boolean>(false);
 
@@ -101,9 +95,9 @@ function TrackOrderContent() {
           setOrder(res);
           setOrderNumber(cleanNum);
         },
-        (err: any) => {
+        (err) => {
           setOrder(null);
-          setLookupError(err?.message || NOT_FOUND_MESSAGE);
+          setLookupError(errorMessage(err, NOT_FOUND_MESSAGE));
         }
       )
       .finally(() => setIsLoading(false));
@@ -130,10 +124,10 @@ function TrackOrderContent() {
           setOrder(res);
           setOrderNumber(cleanNum);
         },
-        (err: any) => {
+        (err) => {
           if (!current) return;
           setOrder(null);
-          setLookupError(err?.message || NOT_FOUND_MESSAGE);
+          setLookupError(errorMessage(err, NOT_FOUND_MESSAGE));
         }
       )
       .finally(() => current && setIsLoading(false));
@@ -185,15 +179,8 @@ function TrackOrderContent() {
     const whatsappTab = gateway === 'whatsapp' ? window.open('about:blank', '_blank') : null;
 
     try {
-      const guestToken =
-        typeof window !== 'undefined'
-          ? localStorage.getItem(`shopco_guest_token_${order.order_number}`) || undefined
-          : undefined;
-
-      const redirectUrl =
-        typeof window !== 'undefined'
-          ? `${window.location.origin}/checkout/callback?order=${encodeURIComponent(order.order_number)}`
-          : undefined;
+      const guestToken = readGuestToken(order.order_number);
+      const redirectUrl = `${window.location.origin}/checkout/callback?order=${encodeURIComponent(order.order_number)}`;
 
       const res = await apiInitializePayment(order.order_number, guestToken, redirectUrl, gateway);
       if (gateway === 'whatsapp') {
@@ -208,9 +195,9 @@ function TrackOrderContent() {
       } else {
         throw new Error(`${gateway === 'kora' ? 'Kora' : 'Monnify'} did not return a valid payment URL.`);
       }
-    } catch (err: any) {
+    } catch (err) {
       whatsappTab?.close();
-      setPaymentError(err.message || 'Payment initialization failed. Please retry.');
+      setPaymentError(errorMessage(err, 'Payment initialization failed. Please retry.'));
     } finally {
       setIsInitializingPayment(null);
     }
@@ -219,7 +206,7 @@ function TrackOrderContent() {
   const rawStatus = order?.status || order?.order_status || 'pending_payment';
   const statusDisplay = order ? getOrderStatusDisplay(rawStatus, order.payment_status, order.expires_at) : null;
   const canPay = Boolean(statusDisplay?.canPay);
-  const isPaid = ['successful', 'partially_refunded', 'refunded'].includes(order?.payment_status);
+  const isPaid = ['successful', 'partially_refunded', 'refunded'].includes(order?.payment_status ?? '');
   const isOffTrack = ['cancelled', 'returned', 'refund_pending', 'refunded'].includes(rawStatus);
 
   // "Pay now" from My orders opens the payment options straight away.
@@ -246,21 +233,7 @@ function TrackOrderContent() {
     { title: 'Delivered', tooltip: 'Your parcel was delivered.' },
   ];
 
-  const whatsAppInvoiceUrl = order
-    ? buildWhatsAppInvoiceUrl(
-        {
-          order_number: order.order_number,
-          grand_total: order.grand_total,
-          subtotal: order.subtotal,
-          shipping_fee: order.shipping_fee,
-          discount_amount: order.discount_amount,
-          items: (order.items || []).map((it: any) => ({ name: it.item_name, quantity: it.quantity, line_total: it.line_total, size: it.variant_options?.size })),
-          guest_email: order.guest_email,
-          shipping_address: order.shipping_address_snapshot,
-        },
-        supportPhone
-      )
-    : '';
+  const whatsAppInvoiceUrl = order ? buildWhatsAppInvoiceUrl(whatsAppOrderFrom(order), supportPhone) : '';
 
   return (
     <div className="min-h-screen bg-[#FBFBFB] py-8 sm:py-12 px-4 sm:px-6 lg:px-8">
@@ -590,7 +563,7 @@ function TrackOrderContent() {
                       </span>
                       <button
                         type="button"
-                        onClick={() => handleCopyTracking(order.shipment.tracking_number)}
+                        onClick={() => handleCopyTracking(order.shipment?.tracking_number ?? '')}
                         className="p-1.5 hover:bg-neutral-200 rounded-lg text-neutral-600 hover:text-black transition-colors shrink-0"
                         title="Copy tracking number"
                         aria-label={copiedTracking ? 'Tracking number copied' : 'Copy tracking number'}
@@ -647,7 +620,7 @@ function TrackOrderContent() {
                 </div>
 
                 <div className="divide-y divide-neutral-100">
-                  {order.items?.map((item: any) => (
+                  {order.items.map((item) => (
                     <div key={item.id} className="py-3 flex items-center justify-between gap-3 text-sm">
                       <div>
                         <p className="font-bold text-neutral-900">{item.item_name}</p>

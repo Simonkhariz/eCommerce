@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext } from 'react';
-import type { CatalogFacets, PaymentMethodsResponse, ShippingZone } from '@/lib/api-client';
+import type { CatalogFacets, PaymentMethodsResponse, ShippingZone, StoreOrigin } from '@/lib/api-client';
 
 /**
  * Store-wide data the server already fetched for this page (categories and dress styles,
@@ -12,7 +12,7 @@ import type { CatalogFacets, PaymentMethodsResponse, ShippingZone } from '@/lib/
  */
 export interface StoreSeed {
   facets: CatalogFacets | null;
-  shipping: { zones: ShippingZone[]; origin: unknown } | null;
+  shipping: { zones: ShippingZone[]; origin: StoreOrigin | null } | null;
   payments: PaymentMethodsResponse | null;
 }
 

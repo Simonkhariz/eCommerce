@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { InventoryRow, adminAdjustStock, adminGetInventory, adminGetInventoryLogs, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { formatDateTime, formatPrice, num } from '@/lib/admin-format';
@@ -23,7 +23,7 @@ import {
   Toolbar,
   redirectIfSignedOut,
   useAdminData,
-  useDebouncedValue,
+  useSearchBox,
   useToast,
   useUrlFilters,
 } from '@/components/admin/ui';
@@ -86,12 +86,7 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
   const page = Number(filters.page) || 1;
   const stockFilter = (['all', 'low_stock', 'out_of_stock'].includes(filters.filter) ? filters.filter : 'all') as 'all' | 'low_stock' | 'out_of_stock';
 
-  const [searchText, setSearchText] = useState(filters.search);
-  const debouncedSearch = useDebouncedValue(searchText, 300);
-  useEffect(() => {
-    if (debouncedSearch !== filters.search) setFilters({ search: debouncedSearch });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch]);
+  const [searchText, setSearchText] = useSearchBox(filters.search, setFilters);
 
   const { data, loading, error, reload } = useAdminData(
     () => adminGetInventory({ filter: stockFilter, search: filters.search, page, per_page: 25 }),

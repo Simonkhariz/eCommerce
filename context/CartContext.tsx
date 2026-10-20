@@ -10,6 +10,7 @@ import {
   apiSaveCart,
   apiValidatePromotion,
   apiVerifyPayment,
+  errorMessage,
   getProductDetail,
 } from '@/lib/api-client';
 import { useAuth } from '@/context/AuthContext';
@@ -299,10 +300,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else {
           throw new Error('Coupon is no longer valid.');
         }
-      } catch (err: any) {
+      } catch (err) {
         setAppliedPromo(null);
         writeStorage(PROMO_STORAGE_KEY, null);
-        setCartNotices((prev) => [...prev, `Promo code ${promoCode} was removed: ${err?.message || 'it is no longer valid.'}`]);
+        setCartNotices((prev) => [...prev, `Promo code ${promoCode} was removed: ${errorMessage(err, 'it is no longer valid.')}`]);
       }
     }, 500);
     return () => clearTimeout(timer);
@@ -593,8 +594,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: true, message: `Promo code ${res.code} applied! (-${res.discount_percent}%)` };
       }
       return { success: false, message: 'Coupon code is invalid or deactivated.' };
-    } catch (err: any) {
-      return { success: false, message: err?.message || 'Invalid or expired coupon code.' };
+    } catch (err) {
+      return { success: false, message: errorMessage(err, 'Invalid or expired coupon code.') };
     }
   };
 

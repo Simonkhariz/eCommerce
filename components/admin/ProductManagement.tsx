@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import Link from 'next/link';
 import { ImageOff, Plus, Share2, Trash2, Upload } from 'lucide-react';
 import {
   AdminProduct,
+  AdminProductPayload,
   PRODUCT_IMAGE_PLACEHOLDER,
   apiCreateAdminProduct,
   apiDeleteAdminProduct,
@@ -40,7 +41,7 @@ import {
   redirectIfSignedOut,
   useAdminData,
   useConfirm,
-  useDebouncedValue,
+  useSearchBox,
   useToast,
   useUrlFilters,
 } from '@/components/admin/ui';
@@ -185,12 +186,7 @@ export function ProductManagement() {
   const [filters, setFilters] = useUrlFilters({ search: '', category: 'all', status: 'all', inventory: 'all', page: '1' });
   const page = Number(filters.page) || 1;
 
-  const [searchText, setSearchText] = useState(filters.search);
-  const debouncedSearch = useDebouncedValue(searchText, 300);
-  useEffect(() => {
-    if (debouncedSearch !== filters.search) setFilters({ search: debouncedSearch });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch]);
+  const [searchText, setSearchText] = useSearchBox(filters.search, setFilters);
 
   const { data, loading, error, reload } = useAdminData(
     () =>
@@ -282,7 +278,11 @@ export function ProductManagement() {
       setErrors((e) => ({ ...e, new_image: 'Use a store path (/uploads/…) or an https:// address.' }));
       return;
     }
-    setErrors(({ new_image: _ignored, ...rest }) => rest);
+    setErrors((e) => {
+      const rest = { ...e };
+      delete rest.new_image;
+      return rest;
+    });
     setForm((f) => ({ ...f, images: [...f.images, { image_url: url, alt_text: '', is_primary: !f.images.some((i) => i.is_primary) }] }));
     setNewImageUrl('');
   };
@@ -343,7 +343,7 @@ export function ProductManagement() {
     setFormError(Object.keys(local).length ? 'Please fix the highlighted fields.' : null);
     if (Object.keys(local).length) return;
 
-    const payload = {
+    const payload: AdminProductPayload = {
       name: form.name.trim(),
       slug: form.slug.trim(),
       category_id: form.category_id ? Number(form.category_id) : null,

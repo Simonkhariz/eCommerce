@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCart, MAX_QUANTITY_PER_LINE } from '@/context/CartContext';
@@ -14,6 +14,8 @@ import { ProductCard } from '@/components/ui/ProductCard';
 import { formatPrice } from '@/lib/currency';
 import {
   ApiProductDetail,
+  ApiError,
+  errorMessage,
   getProductDetail,
   getProducts,
   mapApiProductToStorefront,
@@ -91,12 +93,12 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
               void loadRelated(mapped);
             }
           },
-          (err: any) => {
+          (err) => {
             if (background) return; // The server copy is still on screen.
-            const is404 = err.statusCode === 404 || err.errorCode === 'RESOURCE_NOT_FOUND';
+            const is404 = err instanceof ApiError && (err.statusCode === 404 || err.errorCode === 'RESOURCE_NOT_FOUND');
             setError({
               notFound: is404,
-              message: is404 ? `Product "${id}" was not found or is no longer available.` : err.message || 'We could not load this product.',
+              message: is404 ? `Product "${id}" was not found or is no longer available.` : errorMessage(err, 'We could not load this product.'),
             });
           }
         )

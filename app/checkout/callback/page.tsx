@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import confetti from 'canvas-confetti';
@@ -9,8 +9,17 @@ import { CheckmarkBadge01Icon, AlertCircleIcon, Clock01Icon, ArrowRight01Icon } 
 import { Printer, Download } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import { formatPrice } from '@/lib/currency';
-import { apiVerifyPayment, apiGetOrder, apiInitializePayment, apiMarkPaymentSent, PaymentVerificationResponse } from '@/lib/api-client';
-import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptUrl, formatSupportPhone } from '@/lib/whatsapp';
+import {
+  ApiError,
+  ApiOrder,
+  apiVerifyPayment,
+  apiGetOrder,
+  apiInitializePayment,
+  apiMarkPaymentSent,
+  errorMessage,
+  PaymentVerificationResponse,
+} from '@/lib/api-client';
+import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptUrl, formatSupportPhone, whatsAppOrderFrom } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useCart } from '@/context/CartContext';
 import { clearPendingOrder, markInvoiceSent, readGuestToken, saveGuestToken } from '@/lib/pending-order';
@@ -47,7 +56,7 @@ function CheckoutCallbackContent() {
   const invoiceSent = useInvoiceSent(orderNumber);
   const [view, setView] = useState<ViewState>('checking');
   const [result, setResult] = useState<PaymentVerificationResponse | null>(null);
-  const [order, setOrder] = useState<any>(null);
+  const [order, setOrder] = useState<ApiOrder | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pollIndex, setPollIndex] = useState(0);
@@ -111,8 +120,8 @@ function CheckoutCallbackContent() {
             const recent = Number.isFinite(paidAtMs) && Date.now() - paidAtMs < 2 * 24 * 60 * 60 * 1000;
             completePaidOrder(
               orderNumber,
-              recent && Array.isArray(paidOrder?.items)
-                ? paidOrder.items.map((it: any) => ({ variant_id: it.variant_id ? Number(it.variant_id) : null, quantity: Number(it.quantity) }))
+              recent && paidOrder && Array.isArray(paidOrder.items)
+                ? paidOrder.items.map((it) => ({ variant_id: it.variant_id ? Number(it.variant_id) : null, quantity: Number(it.quantity) }))
                 : undefined
             );
             if (!celebrated.current) {
@@ -136,12 +145,12 @@ function CheckoutCallbackContent() {
           loadOrder(accessToken);
         }
         return res.status;
-      } catch (err: any) {
+      } catch (err) {
         setView('error');
         setMessage(
-          err?.statusCode === 404
+          err instanceof ApiError && err.statusCode === 404
             ? 'We could not open this order from this device. Enter the access key from your order confirmation, or use "Track order" with your email.'
-            : err?.message || 'We could not check the payment right now.'
+            : errorMessage(err, 'We could not check the payment right now.')
         );
         return null;
       } finally {
@@ -183,15 +192,7 @@ function CheckoutCallbackContent() {
       );
       if (retryMethod === 'whatsapp') {
         const url = buildWhatsAppInvoiceUrl(
-          {
-            order_number: orderNumber,
-            grand_total: Number(order?.grand_total ?? res.amount),
-            subtotal: order ? Number(order.subtotal) : undefined,
-            shipping_fee: order ? Number(order.shipping_fee) : undefined,
-            discount_amount: order ? Number(order.discount_amount) : undefined,
-            items: (order?.items || []).map((it: any) => ({ name: it.item_name, quantity: it.quantity, line_total: it.line_total, size: it.variant_options?.size })),
-            shipping_address: order?.shipping_address_snapshot,
-          },
+          order ? whatsAppOrderFrom(order) : { order_number: orderNumber, grand_total: Number(res.amount) },
           supportPhone
         );
         if (whatsappTab) whatsappTab.location.href = url;
@@ -202,9 +203,9 @@ function CheckoutCallbackContent() {
       }
       if (!res.checkout_url) throw new Error('The payment provider did not return a checkout page.');
       window.location.href = res.checkout_url;
-    } catch (err: any) {
+    } catch (err) {
       whatsappTab?.close();
-      setRetryError(err?.message || 'We could not start the payment. Please try another method.');
+      setRetryError(errorMessage(err, 'We could not start the payment. Please try another method.'));
       setIsRetrying(false);
     }
   };
@@ -368,9 +369,9 @@ function CheckoutCallbackContent() {
               </div>
 
               <div className="bg-[#FAFAFA] rounded-2xl p-4 text-sm text-neutral-700 text-left space-y-3">
-                {order?.items?.length > 0 && (
+                {order && order.items.length > 0 && (
                   <ul className="divide-y divide-neutral-100 max-h-36 overflow-y-auto">
-                    {order.items.map((item: any) => (
+                    {order.items.map((item) => (
                       <li key={item.id} className="py-2 flex items-center justify-between gap-2">
                         <div className="min-w-0">
                           <p className="font-semibold text-black truncate">{item.item_name}</p>
@@ -447,13 +448,8 @@ function CheckoutCallbackContent() {
                 <a
                   href={buildWhatsAppReceiptUrl(
                     {
-                      order_number: orderNumber,
+                      ...(order ? whatsAppOrderFrom(order) : { order_number: orderNumber }),
                       grand_total: Number(result?.amount ?? order?.grand_total ?? 0),
-                      subtotal: order ? Number(order.subtotal) : undefined,
-                      shipping_fee: order ? Number(order.shipping_fee) : undefined,
-                      discount_amount: order ? Number(order.discount_amount) : undefined,
-                      items: (order?.items || []).map((it: any) => ({ name: it.item_name, quantity: it.quantity, line_total: it.line_total, size: it.variant_options?.size })),
-                      shipping_address: order?.shipping_address_snapshot,
                     },
                     supportPhone
                   )}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { adminGetAuditLogs, AuditLogRow } from '@/lib/admin-api';
 import { formatDateTime, humanize } from '@/lib/admin-format';

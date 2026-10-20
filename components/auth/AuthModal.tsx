@@ -2,6 +2,7 @@
 
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { errorMessage as describeError } from '@/lib/api-client';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Cancel01Icon, Mail01Icon, LockPasswordIcon, UserIcon, CallIcon, CheckmarkCircle02Icon } from '@hugeicons/core-free-icons';
 import { Dialog } from '@/components/ui/Dialog';
@@ -118,8 +119,8 @@ export const AuthModal: React.FC = () => {
     try {
       await login(email, password);
       resetForm();
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Sign in failed. Please check your email and password.');
+    } catch (err) {
+      setErrorMessage(describeError(err, 'Sign in failed. Please check your email and password.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -132,8 +133,8 @@ export const AuthModal: React.FC = () => {
     try {
       await register({ full_name: fullName, email, password, phone: phone || undefined });
       resetForm();
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'We could not create your account. Please check your details.');
+    } catch (err) {
+      setErrorMessage(describeError(err, 'We could not create your account. Please check your details.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -146,8 +147,8 @@ export const AuthModal: React.FC = () => {
     try {
       await requestMagicLink(email);
       setMagicSent(true);
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'We could not send a sign-in link. Please try again.');
+    } catch (err) {
+      setErrorMessage(describeError(err, 'We could not send a sign-in link. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }

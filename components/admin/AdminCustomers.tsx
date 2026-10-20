@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import {
   adminGetCustomer,
@@ -29,7 +29,7 @@ import {
   useAdminData,
   useClientPagination,
   useConfirm,
-  useDebouncedValue,
+  useSearchBox,
   useToast,
   useUrlFilters,
 } from '@/components/admin/ui';
@@ -44,30 +44,11 @@ function customerStatus(status: string) {
   return CUSTOMER_STATUS[status] ?? { label: humanize(status), tone: 'neutral' as StatusTone };
 }
 
-/** Saved address as stored in the `addresses` table. */
-interface SavedAddress {
-  id: number;
-  label?: string | null;
-  recipient_name?: string;
-  phone?: string;
-  street_address?: string;
-  city?: string;
-  state?: string;
-  country?: string;
-  postal_code?: string | null;
-  is_default?: number | boolean;
-}
 
 export function AdminCustomers() {
   const [filters, setFilters] = useUrlFilters({ status: 'all', search: '', page: '1' });
-  const [searchText, setSearchText] = useState(filters.search);
-  const debouncedSearch = useDebouncedValue(searchText);
+  const [searchText, setSearchText] = useSearchBox(filters.search, setFilters);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (debouncedSearch !== filters.search) setFilters({ search: debouncedSearch });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch]);
 
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
   const { data, loading, error, reload } = useAdminData(
@@ -204,7 +185,7 @@ function CustomerDetailModal({ customerId, onClose, onChanged }: { customerId: n
     }
   };
 
-  const addresses = (detail?.addresses ?? []) as unknown as SavedAddress[];
+  const addresses = detail?.addresses ?? [];
 
   return (
     <Modal

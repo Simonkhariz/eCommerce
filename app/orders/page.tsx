@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
-import { apiGetCustomerOrders } from '@/lib/api-client';
+import { ApiCustomerOrder, apiGetCustomerOrders, errorMessage } from '@/lib/api-client';
 import { formatPrice } from '@/lib/currency';
 import { getOrderStatusDisplay, STATUS_TONE_CLASSES } from '@/lib/order-status';
 import { Package, ArrowRight, AlertCircle, Truck, ArrowLeft, Search, Mail } from 'lucide-react';
@@ -13,7 +13,7 @@ export default function CustomerOrdersPage() {
   // One request per signed-in customer and per "Try again"; only its answer is shown.
   const [retries, setRetries] = useState(0);
   const requestKey = user ? `${user.id}#${retries}` : null;
-  const [answer, setAnswer] = useState<{ key: string; orders: any[]; error: string | null } | null>(null);
+  const [answer, setAnswer] = useState<{ key: string; orders: ApiCustomerOrder[]; error: string | null } | null>(null);
   const isLoading = requestKey !== null && answer?.key !== requestKey;
   const orders = requestKey ? (answer?.orders ?? []) : [];
   const error = isLoading ? null : (answer?.error ?? null);
@@ -24,7 +24,7 @@ export default function CustomerOrdersPage() {
     let current = true;
     apiGetCustomerOrders().then(
       (data) => current && setAnswer({ key: requestKey, orders: data || [], error: null }),
-      (err) => current && setAnswer({ key: requestKey, orders: [], error: err?.message || 'Failed to load your orders.' })
+      (err) => current && setAnswer({ key: requestKey, orders: [], error: errorMessage(err, 'Failed to load your orders.') })
     );
     return () => {
       current = false;
@@ -136,9 +136,9 @@ export default function CustomerOrdersPage() {
                     </div>
                   </div>
 
-                  {ord.items?.length > 0 && (
+                  {ord.items.length > 0 && (
                     <ul className="divide-y divide-neutral-50 text-sm">
-                      {ord.items.map((it: any) => (
+                      {ord.items.map((it) => (
                         <li key={it.id} className="py-2 flex items-center justify-between gap-2">
                           <div className="min-w-0 pr-2">
                             <p className="font-medium text-black truncate">{it.item_name}</p>

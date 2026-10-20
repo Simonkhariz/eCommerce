@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { RefreshCw, RotateCcw, Send } from 'lucide-react';
 import { adminGetOutbox, adminGetSystemStatus, adminProcessOutbox, adminRetryOutbox, errorMessage, OutboxRow } from '@/lib/admin-api';
 import { formatDateTime, formatRelative, humanize } from '@/lib/admin-format';

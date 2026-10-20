@@ -6,6 +6,7 @@
 import { API_BASE_URL, ApiError, PaginationMeta, apiRequest, apiRequestFull } from '@/lib/api-client';
 
 export type { PaginationMeta };
+export { errorMessage } from '@/lib/api-client';
 
 export interface Paginated<T> {
   items: T[];
@@ -42,11 +43,6 @@ export function fieldErrors(err: unknown): Record<string, string> {
     return out;
   }
   return {};
-}
-
-export function errorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
-  if (err instanceof Error && err.message) return err.message;
-  return fallback;
 }
 
 // =============================================================================
@@ -355,7 +351,7 @@ export interface CustomerRow {
 export interface CustomerDetail {
   customer: Omit<CustomerRow, 'total_orders' | 'lifetime_spend'> & { updated_at: string };
   summary: { total_orders: number | string; total_spend: number | string };
-  addresses: Array<{ id: number; label: string; recipient_name: string; phone: string; street_address: string; city: string; state: string; country: string; postal_code: string | null; is_default: number | boolean }>;
+  addresses: Array<{ id: number; label: string | null; recipient_name: string; phone: string; street_address: string; city: string; state: string; country: string; postal_code: string | null; is_default: number | boolean }>;
   orders: Array<{ id: number; order_number: string; grand_total: number | string; currency: string; order_status: OrderStatus; payment_status: string; created_at: string }>;
 }
 

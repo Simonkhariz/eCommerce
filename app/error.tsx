@@ -1,6 +1,5 @@
 'use client';
 
-import React from 'react';
 import Link from 'next/link';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Alert02Icon, RefreshIcon, Home01Icon } from '@hugeicons/core-free-icons';

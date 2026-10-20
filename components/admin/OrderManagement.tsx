@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, ChevronRight, Download } from 'lucide-react';
@@ -20,7 +20,7 @@ import {
   redirectIfSignedOut,
   useAdminData,
   useConfirm,
-  useDebouncedValue,
+  useSearchBox,
   useToast,
   useUrlFilters,
 } from '@/components/admin/ui';
@@ -79,21 +79,8 @@ export function OrderManagement() {
     }
   };
   const [filters, setFilters] = useUrlFilters({ status: 'all', search: '', page: '1' });
-  const [searchText, setSearchText] = useState(filters.search);
-  const debouncedSearch = useDebouncedValue(searchText, 350);
+  const [searchText, setSearchText] = useSearchBox(filters.search, setFilters, 350);
   const [exporting, setExporting] = useState(false);
-
-  // Keep the box in sync when the URL changes (back/forward).
-  const [searchFor, setSearchFor] = useState(filters.search);
-  if (filters.search !== searchFor) {
-    setSearchFor(filters.search);
-    setSearchText(filters.search);
-  }
-
-  useEffect(() => {
-    if (debouncedSearch.trim() !== filters.search) setFilters({ search: debouncedSearch.trim() });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch]);
 
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
   const { data, loading, error, reload } = useAdminData(

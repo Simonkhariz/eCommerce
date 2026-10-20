@@ -105,9 +105,7 @@ export function Dialog({
       document.body.style.overflow = prevOverflow;
       previouslyFocused?.focus?.({ preventScroll: true });
     };
-    // initialFocusRef is a ref; reading it on open is enough.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, initialFocusRef]);
 
   if (!open) return null;
 

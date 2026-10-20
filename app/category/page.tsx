@@ -1,10 +1,10 @@
 'use client';
 
-import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FilterState, Product } from '@/types';
-import { CatalogFacets, getCatalogFacets, getProducts, mapApiProductToStorefront } from '@/lib/api-client';
+import { CatalogFacets, errorMessage, getCatalogFacets, getProducts, mapApiProductToStorefront } from '@/lib/api-client';
 import { PAGE_SIZE, apiSortFor, buildCatalogUrl, EMPTY_FILTERS, parseCatalogParams } from '@/lib/catalog-query';
 import { FilterSidebar } from '@/components/catalog/FilterSidebar';
 import { FilterDrawer } from '@/components/catalog/FilterDrawer';
@@ -70,9 +70,9 @@ function CatalogContent() {
           error: null,
         });
       },
-      (err: any) => {
+      (err) => {
         if (!current) return;
-        setAnswer({ key: requestKey, products: [], totalCount: 0, totalPages: 1, error: err?.message || 'The catalogue could not be loaded.' });
+        setAnswer({ key: requestKey, products: [], totalCount: 0, totalPages: 1, error: errorMessage(err, 'The catalogue could not be loaded.') });
       }
     );
     return () => {

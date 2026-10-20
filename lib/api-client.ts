@@ -186,7 +186,7 @@ export interface ApiResponse<T> {
   error?: {
     code: string;
     message: string;
-    details?: any;
+    details?: Record<string, unknown>;
   };
 }
 
@@ -220,6 +220,12 @@ function rememberCsrf(user: ApiUser | undefined, token: string | undefined): voi
   }
 }
 
+/** The message to show for a failed request (or anything thrown), else the fallback. */
+export function errorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
 export class ApiError extends Error {
   statusCode: number;
   errorCode?: string;
@@ -237,7 +243,7 @@ export class ApiError extends Error {
 // Only public catalogue reads are cached briefly. Orders, payment status, customer and
 // admin data are always fetched fresh so status changes show up immediately.
 const CACHEABLE_PREFIXES = ['/products', '/categories', '/storefront/homepage'];
-const apiCache = new Map<string, { data: ApiResponse<any>; timestamp: number }>();
+const apiCache = new Map<string, { data: ApiResponse<unknown>; timestamp: number }>();
 const CACHE_TTL_MS = 30000;
 
 export function clearApiCache(): void {
@@ -303,7 +309,7 @@ async function fetchFullFromApi<T>(
     if (!res.ok || !json.success) {
       const errMsg =
         json.error?.message || json.message || `Request failed with status ${res.status}`;
-      throw new ApiError(errMsg, res.status, json.error?.code, json.error?.details as Record<string, unknown> | undefined);
+      throw new ApiError(errMsg, res.status, json.error?.code, json.error?.details);
     }
 
     if (isCacheable) {
@@ -313,9 +319,9 @@ async function fetchFullFromApi<T>(
     }
 
     return json;
-  } catch (err: any) {
+  } catch (err) {
     clearTimeout(timeoutId);
-    if (err?.name === 'AbortError') {
+    if (err instanceof Error && err.name === 'AbortError') {
       throw new ApiError('The request timed out. Please check your connection and try again.', 0, 'TIMEOUT');
     }
     if (err instanceof TypeError) {
@@ -447,11 +453,8 @@ export async function getProducts(params: ProductQueryParams = {}): Promise<Prod
   
   const json = await fetchFullFromApi<ApiProductSummary[]>(endpoint);
 
-  const rawItems = Array.isArray(json.data)
-    ? json.data
-    : ((json.data as any)?.items || []);
-
-  const meta = json.meta || (json.data as any)?.pagination;
+  const rawItems = Array.isArray(json.data) ? json.data : [];
+  const meta = json.meta;
 
   const pagination: PaginationMeta = meta
     ? {
@@ -766,13 +769,25 @@ export async function apiSaveWishlist(productIds: number[]): Promise<{ product_i
  * Check admin onboarding setup status.
  */
 export async function apiGetSetupStatus(): Promise<{ is_setup_completed: boolean; store_name: string }> {
-  return fetchFromApi<any>('/setup/status');
+  return fetchFromApi<{ is_setup_completed: boolean; store_name: string }>('/setup/status');
+}
+
+export interface SetupStorePayload {
+  name: string;
+  email: string;
+  password: string;
+  store_name: string;
+  contact_email: string;
+  contact_phone: string;
+  origin_address: string;
+  origin_city: string;
+  origin_state: string;
 }
 
 /**
  * Complete first-run admin onboarding.
  */
-export async function apiSetupStore(payload: any): Promise<ApiAuthResponse> {
+export async function apiSetupStore(payload: SetupStorePayload): Promise<ApiAuthResponse> {
   const res = await fetchFullFromApi<ApiAuthResponse>('/setup', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -812,10 +827,47 @@ export interface AdminProduct {
   images: ApiProductImage[];
 }
 
+export interface AdminProductQuery {
+  page?: number;
+  per_page?: number;
+  search?: string;
+  category?: string;
+  status?: string;
+  inventory?: string;
+}
+
+/** What the product editor saves. A new variant carries its starting stock; later changes go through inventory. */
+export interface AdminProductPayload {
+  name: string;
+  slug: string;
+  category_id: number | null;
+  product_type: 'physical';
+  status: AdminProduct['status'];
+  dress_style: string | null;
+  base_price: number;
+  original_price: number | null;
+  sku: string;
+  description: string;
+  is_featured: 0 | 1;
+  is_flash_deal: 0 | 1;
+  flash_deal_ends_at: string;
+  images: Array<{ image_url: string; alt_text: string; is_primary: 0 | 1; display_order: number }>;
+  variants: Array<{
+    id?: number;
+    stock_quantity?: number;
+    sku: string;
+    size: string;
+    color_name: string;
+    color_hex: string;
+    price_override: number | null;
+    low_stock_threshold: number;
+  }>;
+}
+
 /**
  * Fetch admin products with filtering and pagination.
  */
-export async function apiGetAdminProducts(params: Record<string, any> = {}): Promise<{
+export async function apiGetAdminProducts(params: AdminProductQuery = {}): Promise<{
   items: AdminProduct[];
   pagination: PaginationMeta;
 }> {
@@ -828,8 +880,8 @@ export async function apiGetAdminProducts(params: Record<string, any> = {}): Pro
   const qs = query.toString() ? `?${query.toString()}` : '';
   const res = await fetchFullFromApi<AdminProduct[]>(`/admin/products${qs}`);
   return {
-    items: (res.data as AdminProduct[]) || [],
-    pagination: (res.meta as unknown as PaginationMeta) || {
+    items: res.data || [],
+    pagination: res.meta || {
       page: 1,
       per_page: 15,
       total: 0,
@@ -841,7 +893,7 @@ export async function apiGetAdminProducts(params: Record<string, any> = {}): Pro
 /**
  * Create a new product as admin.
  */
-export async function apiCreateAdminProduct(payload: any): Promise<ApiProductDetail> {
+export async function apiCreateAdminProduct(payload: AdminProductPayload): Promise<ApiProductDetail> {
   return fetchFromApi<ApiProductDetail>('/admin/products', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -851,7 +903,7 @@ export async function apiCreateAdminProduct(payload: any): Promise<ApiProductDet
 /**
  * Update an existing product as admin.
  */
-export async function apiUpdateAdminProduct(id: number, payload: any): Promise<ApiProductDetail> {
+export async function apiUpdateAdminProduct(id: number, payload: AdminProductPayload): Promise<ApiProductDetail> {
   return fetchFromApi<ApiProductDetail>(`/admin/products/${id}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
@@ -864,35 +916,18 @@ export async function apiUpdateAdminProduct(id: number, payload: any): Promise<A
 export async function apiUpdateAdminProductStatus(
   id: number,
   status: 'draft' | 'published' | 'archived'
-): Promise<any> {
-  return fetchFromApi<any>(`/admin/products/${id}/status`, {
+): Promise<void> {
+  await fetchFromApi<unknown>(`/admin/products/${id}/status`, {
     method: 'PATCH',
     body: JSON.stringify({ status }),
   });
 }
 
 /**
- * Adjust variant inventory with reason and audit trail.
- */
-export async function apiAdjustInventory(payload: {
-  variant_id: number;
-  adjustment: number;
-  reason: string;
-  notes?: string;
-}): Promise<any> {
-  return fetchFromApi<any>('/admin/inventory/adjust', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-
-
-/**
  * Archive a product.
  */
-export async function apiDeleteAdminProduct(id: number): Promise<any> {
-  return fetchFromApi<any>(`/admin/products/${id}`, {
+export async function apiDeleteAdminProduct(id: number): Promise<void> {
+  await fetchFromApi<unknown>(`/admin/products/${id}`, {
     method: 'DELETE',
   });
 }
@@ -947,20 +982,41 @@ export interface ShippingZone {
   is_active: boolean;
 }
 
+/** Size and colour as saved on an order line. */
+export interface VariantOptions {
+  size?: string;
+  color?: string;
+  color_hex?: string;
+}
+
+/** Store contact and dispatch details as configured in admin Settings ('' means not set). */
+export interface StoreOrigin {
+  store_name: string;
+  origin_city: string;
+  origin_state: string;
+  origin_address: string;
+  contact_phone: string;
+  contact_email: string;
+  whatsapp_phone?: string;
+}
+
+/** A priced cart line as the server checked it (quote and newly placed order). */
+export interface CheckoutLineItem {
+  product_id: number;
+  variant_id: number;
+  name: string;
+  slug?: string;
+  sku: string;
+  variant_options: VariantOptions | null;
+  unit_price: number;
+  quantity: number;
+  line_total: number;
+  stock_available?: number;
+}
+
 export interface CheckoutQuoteResponse {
   currency: string;
-  items: Array<{
-    product_id: number;
-    variant_id: number;
-    name: string;
-    slug: string;
-    sku: string;
-    variant_options: { size: string; color: string; color_hex: string };
-    unit_price: number;
-    quantity: number;
-    line_total: number;
-    stock_available: number;
-  }>;
+  items: CheckoutLineItem[];
   items_count: number;
   total_quantity: number;
   subtotal: number;
@@ -970,14 +1026,17 @@ export interface CheckoutQuoteResponse {
   applied_coupon: { id: number; code: string; description: string; discount_percent: number } | null;
   shipping_zone: ShippingZone | null;
   eligible_zones: ShippingZone[];
-  origin: {
-    store_name: string;
-    origin_city: string;
-    origin_state: string;
-    origin_address: string;
-    contact_phone: string;
-    contact_email: string;
-  };
+  origin: StoreOrigin;
+}
+
+/** The delivery zone as it was when the order was placed. */
+export interface OrderZoneSnapshot {
+  id: number;
+  name: string;
+  code: string;
+  fee: number;
+  estimated_days: string;
+  origin?: StoreOrigin;
 }
 
 export interface CheckoutOrderResponse {
@@ -994,18 +1053,84 @@ export interface CheckoutOrderResponse {
   discount_amount: number;
   shipping_fee: number;
   grand_total: number;
-  shipping_zone: any;
+  shipping_zone: OrderZoneSnapshot | null;
   shipping_address: ShippingAddressInput;
   items_count: number;
-  items: any[];
+  items: CheckoutLineItem[];
   created_at: string;
+  /** True when a repeated submit returned the order already placed. */
+  replayed?: boolean;
+}
+
+/** One line of a placed order. */
+export interface ApiOrderItem {
+  id: number;
+  product_id: number | null;
+  variant_id: number | null;
+  item_name: string;
+  sku: string;
+  variant_options: VariantOptions | null;
+  unit_price: number;
+  quantity: number;
+  line_total: number;
+}
+
+export interface ApiOrderShipment {
+  carrier: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  status: string;
+  shipped_at: string | null;
+  delivered_at: string | null;
+}
+
+/** A customer's order as listed in "My orders". */
+export interface ApiCustomerOrder {
+  id: number;
+  order_number: string;
+  order_status: string;
+  payment_status: string;
+  currency: string;
+  subtotal: number;
+  discount_amount: number;
+  shipping_fee: number;
+  grand_total: number;
+  shipping_address_snapshot: ShippingAddressInput | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  items: ApiOrderItem[];
+  items_count: number;
+  shipment: ApiOrderShipment | null;
+}
+
+/** One order as the order lookup returns it (internal fields are removed by the server). */
+export interface ApiOrder extends Omit<ApiCustomerOrder, 'items_count'> {
+  /** Same as order_status. */
+  status: string;
+  guest_email: string | null;
+  shipping_zone_id: number | null;
+  shipping_zone_snapshot: OrderZoneSnapshot | null;
+  applied_promo_code: string | null;
+  notes: string | null;
+  customer_marked_paid_at: string | null;
+  history: Array<{ previous_status: string | null; new_status: string; created_at: string }>;
+  /** The successful payment, else the latest attempt. */
+  payment: {
+    provider: string;
+    provider_reference: string | null;
+    amount: number;
+    currency: string;
+    status: string;
+    verified_at: string | null;
+  } | null;
 }
 
 /**
  * Fetch available shipping destination zones from the store backend.
  */
-export async function apiGetShippingZones(): Promise<{ zones: ShippingZone[]; origin: any }> {
-  return fetchFromApi<{ zones: ShippingZone[]; origin: any }>('/checkout/shipping-zones');
+export async function apiGetShippingZones(): Promise<{ zones: ShippingZone[]; origin: StoreOrigin }> {
+  return fetchFromApi<{ zones: ShippingZone[]; origin: StoreOrigin }>('/checkout/shipping-zones');
 }
 
 export interface ValidatePromoResponse {
@@ -1069,7 +1194,7 @@ export async function apiCreateCheckoutOrder(data: {
 export async function apiGetOrder(
   orderNumber: string,
   verification?: string | { token?: string; email?: string; reference?: string }
-): Promise<any> {
+): Promise<ApiOrder> {
   const headers: Record<string, string> = {};
   const token = typeof verification === 'string' ? verification : verification?.token;
   const email = typeof verification === 'string' ? undefined : verification?.email;
@@ -1077,14 +1202,14 @@ export async function apiGetOrder(
   if (token) headers['X-Guest-Access-Token'] = token;
   if (email) headers['X-Order-Email'] = email.trim();
 
-  return fetchFromApi<any>(`/checkout/orders/${encodeURIComponent(orderNumber)}`, { headers });
+  return fetchFromApi<ApiOrder>(`/checkout/orders/${encodeURIComponent(orderNumber)}`, { headers });
 }
 
 /**
  * Retrieve all past orders for the authenticated customer.
  */
-export async function apiGetCustomerOrders(): Promise<any[]> {
-  return fetchFromApi<any[]>('/customer/orders');
+export async function apiGetCustomerOrders(): Promise<ApiCustomerOrder[]> {
+  return fetchFromApi<ApiCustomerOrder[]>('/customer/orders');
 }
 
 export interface PaymentMethodItem {

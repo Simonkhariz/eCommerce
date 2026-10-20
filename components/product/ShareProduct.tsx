@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Facebook, Mail, Share2 } from 'lucide-react';
 import { formatPrice } from '@/lib/currency';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';

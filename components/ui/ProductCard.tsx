@@ -11,13 +11,15 @@ import { useWishlist } from '@/context/WishlistContext';
 
 interface ProductCardProps {
   product: Product;
+  /** Load the photo straight away (for cards in the first row of a page). */
+  preload?: boolean;
 }
 
 /**
  * Catalogue card. Size and colour are chosen on the product page, so the card's cart
  * action opens the product rather than guessing an option.
  */
-export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
+export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = false }) => {
   const { toggleWishlist, isInWishlist } = useWishlist();
   const isFavorited = isInWishlist(product.id);
   const href = `/products/${product.slug}`;
@@ -32,6 +34,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             alt=""
             fill
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+            preload={preload}
             className={`object-cover group-hover:scale-105 transition-transform duration-300 ${soldOut ? 'opacity-60' : ''}`}
           />
         </Link>

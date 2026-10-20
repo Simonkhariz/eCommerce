@@ -4,6 +4,8 @@
  * the constant below is only a fallback until that has loaded.
  */
 
+import type { ApiOrder, ApiOrderItem } from '@/lib/api-client';
+
 export const SUPPORT_WHATSAPP_NUMBER = '2349066707079';
 export const SUPPORT_PHONE_FORMATTED = '+234 906 670 7079';
 
@@ -52,6 +54,30 @@ export interface WhatsAppOrderDetails {
     address_line1?: string;
     city?: string;
     state?: string;
+  };
+}
+
+/** Order lines as the WhatsApp messages list them. */
+export function whatsAppItems(items: ApiOrderItem[] | null | undefined): WhatsAppOrderItem[] {
+  return (items ?? []).map((it) => ({
+    name: it.item_name,
+    quantity: Number(it.quantity),
+    line_total: Number(it.line_total),
+    size: it.variant_options?.size,
+  }));
+}
+
+/** Invoice or receipt details for an order from the order lookup. */
+export function whatsAppOrderFrom(order: ApiOrder): WhatsAppOrderDetails {
+  return {
+    order_number: order.order_number,
+    grand_total: Number(order.grand_total),
+    subtotal: Number(order.subtotal),
+    shipping_fee: Number(order.shipping_fee),
+    discount_amount: Number(order.discount_amount),
+    items: whatsAppItems(order.items),
+    guest_email: order.guest_email ?? undefined,
+    shipping_address: order.shipping_address_snapshot ?? undefined,
   };
 }
 

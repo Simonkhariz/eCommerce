@@ -7,8 +7,8 @@ Things left for the store owner after the speed, scale and bug-fix work (commits
 
 - [ ] **Turn on OPcache in XAMPP.** PHP currently recompiles every file on every request;
       OPcache typically makes the API 2-3x faster. Steps in [section 1](#1-turn-on-opcache-about-5-minutes).
-- [ ] **Install sharp.** Faster photo resizing in production; Next.js warns that it is missing.
-      Steps in [section 2](#2-install-sharp-about-2-minutes).
+- [x] **Install sharp.** Done: Next.js 16 installs sharp itself, so there is nothing to do.
+      See [section 2](#2-sharp-done-with-nextjs-16).
 - [ ] **Production web server.** Host the API on Apache or nginx with PHP-FPM; `php -S` handles
       one request at a time. Steps in [section 3](#3-a-proper-web-server-for-the-api).
 - [ ] **Broken pictures.** Three home banners and all six categories point to picture files that
@@ -60,22 +60,13 @@ XAMPP's PHP 8.2 already ships the OPcache file (`php_opcache.dll`); it is only s
    It should print `Zend OPcache`. If PHP prints an error about the extension instead, the
    `zend_extension` line has a typo.
 
-## 2. Install sharp (about 2 minutes)
+## 2. sharp (done with Next.js 16)
 
-1. In the project folder:
-   ```
-   npm i sharp
-   ```
-   The :3000 dev server can keep running.
-2. Check it:
-   ```
-   npm ls sharp
-   ```
-3. Commit `package.json` and `package-lock.json`.
-4. When you deploy, run `npm ci` **on the server** so it downloads the right version for that
-   computer. Don't copy `node_modules` from Windows to a Linux server. Vercel does this for you.
+Since the move to Next.js 16, `npm install` brings sharp along with Next, so photos are already
+resized with it. `npm ls sharp` shows it under `next`.
 
-The "sharp is strongly recommended" warning is gone the next time you run `npm run build`.
+When you deploy, run `npm ci` **on the server** so it downloads the sharp build for that
+computer. Don't copy `node_modules` from Windows to a Linux server. Vercel does this for you.
 
 ## 3. A proper web server for the API
 

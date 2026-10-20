@@ -10,7 +10,6 @@ import {
   adminGetOrder,
   adminUpdateOrderStatus,
   errorMessage,
-  fieldErrors,
 } from '@/lib/admin-api';
 import {
   ORDER_TRANSITION_LABELS,
@@ -35,7 +34,6 @@ import {
   StatusPill,
   Table,
   TextArea,
-  TextInput,
   redirectIfSignedOut,
   useAdminData,
   useConfirm,

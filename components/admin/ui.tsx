@@ -382,6 +382,29 @@ export function useDebouncedValue<T>(value: T, delayMs = 300): T {
 }
 
 /**
+ * Text for a list's search box, written to the URL filters (`search`) once typing pauses.
+ * The box follows the URL too, so Back and Forward show the search that page was for.
+ */
+export function useSearchBox(search: string, setFilters: (changes: { search: string }) => void, delayMs = 300) {
+  const [text, setText] = useState(search);
+  const [shownFor, setShownFor] = useState(search);
+  if (search !== shownFor) {
+    setShownFor(search);
+    // Our own update (a trimmed copy of the text) leaves the box alone, so a space typed
+    // between words is not removed mid-typing.
+    if (search !== text.trim()) setText(search);
+  }
+  const debounced = useDebouncedValue(text, delayMs);
+  const apply = useEffectEvent((value: string) => {
+    if (value.trim() !== search) setFilters({ search: value.trim() });
+  });
+  useEffect(() => {
+    apply(debounced);
+  }, [debounced]);
+  return [text, setText] as const;
+}
+
+/**
  * Load data for a screen and reload when `deps` change. Out-of-order responses are ignored.
  * Returns data, loading, error and a reload() for retry buttons and after mutations.
  */
