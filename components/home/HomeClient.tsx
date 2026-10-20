@@ -58,11 +58,12 @@ export function HomeClient({ initial = null }: { initial?: HomepageData | null }
 
   return (
     <div className="space-y-4">
-      {/* 1. Hero with CMS banners, active promotion and real store numbers */}
-      <HeroBanner banners={homepageData?.banners} promotions={homepageData?.promotions} stats={homepageData?.stats} />
-
-      {/* Brands the store carries (admin Settings), scrolling under the banner */}
-      <BrandMarquee brands={homepageData?.brands} />
+      {/* 1. The first screen: hero (CMS banners, active promotion, real store numbers) with the
+          brands the store carries (admin Settings) moving along its bottom edge. */}
+      <div className="first-screen flex flex-col">
+        <HeroBanner banners={homepageData?.banners} promotions={homepageData?.promotions} stats={homepageData?.stats} />
+        <BrandMarquee brands={homepageData?.brands} />
+      </div>
 
       {/* Couldn't load the shop: say so plainly (never fall back to made-up products or prices) */}
       {error && (

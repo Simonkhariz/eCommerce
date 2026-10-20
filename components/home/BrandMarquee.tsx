@@ -20,34 +20,34 @@ function Brand({ name }: { name: string }) {
         role="img"
         aria-label={name}
         viewBox={logo.viewBox}
-        className="h-7 w-auto shrink-0 fill-current sm:h-9"
-        // Very flat wordmarks (ratio over 3:1) are drawn a little shorter so they look the same size.
-        style={w / h > 3 ? { height: '1.35rem' } : undefined}
+        className={`w-auto shrink-0 fill-current ${w / h > 3 ? 'h-5 sm:h-6' : 'h-6 sm:h-8'}`}
+        // Very flat wordmarks (wider than 3:1) are drawn a little shorter so they look the same size.
       >
         <path d={logo.path} />
       </svg>
     );
   }
   return (
-    <span className={`shrink-0 whitespace-nowrap text-xl sm:text-3xl ${WORDMARK_CLASS[key] ?? 'font-bold uppercase tracking-wide'}`}>
+    <span className={`shrink-0 whitespace-nowrap text-lg sm:text-2xl ${WORDMARK_CLASS[key] ?? 'font-bold uppercase tracking-wide'}`}>
       {name}
     </span>
   );
 }
 
 /**
- * Scrolling strip of the brands the store carries (admin Settings → "storefront_brands").
- * Hidden when no brands are set.
+ * Endlessly moving strip of the brands the store carries (admin Settings → "storefront_brands"),
+ * the last thing on the home page's first screen. Hidden when no brands are set.
  */
 export function BrandMarquee({ brands }: { brands?: string[] }) {
   const list = (brands ?? []).map((b) => b.trim()).filter(Boolean);
   if (list.length === 0) return null;
-  // Enough copies that one copy is wider than the screen, then the whole set twice for the loop.
-  const copy = list.length < 6 ? [...list, ...list, ...list] : list;
+  // Repeat the brands until one copy is wider than a large screen (16 logos is about 2,000px),
+  // then show that copy twice so the loop joins up.
+  const copy = [...list];
+  while (copy.length < 16) copy.push(...list);
 
   return (
-    // !mt-0: sits flush under the hero banner (the home page spaces its other sections).
-    <section aria-label="Brands we stock" className="!mt-0 bg-black py-6 text-white sm:py-9">
+    <section aria-label="Brands we stock" className="shrink-0 bg-black py-[clamp(1rem,2.4svh,1.25rem)] text-white sm:py-[clamp(1.1rem,2.6svh,1.75rem)]">
       <div
         className="marquee overflow-hidden"
         style={{ maskImage: 'linear-gradient(to right, transparent, black 6%, black 94%, transparent)' }}
@@ -55,7 +55,7 @@ export function BrandMarquee({ brands }: { brands?: string[] }) {
         <ul className="marquee-track flex w-max items-center" style={{ ['--marquee-duration' as string]: `${copy.length * 3.5}s` }}>
           {[0, 1].map((half) =>
             copy.map((name, i) => (
-              <li key={`${half}-${i}`} aria-hidden={half === 1 || i >= list.length ? true : undefined} className="flex items-center px-7 sm:px-12">
+              <li key={`${half}-${i}`} aria-hidden={half === 1 || i >= list.length ? true : undefined} className="flex items-center px-6 sm:px-10">
                 <Brand name={name} />
               </li>
             ))

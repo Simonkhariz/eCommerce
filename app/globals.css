@@ -263,9 +263,28 @@ input[type="range"]::-webkit-slider-thumb {
   }
 }
 
+/* Height of the sticky store header (h-16 / sm:h-20, plus its 1px border). */
+:root {
+  --site-header-h: 65px;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --site-header-h: 81px;
+  }
+}
+
+/* The home page's first screen: the hero banner and the brand strip under it fill the window
+   below the header exactly, so the strip is the last thing in view. Spacing and type in the
+   hero shrink with the window's height; a window too short even for that lets it grow
+   rather than cutting anything off. */
+.first-screen {
+  min-height: calc(100svh - var(--site-header-h));
+}
+
 /* Brand strip: two identical copies of the list slide left by one copy's width and repeat,
-   so the loop has no visible seam. Hover or keyboard focus pauses it; with reduced motion
-   it stands still and can be scrolled by hand. */
+   so the loop has no seam. It cannot be scrolled; hovering pauses it. The store owner wants
+   it moving for everyone, so it keeps moving (slowly) with reduced motion too. */
 @keyframes marquee {
   from {
     transform: translateX(0);
@@ -279,18 +298,35 @@ input[type="range"]::-webkit-slider-thumb {
   animation: marquee var(--marquee-duration, 40s) linear infinite;
 }
 
-.marquee:hover .marquee-track,
-.marquee:focus-within .marquee-track {
+.marquee:hover .marquee-track {
   animation-play-state: paused;
 }
 
+/* Hero slide timer: the bar of the slide on show fills up, and the next slide comes when it
+   is full (so pausing the bar pauses the slideshow too). */
+@keyframes hero-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.hero-progress {
+  transform-origin: left;
+  animation: hero-progress var(--hero-slide-ms, 6000ms) linear forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .marquee {
-    overflow-x: auto;
+  /* These two are timers rather than decoration: keep their real speed. */
+  .marquee-track {
+    animation-duration: var(--marquee-duration, 40s) !important;
+    animation-iteration-count: infinite !important;
   }
 
-  .marquee-track {
-    animation: none !important;
+  .hero-progress {
+    animation-duration: var(--hero-slide-ms, 6000ms) !important;
   }
 }
 
