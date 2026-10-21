@@ -30,6 +30,7 @@ final class MailTemplates
         'marketing_broadcast',
         'payment_claimed',
         'storage_alert',
+        'data_cleanup_done',
     ];
 
     private string $frontendUrl;
@@ -73,6 +74,8 @@ final class MailTemplates
             'magic_link' => $this->magicLink($p),
             'payment_claimed' => $this->paymentClaimed($p),
             'storage_alert' => $this->storageAlert($p),
+            'admin_confirm_code' => $this->adminConfirmCode($p),
+            'data_cleanup_done' => $this->dataCleanupDone($p),
             default => throw new InvalidArgumentException("Unknown email template '{$template}'."),
         };
     }
@@ -246,7 +249,7 @@ final class MailTemplates
         return compact('subject', 'html', 'text');
     }
 
-    /** To the admins: the database is getting too big or the site slow (from the daily clean-up). */
+    /** To the admins: the database is big or slow, or old data waits for review (daily check). */
     private function storageAlert(array $p): array
     {
         $critical = ($p['level'] ?? '') === 'critical';
@@ -267,11 +270,76 @@ final class MailTemplates
             $critical ? 'Database problem' : 'Database check',
             '<p style="margin:0 0 12px">The daily check of your store database found:</p>'
             . '<ul style="margin:0 0 16px;padding-left:20px">' . $list . '</ul>'
-            . '<p style="margin:0 0 16px">Open Data &amp; storage in admin to see the details and clean up old data.</p>'
+            . '<p style="margin:0 0 16px">Nothing has been removed. Open Data &amp; storage in admin to review the details; old data is only removed when you confirm a clean-up there.</p>'
             . $this->button($adminUrl, 'Open Data & storage')
         );
 
-        $text = "The daily check of your store database found:\n\n{$text}\nOpen Data & storage in admin: {$adminUrl}\n" . $this->footerText();
+        $text = "The daily check of your store database found:\n\n{$text}\nNothing has been removed. Review the details in Data & storage: {$adminUrl}\n" . $this->footerText();
+
+        return compact('subject', 'html', 'text');
+    }
+
+    /** To one admin: the code that confirms a data clean-up they asked for. */
+    private function adminConfirmCode(array $p): array
+    {
+        $code = (string) ($p['code'] ?? '');
+        $summary = is_array($p['summary'] ?? null) ? $p['summary'] : [];
+        $expires = !empty($p['expires_at']) ? $this->dateTime((string) $p['expires_at']) : '';
+        $subject = "Your clean-up confirmation code: {$code}";
+
+        $rows = [];
+        foreach ($summary as $label => $count) {
+            $rows[] = [(string) $label, number_format((int) $count)];
+        }
+
+        $html = $this->layout(
+            'Confirm the data clean-up',
+            '<p style="margin:0 0 12px">Hi ' . $this->e(trim((string) ($p['name'] ?? '')) ?: 'there') . ',</p>'
+            . '<p style="margin:0 0 16px">Your admin account asked to permanently delete old data from the store. Type this code in admin to confirm'
+            . ($expires !== '' ? ' (it works until <strong>' . $this->e($expires) . '</strong>, once)' : '') . ':</p>'
+            . '<p style="margin:0 0 20px;font-size:28px;font-weight:bold;letter-spacing:6px;font-family:monospace">' . $this->e($code) . '</p>'
+            . $this->keyValueTable($rows)
+            . '<p style="margin:0 0 16px;color:#b91c1c"><strong>If this wasn\'t you, don\'t share the code: change your admin password now.</strong></p>'
+        );
+
+        $text = "Your admin account asked to permanently delete old data from the store.\n"
+            . "Confirmation code: {$code}" . ($expires !== '' ? " (works until {$expires}, once)" : '') . "\n\n"
+            . $this->keyValueText($rows)
+            . "\nIf this wasn't you, don't share the code: change your admin password now.\n"
+            . $this->footerText();
+
+        return compact('subject', 'html', 'text');
+    }
+
+    /** To every admin: a data clean-up has run (a security notice). */
+    private function dataCleanupDone(array $p): array
+    {
+        $removed = is_array($p['removed'] ?? null) ? $p['removed'] : [];
+        $subject = 'Old data was removed from your store';
+        $rows = [
+            ['By', (string) ($p['admin_name'] ?? '')],
+            ['When', !empty($p['at']) ? $this->dateTime((string) $p['at']) : ''],
+            ['From IP address', (string) ($p['ip'] ?? '')],
+        ];
+        $removedRows = [];
+        foreach ($removed as $label => $count) {
+            $removedRows[] = [(string) $label, number_format((int) $count)];
+        }
+
+        $html = $this->layout(
+            'Data clean-up done',
+            '<p style="margin:0 0 16px">A data clean-up was confirmed with a password and an emailed code.</p>'
+            . $this->keyValueTable($rows)
+            . ($removedRows !== [] ? '<p style="margin:0 0 8px;font-weight:bold">Removed</p>' . $this->keyValueTable($removedRows) : '<p style="margin:0 0 16px">Nothing needed removing.</p>')
+            . '<p style="margin:0 0 16px">If you don\'t recognise this, change the admin passwords now and check the audit log.</p>'
+            . $this->button($this->frontendUrl . '/admin/audit-logs', 'Open the audit log')
+        );
+
+        $text = "A data clean-up was confirmed with a password and an emailed code.\n\n"
+            . $this->keyValueText($rows)
+            . ($removedRows !== [] ? "\nRemoved:\n" . $this->keyValueText($removedRows) : "\nNothing needed removing.\n")
+            . "\nIf you don't recognise this, change the admin passwords now and check the audit log.\n"
+            . $this->footerText();
 
         return compact('subject', 'html', 'text');
     }

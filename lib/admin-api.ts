@@ -740,14 +740,15 @@ export type HealthLevel = 'ok' | 'warning' | 'critical';
 
 export interface HealthIssue {
   level: Exclude<HealthLevel, 'ok'>;
-  code: 'size' | 'slow' | 'queries' | 'cleanup' | 'backlog';
+  code: 'size' | 'slow' | 'queries' | 'due' | 'backlog';
   title: string;
   detail: string;
 }
 
 export interface CleanupRun {
   at: string;
-  source: 'schedule' | 'admin';
+  /** The admin who confirmed it. */
+  by: string | null;
   removed: Record<string, number>;
 }
 
@@ -755,6 +756,8 @@ export interface StorageHealthReport {
   level: HealthLevel;
   issues: HealthIssue[];
   checked_at: string;
+  /** The moment every list on the page is computed for (sent back when reviewing and confirming). */
+  as_of: string;
   database: {
     size_bytes: number;
     alert_mb: number;
@@ -768,14 +771,40 @@ export interface StorageHealthReport {
     routes: Array<{ method: string; route: string; hits: number; avg_ms: number; max_ms: number }>;
   };
   queries?: { typical_ms: number };
-  cleanup: { last_run: CleanupRun | null; days_since: number | null; waiting?: Record<string, number> };
+  /** due: records past the keep periods per rule (nothing is removed until an admin confirms). */
+  cleanup: { due: Record<string, number>; last_run: CleanupRun | null; days_since: number | null };
 }
 
 export interface DataOverview {
   settings: DataSettings;
   options: Record<DataSettingKey, number[]>;
   labels: Record<string, string>;
+  /** Rules for technical rows with no customer or business data. */
+  housekeeping: string[];
   health: StorageHealthReport;
+  mail_mode: 'smtp' | 'log_only';
+}
+
+export interface DataRecordColumn {
+  key: string;
+  label: string;
+  type: 'text' | 'date' | 'money' | 'number' | 'code';
+}
+
+export interface DataRecords {
+  rule: string;
+  label: string;
+  columns: DataRecordColumn[];
+  items: Array<Record<string, string | number | null>>;
+  pagination: PaginationMeta;
+}
+
+export interface CleanupChallenge {
+  confirmation_id: string;
+  sent_to: string;
+  expires_at: string;
+  counts: Record<string, number>;
+  mail_mode: 'smtp' | 'log_only';
 }
 
 export function adminGetDataOverview() {
@@ -790,8 +819,18 @@ export function adminUpdateDataSettings(data: Partial<DataSettings>) {
   return send<DataSettings>('/admin/data/settings', 'PUT', data);
 }
 
-export function adminRunCleanup(expectedCustomers: number) {
-  return send<{ removed: Record<string, number> }>('/admin/data/cleanup', 'POST', { expected_customers: expectedCustomers });
+export function adminGetDataRecords(rule: string, asOf: string, page: number) {
+  return apiRequest<DataRecords>(`/admin/data/records${qs({ rule, as_of: asOf, page })}`);
+}
+
+/** Step 1 of a clean-up: the admin's password; a one-time code is emailed to them. */
+export function adminVerifyCleanup(password: string, asOf: string) {
+  return send<CleanupChallenge>('/admin/data/cleanup/verify', 'POST', { password, as_of: asOf });
+}
+
+/** Step 2: the emailed code; removes exactly the records reviewed as of the challenge's time. */
+export function adminRunCleanup(confirmationId: string, code: string) {
+  return send<{ removed: Record<string, number> }>('/admin/data/cleanup', 'POST', { confirmation_id: confirmationId, code });
 }
 
 export interface AdminAccount {

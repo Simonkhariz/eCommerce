@@ -8,15 +8,16 @@ use App\Database\Database;
 use App\Support\SlowRequestLog;
 
 /**
- * Is the database getting too big, or the site slow? Used by admin → Data & storage, the
- * admin alert bell and the daily clean-up script (which emails the admins about problems).
+ * Is the database getting too big, the site slow, or is old data waiting for the admin?
+ * Used by admin → Data & storage, the admin alert bell and the daily check
+ * (scripts/check_database.php, which emails the admins). Nothing here removes anything.
  *
  * Checks:
  *   size      database size against the admin's limit (storage_alert_mb): warning from 80 %
  *   slow      API requests slower than SLOW_REQUEST_MS in the last 24 hours
+ *   due       customer or business records past the admin's keep periods, waiting for review
+ *   backlog   many expired sessions / counters (technical rows) waiting for review
  *   queries   time taken by a few typical storefront and admin queries (full report only)
- *   cleanup   the daily clean-up has not run for a week (the scheduled task is missing)
- *   backlog   many old rows waiting to be cleaned up (full report only)
  */
 final class StorageHealth
 {
@@ -27,7 +28,6 @@ final class StorageHealth
     private const SLOW_CRITICAL = 200;
     private const QUERY_WARNING_MS = 500;
     private const QUERY_CRITICAL_MS = 2000;
-    private const CLEANUP_OVERDUE_DAYS = 7;
     private const BACKLOG_WARNING = 10000;
 
     private Database $db;
@@ -45,11 +45,12 @@ final class StorageHealth
     }
 
     /**
-     * @param bool $full also time typical queries and count rows waiting for clean-up
-     *                   (a little slower; the alert bell uses the quick version)
+     * @param string $asOf the moment the "due" records are counted for (the admin's review time)
+     * @param bool $full also list the biggest tables and slowest routes and time typical
+     *                   queries (the alert bell and daily check use the quick version)
      * @return array<string, mixed>
      */
-    public function report(bool $full = true): array
+    public function report(string $asOf, bool $full = true): array
     {
         $issues = [];
 
@@ -67,9 +68,9 @@ final class StorageHealth
         $usedPercent = $limitBytes > 0 ? (int) round($totalBytes / $limitBytes * 100) : 0;
         $sizeMb = round($totalBytes / 1048576, 1);
         if ($usedPercent >= 100) {
-            $issues[] = $this->issue('critical', 'size', 'The database is over your size limit', "It is {$sizeMb} MB; your alert limit is {$alertMb} MB. Clean up old data below, choose shorter keep periods, or raise the limit if your hosting plan allows it.");
+            $issues[] = $this->issue('critical', 'size', 'The database is over your size limit', "It is {$sizeMb} MB; your limit is {$alertMb} MB. Review the old data below and clean it up, choose shorter keep periods, or raise the limit if your hosting plan allows it.");
         } elseif ($usedPercent >= 80) {
-            $issues[] = $this->issue('warning', 'size', 'The database is getting large', "It is {$sizeMb} MB, {$usedPercent}% of your {$alertMb} MB alert limit.");
+            $issues[] = $this->issue('warning', 'size', 'The database is getting large', "It is {$sizeMb} MB, {$usedPercent}% of your {$alertMb} MB limit. Review the old data below and clean it up.");
         }
 
         // --- Slow requests (last 24 hours) ------------------------------------------------
@@ -95,20 +96,38 @@ final class StorageHealth
             );
         }
 
-        // --- Clean-up schedule ------------------------------------------------------------
+        // --- Old data waiting for the admin -------------------------------------------------
         $cleanup = new DatabaseCleanup($this->db);
-        $lastRun = $cleanup->lastRun();
-        $daysSince = $lastRun ? (int) floor((time() - strtotime((string) $lastRun['at'])) / 86400) : null;
-        if ($daysSince === null || $daysSince >= self::CLEANUP_OVERDUE_DAYS) {
+        $due = $cleanup->snapshot($asOf)['counts'];
+        $records = 0;
+        $technical = 0;
+        foreach ($due as $rule => $count) {
+            if ($rule === 'inactive_customers') {
+                continue;
+            }
+            if (in_array($rule, DatabaseCleanup::HOUSEKEEPING, true)) {
+                $technical += $count;
+            } else {
+                $records += $count;
+            }
+        }
+        if ($records > 0) {
+            $people = $due['inactive_customers'] ?? 0;
             $issues[] = $this->issue(
                 'warning',
-                'cleanup',
-                $daysSince === null ? 'The clean-up has never run' : "The clean-up last ran {$daysSince} days ago",
-                'Old data piles up and slows the site. Schedule backend/scripts/cleanup_database.php to run every day, or press “Clean up now”.'
+                'due',
+                number_format($records) . ' ' . ($records === 1 ? 'record is' : 'records are') . ' past your keep periods',
+                ($people > 0 ? 'Including the personal details of ' . number_format($people) . ' inactive ' . ($people === 1 ? 'customer' : 'customers') . '. ' : '')
+                . 'Nothing is removed until you review the list and confirm the clean-up.'
             );
         }
+        if ($technical >= self::BACKLOG_WARNING) {
+            $issues[] = $this->issue('warning', 'backlog', 'Expired sessions and counters are piling up', number_format($technical) . ' technical rows (no customer data) can be cleaned up.');
+        }
 
+        $lastRun = $cleanup->lastRun();
         $report = [
+            'as_of' => $asOf,
             'database' => [
                 'size_bytes' => $totalBytes,
                 'alert_mb' => $alertMb,
@@ -132,11 +151,14 @@ final class StorageHealth
                     'max_ms' => (int) $r['max_ms'],
                 ], $slowRoutes) : [],
             ],
-            'cleanup' => ['last_run' => $lastRun, 'days_since' => $daysSince],
+            'cleanup' => [
+                'due' => $due,
+                'last_run' => $lastRun,
+                'days_since' => $lastRun ? (int) floor((time() - strtotime((string) $lastRun['at'])) / 86400) : null,
+            ],
         ];
 
         if ($full) {
-            // --- Typical queries ----------------------------------------------------------
             $started = microtime(true);
             $this->db->fetchAll("SELECT `id` FROM `products` WHERE `status` = 'published' ORDER BY `created_at` DESC LIMIT 24");
             $this->db->fetchOne("SELECT COUNT(*) AS c FROM `orders` WHERE `created_at` >= DATE_SUB(NOW(), INTERVAL 30 DAY)");
@@ -148,16 +170,8 @@ final class StorageHealth
                     $queryMs >= self::QUERY_CRITICAL_MS ? 'critical' : 'warning',
                     'queries',
                     'Database queries are slow',
-                    "Typical shop queries took {$queryMs} ms (normally under 50 ms). A clean-up helps; if it stays slow, the server may need more memory."
+                    "Typical shop queries took {$queryMs} ms (normally under 50 ms). Cleaning up old data helps; if it stays slow, the server may need more memory."
                 );
-            }
-
-            // --- Rows waiting for clean-up --------------------------------------------------
-            $waiting = $cleanup->run(true);
-            $waitingRows = array_sum($waiting) - ($waiting['inactive_customers'] ?? 0);
-            $report['cleanup']['waiting'] = $waiting;
-            if ($waitingRows >= self::BACKLOG_WARNING) {
-                $issues[] = $this->issue('warning', 'backlog', 'A lot of old data is waiting to be removed', number_format($waitingRows) . ' old rows can be cleaned up now.');
             }
         }
 

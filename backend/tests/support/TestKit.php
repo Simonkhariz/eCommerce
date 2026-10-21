@@ -270,6 +270,23 @@ final class TestKit
         return $token;
     }
 
+    /** The latest admin confirmation code written to the mail log for an email (log mode). */
+    public function confirmationCode(string $email): ?string
+    {
+        $path = BASE_PATH . '/' . ltrim((string) (Env::get('MAIL_LOG_PATH', 'storage/logs/mail.log') ?: 'storage/logs/mail.log'), '/');
+        $log = @file_get_contents($path);
+        if ($log === false) {
+            return null;
+        }
+        $code = null;
+        foreach (explode(str_repeat('=', 80), $log) as $entry) {
+            if (str_contains($entry, "To: {$email}") && preg_match('#Confirmation code: (\d{6})#', $entry, $m)) {
+                $code = $m[1];
+            }
+        }
+        return $code;
+    }
+
     private function show(mixed $v): string
     {
         return is_string($v) ? "'{$v}'" : var_export($v, true);

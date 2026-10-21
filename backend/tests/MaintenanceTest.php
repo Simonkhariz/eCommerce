@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 /**
- * Database clean-up (backend/scripts/cleanup_database.php): only data the store no longer
- * needs is removed; paid orders and anything waiting for the admin are kept.
+ * Database clean-up (admin → Data & storage): only data the store no longer needs is removed;
+ * paid orders and anything waiting for the admin are kept.
  *
  *   php backend/tests/run.php Maintenance
  */
@@ -81,14 +81,15 @@ $oldToken = (int) $t->db->insert(
 );
 
 // -----------------------------------------------------------------------------
-$t->section('Dry run');
-$preview = (new DatabaseCleanup($t->db))->run(true);
-$t->ok('dry run counts the abandoned order', ($preview['unpaid_cancelled_orders'] ?? 0) >= 1, json_encode($preview));
-$t->ok('dry run removes nothing', $exists($abandoned));
+$t->section('Review');
+$asOf = date('Y-m-d H:i:s');
+$snapshot = (new DatabaseCleanup($t->db))->snapshot($asOf);
+$t->ok('review lists the abandoned order', in_array((string) $abandoned, $snapshot['ids']['unpaid_cancelled_orders'] ?? [], true), json_encode($snapshot['counts']));
+$t->ok('reviewing removes nothing', $exists($abandoned));
 
 // -----------------------------------------------------------------------------
 $t->section('Clean-up');
-$removed = (new DatabaseCleanup($t->db))->run();
+$removed = (new DatabaseCleanup($t->db))->execute($asOf, $snapshot['fingerprint']);
 $t->ok('never-paid order cancelled over 30 days ago is removed', !$exists($abandoned), json_encode($removed));
 $t->check('its items and closed payment attempts go with it', 0, (int) $t->scalar(
     "SELECT (SELECT COUNT(*) FROM `order_items` WHERE `order_id` = ?) + (SELECT COUNT(*) FROM `payments` WHERE `order_id` = ?)",

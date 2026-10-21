@@ -5,22 +5,29 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Database\Database;
+use DomainException;
 
 /**
- * Removes data the store no longer needs, so the database stays small and personal data is
- * not kept longer than the admin chose (admin → Data & storage). Money records (order totals
- * and items, payments, refunds) are never deleted: tax rules require them to be kept.
+ * Data the store no longer needs, per the keep periods the admin chose (admin → Data &
+ * storage). Nothing is ever removed automatically: the daily check only alerts the admin,
+ * who reviews the exact records here and confirms with their password and an emailed code
+ * (AdminDataController). Money records (order totals and items, payments, refunds) are never
+ * deleted: tax rules require them to be kept.
  *
- * Retention settings (store_settings, days; 0 = keep):
- *   retention_customer_days  (off)  customers with no sign-in and no order for this long: their
- *                                   account, saved addresses, cart and wishlist are deleted, and
- *                                   the name, phone, email and street address on their finished
- *                                   orders are removed. Anyone with an open order is skipped.
+ * Everything is computed "as of" the moment the admin reviewed the list. The clean-up then
+ * removes exactly those records: if anything changed since (a customer came back, a setting
+ * changed), it refuses and the admin reviews again.
+ *
+ * Keep periods (store_settings, days; 0 = keep):
+ *   retention_customer_days  (off)  customers with no sign-in and no order for this long and
+ *                                   nothing open: account, saved addresses, cart and wishlist
+ *                                   deleted; name, phone, email, street address and note
+ *                                   removed from their finished orders and email from reviews
  *   retention_unpaid_days    (30)   cancelled orders that were never paid; abandoned guest carts
  *   retention_message_days   (180)  sent/failed emails and raw payment gateway notifications
  *   retention_activity_days  (off)  admin activity log and stock history
  * Expired sign-in sessions and links, old rate-limit counters and slow-request records older
- * than 30 days are always removed.
+ * than 30 days are listed too (technical rows with no customer or business data).
  */
 final class DatabaseCleanup
 {
@@ -39,15 +46,11 @@ final class DatabaseCleanup
         'retention_activity_days' => 0,
     ];
 
-    /** What each rule removes, for the admin screen and the script output. */
+    /** What each rule removes, in the order shown and carried out. */
     public const LABELS = [
         'inactive_customers' => 'Inactive customers (personal details removed)',
         'inactive_customer_accounts' => 'Their customer accounts deleted',
         'inactive_customer_orders' => 'Their orders anonymised (totals kept)',
-        'expired_sessions' => 'Expired sign-in sessions',
-        'used_or_expired_sign_in_links' => 'Used or expired sign-in links',
-        'old_rate_limit_counters' => 'Old rate-limit counters',
-        'old_slow_request_records' => 'Slow-request records older than 30 days',
         'unpaid_cancelled_orders' => 'Cancelled orders that were never paid',
         'abandoned_guest_carts' => 'Abandoned guest carts',
         'old_emails' => 'Old sent and failed emails',
@@ -55,11 +58,19 @@ final class DatabaseCleanup
         'unsubscribed_newsletter_emails' => 'Unsubscribed newsletter addresses',
         'old_admin_activity' => 'Old admin activity log entries',
         'old_stock_history' => 'Old stock history entries',
+        'expired_sessions' => 'Expired sign-in sessions',
+        'used_or_expired_sign_in_links' => 'Used or expired sign-in links',
+        'old_rate_limit_counters' => 'Old rate-limit counters',
+        'old_slow_request_records' => 'Slow-request records older than 30 days',
     ];
+
+    /** Technical rows with no customer or business data: they only raise an alert when many pile up. */
+    public const HOUSEKEEPING = ['expired_sessions', 'used_or_expired_sign_in_links', 'old_rate_limit_counters', 'old_slow_request_records'];
 
     /** An order in one of these states still needs the customer's details. */
     private const OPEN_ORDER_STATES = "'pending_payment', 'paid', 'processing', 'shipped', 'refund_pending'";
     private const LAST_RUN_KEY = 'cleanup_last_run';
+    private const CHUNK = 500;
 
     private Database $db;
 
@@ -69,7 +80,7 @@ final class DatabaseCleanup
     }
 
     /**
-     * Saved retention settings; a missing or unknown value falls back to the default.
+     * Saved keep periods; a missing or unknown value falls back to the default.
      *
      * @return array<string, int>
      */
@@ -88,9 +99,9 @@ final class DatabaseCleanup
     }
 
     /**
-     * When the clean-up last ran (by the schedule or an admin) and what it removed.
+     * When an admin last cleaned up and what was removed.
      *
-     * @return array{at: string, source: string, removed: array<string, int>}|null
+     * @return array{at: string, by: string|null, removed: array<string, int>}|null
      */
     public function lastRun(): ?array
     {
@@ -100,114 +111,420 @@ final class DatabaseCleanup
     }
 
     /**
-     * @param string $source 'schedule' (the daily script) or 'admin'
-     * @return array<string, int> rows removed (or that would be removed) per rule
+     * Everything a clean-up as of $asOf would remove.
+     *
+     * @return array{ids: array<string, list<string>>, counts: array<string, int>, fingerprint: string}
      */
-    public function run(bool $dryRun = false, string $source = 'schedule'): array
+    public function snapshot(string $asOf): array
     {
         $s = $this->settings();
-        $customerDays = $s['retention_customer_days'];
-        $unpaidDays = $s['retention_unpaid_days'];
-        // Emails carry names and addresses, so they never outlive the customer-record period.
-        $messageDays = $customerDays > 0 ? min($s['retention_message_days'], $customerDays) : $s['retention_message_days'];
-        $activityDays = $s['retention_activity_days'];
+        $customers = $s['retention_customer_days'] > 0 ? $this->inactiveCustomers($asOf, $s['retention_customer_days']) : [];
+        $emails = array_keys($customers);
 
-        $counts = [];
-        if ($customerDays > 0) {
-            $counts += $this->inactiveCustomers($customerDays, $dryRun);
+        $ids = [];
+        foreach ($this->rules($asOf, $s) as $name => $rule) {
+            $ids[$name] = isset($rule['ids']) ? $this->column($rule['ids'], $rule['types'], $rule['params']) : [];
         }
-
-        $rules = [
-            'expired_sessions' => ["FROM `sessions` WHERE `expires_at` < NOW()", '', []],
-            'used_or_expired_sign_in_links' => [
-                "FROM `email_verification_tokens`
-                 WHERE `expires_at` < DATE_SUB(NOW(), INTERVAL 1 DAY)
-                    OR (`used_at` IS NOT NULL AND `used_at` < DATE_SUB(NOW(), INTERVAL 1 DAY))",
-                '',
-                [],
-            ],
-            // The longest rate-limit window is one hour; keep a day for safety.
-            'old_rate_limit_counters' => ["FROM `rate_limits` WHERE `window_start` < ?", 'i', [time() - 86400]],
-            'old_slow_request_records' => ["FROM `api_slow_requests` WHERE `hour_start` < DATE_SUB(NOW(), INTERVAL 30 DAY)", '', []],
-            // Never paid, nothing refunded, nothing waiting for the admin; stock was already
-            // released when the order was cancelled. Items, history and closed payment
-            // attempts are removed with the order (foreign keys cascade).
-            'unpaid_cancelled_orders' => [
-                "FROM `orders` o
-                 WHERE o.`order_status` = 'cancelled'
-                   AND o.`requires_attention` = 0
-                   AND o.`updated_at` < DATE_SUB(NOW(), INTERVAL ? DAY)
-                   AND NOT EXISTS (SELECT 1 FROM `payments` p WHERE p.`order_id` = o.`id`
-                                   AND p.`status` IN ('successful', 'partially_refunded', 'refunded'))
-                   AND NOT EXISTS (SELECT 1 FROM `refunds` r WHERE r.`order_id` = o.`id`)",
-                'i',
-                [$unpaidDays],
-            ],
-            'abandoned_guest_carts' => [
-                "FROM `carts` WHERE `user_id` IS NULL AND `updated_at` < DATE_SUB(NOW(), INTERVAL ? DAY)",
-                'i',
-                [$unpaidDays],
-            ],
-            'old_emails' => [
-                "FROM `email_outbox` WHERE `status` IN ('sent', 'failed') AND `created_at` < DATE_SUB(NOW(), INTERVAL ? DAY)",
-                'i',
-                [$messageDays],
-            ],
-            'old_gateway_notifications' => [
-                "FROM `payment_webhook_events` WHERE `received_at` < DATE_SUB(NOW(), INTERVAL ? DAY)",
-                'i',
-                [$s['retention_message_days']],
-            ],
-        ];
-        if ($customerDays > 0) {
-            $rules['unsubscribed_newsletter_emails'] = [
-                "FROM `newsletter_subscribers` WHERE `status` = 'unsubscribed' AND COALESCE(`unsubscribed_at`, `created_at`) < DATE_SUB(NOW(), INTERVAL ? DAY)",
-                'i',
-                [$customerDays],
-            ];
-        }
-        if ($activityDays > 0) {
-            $rules['old_admin_activity'] = ["FROM `admin_audit_logs` WHERE `created_at` < DATE_SUB(NOW(), INTERVAL ? DAY)", 'i', [$activityDays]];
-            $rules['old_stock_history'] = ["FROM `inventory_logs` WHERE `created_at` < DATE_SUB(NOW(), INTERVAL ? DAY)", 'i', [$activityDays]];
-        }
-
-        foreach ($rules as $name => [$from, $types, $params]) {
-            $alias = str_contains($from, '`orders` o') ? 'o' : null;
-            if ($dryRun) {
-                $counts[$name] = (int) ($this->db->fetchOne("SELECT COUNT(*) AS c {$from}", $types, $params)['c'] ?? 0);
-                continue;
-            }
-            $counts[$name] = $this->db->executeUpdate(($alias ? "DELETE {$alias} " : 'DELETE ') . $from, $types, $params);
-        }
-
-        if (!$dryRun) {
-            $this->db->execute(
-                "INSERT INTO `store_settings` (`key_name`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)",
-                'ss',
-                [self::LAST_RUN_KEY, json_encode(['at' => date('Y-m-d H:i:s'), 'source' => $source, 'removed' => $counts])]
+        if ($s['retention_customer_days'] > 0) {
+            $ids['inactive_customers'] = $emails;
+            $ids['inactive_customer_accounts'] = $this->columnForEmails(
+                "SELECT u.`id` AS k FROM `users` u WHERE u.`role` = 'customer' AND u.`email` IN ({in}) ORDER BY u.`id`",
+                $emails
             );
+            // Orders removed as never-paid are not anonymised as well.
+            $ids['inactive_customer_orders'] = array_values(array_diff($this->columnForEmails(
+                "SELECT o.`id` AS k FROM `orders` o LEFT JOIN `users` u ON u.`id` = o.`user_id`
+                 WHERE o.`personal_data_removed_at` IS NULL AND (o.`guest_email` IN ({in}) OR u.`email` IN ({in})) ORDER BY o.`created_at`",
+                $emails
+            ), $ids['unpaid_cancelled_orders']));
+            // Their copies of sent emails go too, whatever their age.
+            $ids['old_emails'] = array_values(array_unique(array_merge($ids['old_emails'], $this->columnForEmails(
+                "SELECT e.`id` AS k FROM `email_outbox` e WHERE e.`status` IN ('sent', 'failed') AND e.`recipient_email` IN ({in})",
+                $emails
+            ))));
         }
 
-        return $counts;
+        $ordered = [];
+        foreach (array_keys(self::LABELS) as $name) {
+            if (array_key_exists($name, $ids)) {
+                $ordered[$name] = array_map('strval', $ids[$name]);
+            }
+        }
+
+        $sorted = array_map(static function (array $list): array {
+            sort($list, SORT_STRING);
+            return $list;
+        }, $ordered);
+
+        return [
+            'ids' => $ordered,
+            'counts' => array_map('count', $ordered),
+            'fingerprint' => hash('sha256', json_encode([$s, $sorted])),
+        ];
     }
 
     /**
-     * Customers whose last sign-in, sign-up and order activity are all older than $days and
-     * who have nothing open (unpaid, paid but not delivered, flagged, or a refund pending).
-     * Their account goes, and their finished orders keep only what the accounts need: items,
-     * totals, payments and the delivery city and state.
+     * One page of the records a rule would remove, for the admin to look through.
      *
-     * @return array<string, int>
+     * @return array{columns: list<array{key: string, label: string, type: string}>, items: list<array<string, mixed>>, total: int}
      */
-    private function inactiveCustomers(int $days, bool $dryRun): array
+    public function records(string $rule, string $asOf, int $page, int $perPage): array
+    {
+        $snapshot = $this->snapshot($asOf);
+        if (!isset($snapshot['ids'][$rule])) {
+            throw new DomainException('This kind of data is not part of the clean-up with your current settings.');
+        }
+        $all = $snapshot['ids'][$rule];
+        $slice = array_slice($all, ($page - 1) * $perPage, $perPage);
+
+        if ($rule === 'inactive_customers') {
+            $s = $this->settings();
+            $activity = $this->inactiveCustomers($asOf, $s['retention_customer_days']);
+            $items = array_map(fn (string $email): array => $this->customerSummary($email, $activity[$email] ?? null), $slice);
+            $columns = [
+                ['key' => 'name', 'label' => 'Name', 'type' => 'text'],
+                ['key' => 'email', 'label' => 'Email', 'type' => 'text'],
+                ['key' => 'last_activity', 'label' => 'Last activity', 'type' => 'date'],
+                ['key' => 'orders', 'label' => 'Orders', 'type' => 'number'],
+                ['key' => 'account', 'label' => 'Account', 'type' => 'text'],
+            ];
+            return ['columns' => $columns, 'items' => $items, 'total' => count($all)];
+        }
+
+        $display = $this->display()[$rule];
+        $items = [];
+        if ($slice !== []) {
+            $in = implode(', ', array_fill(0, count($slice), '?'));
+            $rows = $this->db->fetchAll(
+                "{$display['select']} WHERE {$display['key']} IN ({$in})",
+                str_repeat('s', count($slice)),
+                $slice
+            );
+            // Keep the order of the list.
+            $byKey = [];
+            foreach ($rows as $row) {
+                $byKey[(string) $row['k']] = $row;
+            }
+            foreach ($slice as $key) {
+                if (isset($byKey[$key])) {
+                    $row = $byKey[$key];
+                    unset($row['k']);
+                    $items[] = $row;
+                }
+            }
+        }
+
+        return ['columns' => $display['columns'], 'items' => $items, 'total' => count($all)];
+    }
+
+    /**
+     * Remove exactly what the admin reviewed as of $asOf. Throws DomainException when the
+     * records have changed since (fingerprint differs), so nothing unexpected is removed.
+     *
+     * @return array<string, int> rows removed per rule
+     */
+    public function execute(string $asOf, string $fingerprint, ?string $adminName = null): array
+    {
+        $snapshot = $this->snapshot($asOf);
+        if (!hash_equals($snapshot['fingerprint'], $fingerprint)) {
+            throw new DomainException('Some of these records changed after you reviewed them. Review the list again before cleaning up.');
+        }
+        $ids = $snapshot['ids'];
+        $removed = [];
+
+        // Never-paid orders go first, so an inactive customer's order is never both deleted and anonymised.
+        foreach (['unpaid_cancelled_orders', 'inactive_customer_orders', 'inactive_customers', 'old_emails', 'inactive_customer_accounts'] as $name) {
+            if (isset($ids[$name])) {
+                $removed[$name] = $this->apply($name, $ids[$name]);
+            }
+        }
+        foreach ($ids as $name => $list) {
+            if (!isset($removed[$name])) {
+                $removed[$name] = $this->apply($name, $list);
+            }
+        }
+
+        $this->db->execute(
+            "INSERT INTO `store_settings` (`key_name`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)",
+            'ss',
+            [self::LAST_RUN_KEY, json_encode(['at' => date('Y-m-d H:i:s'), 'by' => $adminName, 'removed' => $removed])]
+        );
+
+        $ordered = [];
+        foreach (array_keys(self::LABELS) as $name) {
+            if (isset($removed[$name])) {
+                $ordered[$name] = $removed[$name];
+            }
+        }
+        return $ordered;
+    }
+
+    // -------------------------------------------------------------------------
+
+    /**
+     * @param list<string> $ids
+     */
+    private function apply(string $rule, array $ids): int
+    {
+        if ($ids === []) {
+            return 0;
+        }
+        if ($rule === 'inactive_customers') {
+            // The reviews stay on the shop; only the email behind them goes.
+            foreach (array_chunk($ids, self::CHUNK) as $chunk) {
+                $in = implode(', ', array_fill(0, count($chunk), '?'));
+                $this->db->executeUpdate("UPDATE `reviews` SET `author_email` = NULL WHERE `author_email` IN ({$in})", str_repeat('s', count($chunk)), $chunk);
+            }
+            return count($ids);
+        }
+
+        $targets = [
+            'inactive_customer_accounts' => ["DELETE FROM `users` WHERE `role` = 'customer' AND `id` IN ({in})"],
+            // updated_at keeps its value: reports date orders by it.
+            'inactive_customer_orders' => [
+                "UPDATE `orders` o
+                 SET o.`guest_email` = '',
+                     o.`guest_access_token_hash` = SHA2(CONCAT(o.`id`, '|', RAND(), '|', NOW(6)), 256),
+                     o.`shipping_address_snapshot` = JSON_OBJECT(
+                         'city', JSON_UNQUOTE(JSON_EXTRACT(o.`shipping_address_snapshot`, '$.city')),
+                         'state', JSON_UNQUOTE(JSON_EXTRACT(o.`shipping_address_snapshot`, '$.state')),
+                         'country', JSON_UNQUOTE(JSON_EXTRACT(o.`shipping_address_snapshot`, '$.country'))),
+                     o.`notes` = NULL,
+                     o.`idempotency_key` = NULL,
+                     o.`user_id` = NULL,
+                     o.`personal_data_removed_at` = NOW(),
+                     o.`updated_at` = o.`updated_at`
+                 WHERE o.`personal_data_removed_at` IS NULL AND o.`id` IN ({in})",
+            ],
+            'unpaid_cancelled_orders' => ["DELETE FROM `orders` WHERE `order_status` = 'cancelled' AND `id` IN ({in})"],
+            'abandoned_guest_carts' => ["DELETE FROM `carts` WHERE `user_id` IS NULL AND `id` IN ({in})"],
+            'old_emails' => ["DELETE FROM `email_outbox` WHERE `status` IN ('sent', 'failed') AND `id` IN ({in})"],
+            'old_gateway_notifications' => ["DELETE FROM `payment_webhook_events` WHERE `id` IN ({in})"],
+            'unsubscribed_newsletter_emails' => ["DELETE FROM `newsletter_subscribers` WHERE `status` = 'unsubscribed' AND `id` IN ({in})"],
+            'old_admin_activity' => ["DELETE FROM `admin_audit_logs` WHERE `id` IN ({in})"],
+            'old_stock_history' => ["DELETE FROM `inventory_logs` WHERE `id` IN ({in})"],
+            'expired_sessions' => ["DELETE FROM `sessions` WHERE `id` IN ({in})"],
+            'used_or_expired_sign_in_links' => ["DELETE FROM `email_verification_tokens` WHERE `id` IN ({in})"],
+            'old_rate_limit_counters' => ["DELETE FROM `rate_limits` WHERE `id` IN ({in})"],
+            'old_slow_request_records' => ["DELETE FROM `api_slow_requests` WHERE `id` IN ({in})"],
+        ];
+
+        $sql = $targets[$rule][0];
+        $count = 0;
+        foreach (array_chunk($ids, self::CHUNK) as $chunk) {
+            $in = implode(', ', array_fill(0, count($chunk), '?'));
+            $count += $this->db->transaction(
+                fn (Database $db): int => $db->executeUpdate(str_replace('{in}', $in, $sql), str_repeat('s', count($chunk)), $chunk)
+            );
+        }
+        return $count;
+    }
+
+    /**
+     * Rules that select their records by date (customer rules are added in snapshot()).
+     *
+     * @return array<string, array{ids?: string, types: string, params: array}>
+     */
+    private function rules(string $asOf, array $s): array
+    {
+        $before = static fn (int $days): array => [$asOf, $days];
+        $rules = [];
+        if ($s['retention_customer_days'] > 0) {
+            $rules['inactive_customers'] = ['types' => '', 'params' => []];
+            $rules['inactive_customer_accounts'] = ['types' => '', 'params' => []];
+            $rules['inactive_customer_orders'] = ['types' => '', 'params' => []];
+        }
+        $rules += [
+            // Never paid, nothing refunded, nothing waiting for the admin; stock was already
+            // released when the order was cancelled. Items, history and closed payment
+            // attempts go with the order (foreign keys cascade).
+            'unpaid_cancelled_orders' => [
+                'ids' => "SELECT o.`id` AS k FROM `orders` o
+                          WHERE o.`order_status` = 'cancelled'
+                            AND o.`requires_attention` = 0
+                            AND o.`updated_at` < DATE_SUB(?, INTERVAL ? DAY)
+                            AND NOT EXISTS (SELECT 1 FROM `payments` p WHERE p.`order_id` = o.`id`
+                                            AND p.`status` IN ('successful', 'partially_refunded', 'refunded'))
+                            AND NOT EXISTS (SELECT 1 FROM `refunds` r WHERE r.`order_id` = o.`id`)
+                          ORDER BY o.`created_at`",
+                'types' => 'si',
+                'params' => $before($s['retention_unpaid_days']),
+            ],
+            'abandoned_guest_carts' => [
+                'ids' => "SELECT c.`id` AS k FROM `carts` c WHERE c.`user_id` IS NULL AND c.`updated_at` < DATE_SUB(?, INTERVAL ? DAY) ORDER BY c.`updated_at`",
+                'types' => 'si',
+                'params' => $before($s['retention_unpaid_days']),
+            ],
+            // Emails carry names and addresses, so they never outlive the customer-record period.
+            'old_emails' => [
+                'ids' => "SELECT e.`id` AS k FROM `email_outbox` e WHERE e.`status` IN ('sent', 'failed') AND e.`created_at` < DATE_SUB(?, INTERVAL ? DAY) ORDER BY e.`created_at`",
+                'types' => 'si',
+                'params' => $before($s['retention_customer_days'] > 0 ? min($s['retention_message_days'], $s['retention_customer_days']) : $s['retention_message_days']),
+            ],
+            'old_gateway_notifications' => [
+                'ids' => "SELECT w.`id` AS k FROM `payment_webhook_events` w WHERE w.`received_at` < DATE_SUB(?, INTERVAL ? DAY) ORDER BY w.`received_at`",
+                'types' => 'si',
+                'params' => $before($s['retention_message_days']),
+            ],
+        ];
+        if ($s['retention_customer_days'] > 0) {
+            $rules['unsubscribed_newsletter_emails'] = [
+                'ids' => "SELECT n.`id` AS k FROM `newsletter_subscribers` n
+                          WHERE n.`status` = 'unsubscribed' AND COALESCE(n.`unsubscribed_at`, n.`created_at`) < DATE_SUB(?, INTERVAL ? DAY)
+                          ORDER BY n.`id`",
+                'types' => 'si',
+                'params' => $before($s['retention_customer_days']),
+            ];
+        }
+        if ($s['retention_activity_days'] > 0) {
+            $rules['old_admin_activity'] = [
+                'ids' => "SELECT a.`id` AS k FROM `admin_audit_logs` a WHERE a.`created_at` < DATE_SUB(?, INTERVAL ? DAY) ORDER BY a.`created_at`",
+                'types' => 'si',
+                'params' => $before($s['retention_activity_days']),
+            ];
+            $rules['old_stock_history'] = [
+                'ids' => "SELECT l.`id` AS k FROM `inventory_logs` l WHERE l.`created_at` < DATE_SUB(?, INTERVAL ? DAY) ORDER BY l.`created_at`",
+                'types' => 'si',
+                'params' => $before($s['retention_activity_days']),
+            ];
+        }
+        $rules += [
+            'expired_sessions' => [
+                'ids' => "SELECT s.`id` AS k FROM `sessions` s WHERE s.`expires_at` < ? ORDER BY s.`expires_at`",
+                'types' => 's',
+                'params' => [$asOf],
+            ],
+            'used_or_expired_sign_in_links' => [
+                'ids' => "SELECT t.`id` AS k FROM `email_verification_tokens` t
+                          WHERE t.`expires_at` < DATE_SUB(?, INTERVAL 1 DAY) OR (t.`used_at` IS NOT NULL AND t.`used_at` < DATE_SUB(?, INTERVAL 1 DAY))
+                          ORDER BY t.`created_at`",
+                'types' => 'ss',
+                'params' => [$asOf, $asOf],
+            ],
+            // The longest rate-limit window is one hour; keep a day for safety.
+            'old_rate_limit_counters' => [
+                'ids' => "SELECT r.`id` AS k FROM `rate_limits` r WHERE r.`window_start` < UNIX_TIMESTAMP(?) - 86400 ORDER BY r.`window_start`",
+                'types' => 's',
+                'params' => [$asOf],
+            ],
+            'old_slow_request_records' => [
+                'ids' => "SELECT q.`id` AS k FROM `api_slow_requests` q WHERE q.`hour_start` < DATE_SUB(?, INTERVAL 30 DAY) ORDER BY q.`hour_start`",
+                'types' => 's',
+                'params' => [$asOf],
+            ],
+        ];
+        return $rules;
+    }
+
+    /**
+     * How each rule's records are shown to the admin (rows are fetched by `key`, as `k`).
+     *
+     * @return array<string, array{select: string, key: string, columns: list<array{key: string, label: string, type: string}>}>
+     */
+    private function display(): array
+    {
+        $col = static fn (string $key, string $label, string $type = 'text'): array => compact('key', 'label', 'type');
+        $name = "JSON_UNQUOTE(JSON_EXTRACT(o.`shipping_address_snapshot`, '$.full_name'))";
+
+        return [
+            'inactive_customer_accounts' => [
+                'select' => "SELECT u.`id` AS k, u.`full_name`, u.`email`, u.`created_at`, u.`last_seen_at`,
+                                    (SELECT COUNT(*) FROM `addresses` a WHERE a.`user_id` = u.`id`) AS addresses,
+                                    (SELECT COUNT(*) FROM `wishlists` w JOIN `wishlist_items` wi ON wi.`wishlist_id` = w.`id` WHERE w.`user_id` = u.`id`) AS wishlist_items,
+                                    (SELECT COUNT(*) FROM `carts` c JOIN `cart_items` ci ON ci.`cart_id` = c.`id` WHERE c.`user_id` = u.`id`) AS cart_items
+                             FROM `users` u",
+                'key' => 'u.`id`',
+                'columns' => [$col('full_name', 'Name'), $col('email', 'Email'), $col('created_at', 'Signed up', 'date'), $col('last_seen_at', 'Last seen', 'date'),
+                              $col('addresses', 'Saved addresses', 'number'), $col('cart_items', 'Cart items', 'number'), $col('wishlist_items', 'Wishlist items', 'number')],
+            ],
+            'inactive_customer_orders' => [
+                'select' => "SELECT o.`id` AS k, o.`order_number`, {$name} AS customer, COALESCE(u.`email`, o.`guest_email`) AS email,
+                                    o.`created_at`, o.`order_status`, o.`grand_total`
+                             FROM `orders` o LEFT JOIN `users` u ON u.`id` = o.`user_id`",
+                'key' => 'o.`id`',
+                'columns' => [$col('order_number', 'Order', 'code'), $col('customer', 'Customer'), $col('email', 'Email'), $col('created_at', 'Placed', 'date'),
+                              $col('order_status', 'Status'), $col('grand_total', 'Total (kept)', 'money')],
+            ],
+            'unpaid_cancelled_orders' => [
+                'select' => "SELECT o.`id` AS k, o.`order_number`, {$name} AS customer, o.`guest_email` AS email, o.`created_at`, o.`grand_total` FROM `orders` o",
+                'key' => 'o.`id`',
+                'columns' => [$col('order_number', 'Order', 'code'), $col('customer', 'Customer'), $col('email', 'Email'), $col('created_at', 'Placed', 'date'),
+                              $col('grand_total', 'Total (never paid)', 'money')],
+            ],
+            'abandoned_guest_carts' => [
+                'select' => "SELECT c.`id` AS k, CONCAT('Cart #', c.`id`) AS cart, (SELECT COUNT(*) FROM `cart_items` ci WHERE ci.`cart_id` = c.`id`) AS items, c.`updated_at` FROM `carts` c",
+                'key' => 'c.`id`',
+                'columns' => [$col('cart', 'Cart'), $col('items', 'Items', 'number'), $col('updated_at', 'Last used', 'date')],
+            ],
+            'old_emails' => [
+                'select' => "SELECT e.`id` AS k, e.`recipient_email`, e.`subject`, e.`status`, e.`created_at` FROM `email_outbox` e",
+                'key' => 'e.`id`',
+                'columns' => [$col('recipient_email', 'To'), $col('subject', 'Subject'), $col('status', 'Status'), $col('created_at', 'Created', 'date')],
+            ],
+            'old_gateway_notifications' => [
+                'select' => "SELECT w.`id` AS k, w.`provider`, w.`event_type`, w.`event_reference`, w.`processing_result`, w.`received_at` FROM `payment_webhook_events` w",
+                'key' => 'w.`id`',
+                'columns' => [$col('provider', 'Gateway'), $col('event_type', 'Event'), $col('event_reference', 'Reference', 'code'), $col('processing_result', 'Result'),
+                              $col('received_at', 'Received', 'date')],
+            ],
+            'unsubscribed_newsletter_emails' => [
+                'select' => "SELECT n.`id` AS k, n.`email`, n.`subscribed_at`, n.`unsubscribed_at` FROM `newsletter_subscribers` n",
+                'key' => 'n.`id`',
+                'columns' => [$col('email', 'Email'), $col('subscribed_at', 'Subscribed', 'date'), $col('unsubscribed_at', 'Unsubscribed', 'date')],
+            ],
+            'old_admin_activity' => [
+                'select' => "SELECT a.`id` AS k, a.`created_at`, COALESCE(u.`full_name`, 'System') AS admin, a.`action`,
+                                    TRIM(CONCAT(a.`entity_type`, ' ', COALESCE(a.`entity_id`, ''))) AS entity
+                             FROM `admin_audit_logs` a LEFT JOIN `users` u ON u.`id` = a.`admin_id`",
+                'key' => 'a.`id`',
+                'columns' => [$col('created_at', 'When', 'date'), $col('admin', 'Admin'), $col('action', 'Action', 'code'), $col('entity', 'Item')],
+            ],
+            'old_stock_history' => [
+                'select' => "SELECT l.`id` AS k, l.`created_at`, p.`name` AS product, l.`change_amount`, l.`reason`
+                             FROM `inventory_logs` l LEFT JOIN `products` p ON p.`id` = l.`product_id`",
+                'key' => 'l.`id`',
+                'columns' => [$col('created_at', 'When', 'date'), $col('product', 'Product'), $col('change_amount', 'Change', 'number'), $col('reason', 'Reason')],
+            ],
+            'expired_sessions' => [
+                'select' => "SELECT s.`id` AS k, COALESCE(u.`email`, 'Visitor (not signed in)') AS account, s.`ip_address`, s.`expires_at`
+                             FROM `sessions` s LEFT JOIN `users` u ON u.`id` = s.`user_id`",
+                'key' => 's.`id`',
+                'columns' => [$col('account', 'Account'), $col('ip_address', 'IP address', 'code'), $col('expires_at', 'Expired', 'date')],
+            ],
+            'used_or_expired_sign_in_links' => [
+                'select' => "SELECT t.`id` AS k, t.`email`, t.`type`, t.`created_at`, t.`used_at` FROM `email_verification_tokens` t",
+                'key' => 't.`id`',
+                'columns' => [$col('email', 'Email'), $col('type', 'Kind'), $col('created_at', 'Sent', 'date'), $col('used_at', 'Used', 'date')],
+            ],
+            'old_rate_limit_counters' => [
+                'select' => "SELECT r.`id` AS k, LEFT(r.`id`, 12) AS counter, r.`hits`, FROM_UNIXTIME(r.`window_start`) AS started FROM `rate_limits` r",
+                'key' => 'r.`id`',
+                'columns' => [$col('counter', 'Counter', 'code'), $col('hits', 'Requests counted', 'number'), $col('started', 'Started', 'date')],
+            ],
+            'old_slow_request_records' => [
+                'select' => "SELECT q.`id` AS k, q.`hour_start`, q.`method`, q.`route`, q.`hits`, q.`max_ms` FROM `api_slow_requests` q",
+                'key' => 'q.`id`',
+                'columns' => [$col('hour_start', 'Hour', 'date'), $col('method', 'Method', 'code'), $col('route', 'Request', 'code'), $col('hits', 'Times', 'number'),
+                              $col('max_ms', 'Slowest (ms)', 'number')],
+            ],
+        ];
+    }
+
+    /**
+     * Customers whose sign-up, last sign-in and order activity are all older than $days
+     * before $asOf and who have nothing open (unpaid, paid but not delivered, flagged, or a
+     * refund pending). Emails compare without regard to case (utf8mb4_unicode_ci).
+     *
+     * @return array<string, string> email => last activity, sorted by email
+     */
+    private function inactiveCustomers(string $asOf, int $days): array
     {
         $open = "(o.`order_status` IN (" . self::OPEN_ORDER_STATES . ") OR o.`requires_attention` = 1
                   OR EXISTS (SELECT 1 FROM `refunds` r WHERE r.`order_id` = o.`id` AND r.`status` = 'pending'))";
 
-        // Emails compare without regard to case (utf8mb4_unicode_ci).
-        $emails = array_column($this->db->fetchAll(
-            "SELECT t.`email` FROM (
-                 SELECT u.`email`, COALESCE(u.`last_seen_at`, u.`created_at`) AS `last_at`, 0 AS `open`
+        $rows = $this->db->fetchAll(
+            "SELECT MIN(t.`email`) AS email, MAX(t.`last_at`) AS last_at FROM (
+                 SELECT u.`email`, GREATEST(u.`created_at`, COALESCE(u.`last_seen_at`, u.`created_at`)) AS `last_at`, 0 AS `open`
                    FROM `users` u WHERE u.`role` = 'customer'
                  UNION ALL
                  SELECT o.`guest_email`, GREATEST(o.`created_at`, o.`updated_at`), {$open}
@@ -217,59 +534,55 @@ final class DatabaseCleanup
                    FROM `orders` o JOIN `users` u ON u.`id` = o.`user_id` WHERE o.`personal_data_removed_at` IS NULL
              ) t
              GROUP BY t.`email`
-             HAVING MAX(t.`last_at`) < DATE_SUB(NOW(), INTERVAL ? DAY) AND SUM(t.`open`) = 0",
-            'i',
-            [$days]
-        ), 'email');
+             HAVING MAX(t.`last_at`) < DATE_SUB(?, INTERVAL ? DAY) AND SUM(t.`open`) = 0
+             ORDER BY email",
+            'si',
+            [$asOf, $days]
+        );
+        return array_column($rows, 'last_at', 'email');
+    }
 
-        $counts = ['inactive_customers' => count($emails), 'inactive_customer_accounts' => 0, 'inactive_customer_orders' => 0];
+    /** @return array<string, mixed> */
+    private function customerSummary(string $email, ?string $lastActivity): array
+    {
+        $account = $this->db->fetchOne("SELECT `full_name` FROM `users` WHERE `role` = 'customer' AND `email` = ?", 's', [$email]);
+        $orders = $this->db->fetchOne(
+            "SELECT COUNT(*) AS c, MAX(JSON_UNQUOTE(JSON_EXTRACT(o.`shipping_address_snapshot`, '$.full_name'))) AS name
+             FROM `orders` o LEFT JOIN `users` u ON u.`id` = o.`user_id`
+             WHERE o.`personal_data_removed_at` IS NULL AND (o.`guest_email` = ? OR u.`email` = ?)",
+            'ss',
+            [$email, $email]
+        );
+        return [
+            'name' => $account['full_name'] ?? ($orders['name'] ?? null),
+            'email' => $email,
+            'last_activity' => $lastActivity,
+            'orders' => (int) ($orders['c'] ?? 0),
+            'account' => $account ? 'Yes (deleted)' : 'No (guest)',
+        ];
+    }
 
-        foreach (array_chunk($emails, 500) as $chunk) {
+    /** @return list<string> */
+    private function column(string $sql, string $types, array $params): array
+    {
+        return array_map('strval', array_column($this->db->fetchAll($sql, $types, $params), 'k'));
+    }
+
+    /**
+     * Run a query whose {in} placeholders take the email list, in chunks.
+     *
+     * @param list<string> $emails
+     * @return list<string>
+     */
+    private function columnForEmails(string $sql, array $emails): array
+    {
+        $out = [];
+        $uses = substr_count($sql, '{in}');
+        foreach (array_chunk($emails, self::CHUNK) as $chunk) {
             $in = implode(', ', array_fill(0, count($chunk), '?'));
-            $types = str_repeat('s', count($chunk));
-            $ordersOf = "FROM `orders` o LEFT JOIN `users` u ON u.`id` = o.`user_id`
-                         WHERE o.`personal_data_removed_at` IS NULL AND (o.`guest_email` IN ({$in}) OR u.`email` IN ({$in}))";
-
-            if ($dryRun) {
-                $counts['inactive_customer_accounts'] += (int) $this->db->fetchOne(
-                    "SELECT COUNT(*) AS c FROM `users` WHERE `role` = 'customer' AND `email` IN ({$in})",
-                    $types,
-                    $chunk
-                )['c'];
-                $counts['inactive_customer_orders'] += (int) $this->db->fetchOne("SELECT COUNT(*) AS c {$ordersOf}", $types . $types, [...$chunk, ...$chunk])['c'];
-                continue;
-            }
-
-            $this->db->transaction(function (Database $db) use ($in, $types, $chunk, &$counts): void {
-                // updated_at keeps its value: reports date orders by it.
-                $counts['inactive_customer_orders'] += $db->executeUpdate(
-                    "UPDATE `orders` o LEFT JOIN `users` u ON u.`id` = o.`user_id`
-                     SET o.`guest_email` = '',
-                         o.`guest_access_token_hash` = SHA2(CONCAT(o.`id`, '|', RAND(), '|', NOW(6)), 256),
-                         o.`shipping_address_snapshot` = JSON_OBJECT(
-                             'city', JSON_UNQUOTE(JSON_EXTRACT(o.`shipping_address_snapshot`, '$.city')),
-                             'state', JSON_UNQUOTE(JSON_EXTRACT(o.`shipping_address_snapshot`, '$.state')),
-                             'country', JSON_UNQUOTE(JSON_EXTRACT(o.`shipping_address_snapshot`, '$.country'))),
-                         o.`notes` = NULL,
-                         o.`idempotency_key` = NULL,
-                         o.`user_id` = NULL,
-                         o.`personal_data_removed_at` = NOW(),
-                         o.`updated_at` = o.`updated_at`
-                     WHERE o.`personal_data_removed_at` IS NULL AND (o.`guest_email` IN ({$in}) OR u.`email` IN ({$in}))",
-                    $types . $types,
-                    [...$chunk, ...$chunk]
-                );
-                $db->executeUpdate("UPDATE `reviews` SET `author_email` = NULL WHERE `author_email` IN ({$in})", $types, $chunk);
-                $db->executeUpdate("DELETE FROM `email_outbox` WHERE `status` IN ('sent', 'failed') AND `recipient_email` IN ({$in})", $types, $chunk);
-                // Sessions, sign-in links, addresses, carts and wishlists go with the account.
-                $counts['inactive_customer_accounts'] += $db->executeUpdate(
-                    "DELETE FROM `users` WHERE `role` = 'customer' AND `email` IN ({$in})",
-                    $types,
-                    $chunk
-                );
-            });
+            $params = array_merge(...array_fill(0, $uses, $chunk));
+            array_push($out, ...$this->column(str_replace('{in}', $in, $sql), str_repeat('s', count($params)), $params));
         }
-
-        return $counts;
+        return array_values(array_unique($out));
     }
 }

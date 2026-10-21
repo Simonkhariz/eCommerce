@@ -14,7 +14,8 @@ Things left for the store owner after the speed, scale and bug-fix work (commits
 - [x] **Broken pictures.** Done: every product, banner, category and style now has a WebP picture.
 - [ ] **Choose how long to keep customer records** in admin → Data & storage (off until you pick:
       3 months to 2 years; 1 year is a common choice). Customers with no sign-in and no order for
-      that long are then removed by the daily clean-up; order totals and payments are kept.
+      that long are then listed for your review; nothing is removed until you confirm a clean-up
+      with your password and an emailed code. Order totals and payments are always kept.
 - [x] **Merge.** Done: `main` already contains `mobile-responsive` and the earlier `shop-todos`
       branch (main is at 1c1b511). Restart the :3000 dev server once if it has been running since
       before the merge, so it picks up the self-hosted fonts.
@@ -23,8 +24,8 @@ Also still open from earlier work:
 
 - [ ] Live Kora / Monnify keys and webhooks
 - [ ] SMTP settings for real email
-- [ ] Schedule `expire_pending_orders`, `process_outbox` and `cleanup_database` (see `backend/README.md`).
-      `cleanup_database` also checks the database size and speed and emails you when it needs attention.
+- [ ] Schedule `expire_pending_orders`, `process_outbox` and `check_database` (see `backend/README.md`).
+      `check_database` deletes nothing: it emails you when the database is big or slow, or when old data waits for your review.
 - [ ] Site-content TODOs (about, contact, policies)
 
 ---
@@ -124,7 +125,7 @@ Apache runs PHP inside itself (mod_php), which does the same job as PHP-FPM.
      Secure login cookies need HTTPS.
    - In the server's `php.ini`, set `opcache.validate_timestamps=0`, then run
      `systemctl restart php8.2-fpm` after every deploy.
-5. Schedule `expire_pending_orders`, `process_outbox` and `cleanup_database` with cron.
+5. Schedule `expire_pending_orders`, `process_outbox` and `check_database` with cron.
 
 ### C. Shared hosting (cPanel)
 

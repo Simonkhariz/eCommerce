@@ -193,11 +193,16 @@ schtasks /Create /SC MINUTE /MO 5 /TN "ShopCo Send Email" /TR "C:\xampp\php\php.
 With `MAIL_MAILER=log` (the default) emails go to `backend/storage/logs/mail.log` and the admin outbox
 shows them as "Logged only". The admin Email outbox page also has "Send queued now".
 
-### Database clean-up and data retention
-Removes data the store no longer needs: expired sign-in sessions, used or expired sign-in links,
-old rate-limit counters, cancelled orders that were never paid and abandoned guest carts (after
-30 days), old sent emails and gateway notifications (180 days). How long each kind of data is
-kept is chosen in **admin → Data & storage**:
+### Data retention, database check and clean-up
+**Nothing is ever deleted automatically.** How long each kind of data is kept is chosen in
+**admin → Data & storage**; when records pass those periods (or the database nears the size
+limit the admin set), the admin is alerted and reviews the exact records there, page by page.
+A clean-up only runs when the admin presses the button, re-enters their password and types a
+6-digit code emailed to them (valid 10 minutes, 5 tries, once, same sign-in session). It
+removes exactly the records that were reviewed, or refuses if any changed. Every step is in the
+audit log, and all admins get an email when a clean-up has run.
+
+Keep periods:
 - **Customer records** (off until chosen; 3 months to 2 years): a customer with no sign-in and no
   order for that long, and nothing open, has their account, saved addresses, cart and wishlist
   deleted, and the name, phone, email and street address removed from their finished orders.
@@ -205,18 +210,19 @@ kept is chosen in **admin → Data & storage**:
 - **Unfinished checkouts** (7, 30 or 90 days), **emails and gateway notifications** (3, 6 or 12
   months; never longer than the customer-record period) and **admin activity / stock history**
   (kept unless a period is chosen).
+- Expired sign-in sessions and links, old rate-limit counters and old slow-request records are
+  listed too (technical rows, no customer data).
 
 Money records (order totals and items, payments, refunds) and orders flagged for attention are
-never removed. After each run the script checks the database size against the admin's limit,
-slow requests (`SLOW_REQUEST_MS`) and whether the clean-up is running, and emails the admins
+never removed. The daily check (removes nothing) looks at the database size against the admin's
+limit, slow requests (`SLOW_REQUEST_MS`) and records past the keep periods, and emails the admins
 (at most once a week) when something needs attention. The same check feeds the admin alert bell.
 ```bash
-php backend/scripts/cleanup_database.php --dry-run   # only count what would be removed
-php backend/scripts/cleanup_database.php
+php backend/scripts/check_database.php
 ```
 Windows Task Scheduler (daily at 03:00):
 ```powershell
-schtasks /Create /SC DAILY /ST 03:00 /TN "ShopCo Cleanup" /TR "C:\xampp\php\php.exe C:\path\to\E-commerce\backend\scripts\cleanup_database.php"
+schtasks /Create /SC DAILY /ST 03:00 /TN "ShopCo Database Check" /TR "C:\xampp\php\php.exe C:\path\to\E-commerce\backend\scripts\check_database.php"
 ```
 
 ### Admin panel

@@ -239,6 +239,8 @@ $router->get('/api/v1/admin/system-status', [AdminOperationsController::class, '
 
 $router->get('/api/v1/admin/data', [AdminDataController::class, 'overview'], $adminGuard);
 $router->get('/api/v1/admin/data/alert', [AdminDataController::class, 'alert'], $adminGuard);
+$router->get('/api/v1/admin/data/records', [AdminDataController::class, 'records'], $adminGuard);
+$router->post('/api/v1/admin/data/cleanup/verify', [AdminDataController::class, 'verify'], $adminGuard);
 $router->put('/api/v1/admin/data/settings', [AdminDataController::class, 'updateSettings'], $adminGuard);
 $router->post('/api/v1/admin/data/cleanup', [AdminDataController::class, 'runCleanup'], $adminGuard);
 

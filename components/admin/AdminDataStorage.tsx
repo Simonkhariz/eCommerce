@@ -1,33 +1,41 @@
 'use client';
 
 import React, { useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { Eye, RefreshCw, ShieldCheck } from 'lucide-react';
 import {
+  type CleanupChallenge,
   type DataOverview,
+  type DataRecordColumn,
   type DataSettingKey,
   type DataSettings,
   type HealthLevel,
   type StorageHealthReport,
   adminGetDataOverview,
+  adminGetDataRecords,
   adminRunCleanup,
   adminUpdateDataSettings,
+  adminVerifyCleanup,
   errorMessage,
   fieldErrors,
 } from '@/lib/admin-api';
-import { formatDateTime } from '@/lib/admin-format';
+import { ApiError } from '@/lib/api-client';
+import { formatDateTime, humanize } from '@/lib/admin-format';
+import { formatPrice } from '@/lib/currency';
 import {
   Button,
   DataState,
   Field,
+  Modal,
   Notice,
   PageHeader,
+  Pagination,
   Panel,
   Select,
   StatusPill,
   Table,
+  TextInput,
   redirectIfSignedOut,
   useAdminData,
-  useConfirm,
   useToast,
 } from '@/components/admin/ui';
 
@@ -37,17 +45,17 @@ const LEVEL_PILL: Record<HealthLevel, { label: string; tone: 'green' | 'amber' |
   critical: { label: 'Problem', tone: 'red' },
 };
 
-/** The retention settings in the order shown, with what each one does. */
+/** The keep-period settings in the order shown, with what each one does. */
 const SETTINGS: Array<{ key: DataSettingKey; label: string; keep?: string; hint: React.ReactNode }> = [
   {
     key: 'retention_customer_days',
     label: 'Customer records',
-    keep: 'Keep (never remove)',
+    keep: 'Keep (never list for removal)',
     hint: (
       <>
-        A customer with no sign-in and no order for this long has their account, saved addresses, cart and wishlist deleted, and their name, phone,
-        email and street address removed from their finished orders. Anyone with an unpaid, undelivered or flagged order, or a refund in progress, is
-        skipped.
+        A customer with no sign-in and no order for this long is listed for your review. If you confirm, their account, saved addresses, cart and
+        wishlist are deleted, and their name, phone, email and street address are removed from their finished orders. Anyone with an unpaid,
+        undelivered or flagged order, or a refund in progress, is never listed.
       </>
     ),
   },
@@ -69,8 +77,8 @@ const SETTINGS: Array<{ key: DataSettingKey; label: string; keep?: string; hint:
   },
   {
     key: 'storage_alert_mb',
-    label: 'Warn me when the database is bigger than',
-    hint: 'You get a warning in the admin bell at 80% of this and an email from the daily check. Set it to what your hosting plan allows.',
+    label: 'Alert me when the database is bigger than',
+    hint: 'You get a warning in the admin bell from 80% of this, and an email from the daily check. Set it to what your hosting plan allows.',
   },
 ];
 
@@ -120,9 +128,15 @@ function daysAgo(days: number | null): string {
   return days === 1 ? 'Yesterday' : `${days} days ago`;
 }
 
+/** Records (not people) a clean-up would remove. */
+function recordTotal(counts: Record<string, number>): number {
+  return Object.entries(counts).reduce((sum, [key, n]) => (key === 'inactive_customers' ? sum : sum + n), 0);
+}
+
 /**
- * Admin → Data & storage: how long customer data and logs are kept, database size and speed
- * (with the problems behind the alert bell), and a clean-up the admin can run by hand.
+ * Admin → Data & storage: keep periods, database size and speed, and the exact records that
+ * are past their keep period. Nothing is removed automatically: the admin reviews the records
+ * and confirms a clean-up with their password and a code emailed to them.
  */
 export function AdminDataStorage() {
   const { data, loading, error, reload } = useAdminData<DataOverview>(() => adminGetDataOverview(), []);
@@ -131,7 +145,7 @@ export function AdminDataStorage() {
     <div className="flex w-full flex-col gap-4">
       <PageHeader
         title="Data & storage"
-        description="How long customer data is kept, how big and fast the database is, and clean-ups."
+        description="How long data is kept, how big and fast the database is, and old data waiting for your review."
         actions={
           <Button onClick={reload} loading={loading && !!data}>
             <RefreshCw className="size-3.5" aria-hidden="true" />
@@ -143,10 +157,8 @@ export function AdminDataStorage() {
         {data && (
           <div className="flex flex-col gap-4">
             <HealthPanel health={data.health} />
-            <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-              <RetentionPanel data={data} onSaved={reload} />
-              <CleanupPanel data={data} onDone={reload} />
-            </div>
+            <ReviewPanel data={data} onChanged={reload} />
+            <RetentionPanel data={data} onSaved={reload} />
             <div className="grid items-start gap-4 xl:grid-cols-2">
               <TablesPanel health={data.health} />
               <SlowPanel health={data.health} />
@@ -227,16 +239,332 @@ function HealthPanel({ health }: { health: StorageHealthReport }) {
         <Stat
           label="Last clean-up"
           value={daysAgo(health.cleanup.days_since)}
-          sub={lastRun ? `${formatDateTime(lastRun.at)} · ${lastRun.source === 'admin' ? 'run by an admin' : 'scheduled'}` : 'the daily task is not set up yet'}
+          sub={lastRun ? `${formatDateTime(lastRun.at)}${lastRun.by ? ` · by ${lastRun.by}` : ''}` : 'nothing has been removed yet'}
         />
       </div>
     </Panel>
   );
 }
 
+function ReviewPanel({ data, onChanged }: { data: DataOverview; onChanged: () => void }) {
+  const [viewing, setViewing] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const due = data.health.cleanup.due;
+  const asOf = data.health.as_of;
+  const order = Object.keys(data.labels);
+  const rows = Object.entries(due)
+    .filter(([, count]) => count > 0)
+    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b));
+  const records = rows.filter(([key]) => !data.housekeeping.includes(key));
+  const technical = rows.filter(([key]) => data.housekeeping.includes(key));
+  const total = recordTotal(due);
+
+  const group = (title: string, items: Array<[string, number]>, hint?: string) =>
+    items.length > 0 && (
+      <div>
+        <p className="border-b border-[#f3f4f6] bg-[#f9fafb] px-4 py-2 text-xs font-semibold text-[#6b7280]">
+          {title}
+          {hint && <span className="font-normal"> · {hint}</span>}
+        </p>
+        <ul className="divide-y divide-[#f3f4f6]">
+          {items.map(([key, count]) => (
+            <li
+              key={key}
+              className={`flex items-center justify-between gap-3 px-4 py-2 text-[13px] ${key === 'inactive_customers' ? 'bg-amber-50/60' : ''}`}
+            >
+              <span className={key.startsWith('inactive_customer_') ? 'pl-3 text-[#374151]' : 'font-medium text-[#111827]'}>{data.labels[key] ?? key}</span>
+              <span className="flex items-center gap-3">
+                <span className="font-semibold tabular-nums text-[#111827]">{count.toLocaleString()}</span>
+                <Button size="sm" variant="ghost" onClick={() => setViewing(key)} aria-label={`View ${data.labels[key] ?? key}`}>
+                  <Eye className="size-3.5" aria-hidden="true" />
+                  View
+                </Button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+
+  return (
+    <Panel
+      title="Waiting for your review"
+      actions={<span className="text-xs text-[#6b7280]">as of {formatDateTime(asOf)}</span>}
+      bodyClassName="p-0"
+    >
+      <div className="border-b border-[#f3f4f6] px-4 py-3">
+        <Notice>
+          Nothing is ever removed automatically. These records are past the keep periods below. Open each list to see exactly what would go; only
+          you can remove them, with your password and a code sent to your email. Order totals, payments and refunds are always kept.
+        </Notice>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-4 py-4 text-[13px] text-[#6b7280]">Nothing to review: everything is within your keep periods.</p>
+      ) : (
+        <>
+          {group('Customer and business data', records)}
+          {group('Technical records', technical, 'no customer data')}
+        </>
+      )}
+      <div className="flex flex-wrap items-center gap-3 border-t border-[#f3f4f6] px-4 py-3">
+        <Button variant="danger" onClick={() => setConfirming(true)} disabled={total === 0}>
+          <ShieldCheck className="size-3.5" aria-hidden="true" />
+          Clean up {total > 0 ? `${total.toLocaleString()} records` : ''}…
+        </Button>
+        <p className="text-xs text-[#6b7280]">You&apos;ll be asked for your password and a one-time code from your email.</p>
+      </div>
+
+      {viewing && <RecordsDialog rule={viewing} label={data.labels[viewing] ?? viewing} asOf={asOf} onClose={() => setViewing(null)} />}
+      {confirming && (
+        <CleanupDialog
+          data={data}
+          onClose={() => setConfirming(false)}
+          onDone={() => {
+            setConfirming(false);
+            onChanged();
+          }}
+        />
+      )}
+    </Panel>
+  );
+}
+
+function cellValue(column: DataRecordColumn, value: string | number | null): React.ReactNode {
+  if (value === null || value === '') return <span className="text-[#9ca3af]">—</span>;
+  switch (column.type) {
+    case 'date':
+      return formatDateTime(String(value));
+    case 'money':
+      return formatPrice(Number(value));
+    case 'number':
+      return Number(value).toLocaleString();
+    case 'code':
+      return <span className="font-mono text-xs">{String(value)}</span>;
+    default:
+      return column.key === 'order_status' || column.key === 'status' || column.key === 'type' ? humanize(String(value)) : String(value);
+  }
+}
+
+/** The exact records one rule would remove, page by page. */
+function RecordsDialog({ rule, label, asOf, onClose }: { rule: string; label: string; asOf: string; onClose: () => void }) {
+  const [page, setPage] = useState(1);
+  const { data, loading, error, reload } = useAdminData(() => adminGetDataRecords(rule, asOf, page), [rule, asOf, page]);
+  const right = (c: DataRecordColumn) => c.type === 'money' || c.type === 'number';
+
+  return (
+    <Modal open onClose={onClose} title={label} description={`What a clean-up would remove, as of ${formatDateTime(asOf)}.`} size="lg">
+      <DataState loading={loading} error={error} onRetry={reload} hasData={!!data} empty={!!data && data.items.length === 0} emptyTitle="Nothing here any more">
+        {data && (
+          <div className="-mx-5 -my-4">
+            <Table minWidth={Math.max(420, data.columns.length * 130)}>
+              <thead>
+                <tr>
+                  {data.columns.map((c) => (
+                    <th key={c.key} scope="col" className={right(c) ? 'text-right' : ''}>
+                      {c.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((item, i) => (
+                  <tr key={i}>
+                    {data.columns.map((c) => (
+                      <td key={c.key} className={right(c) ? 'text-right tabular-nums' : ''}>
+                        {cellValue(c, item[c.key] ?? null)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            <Pagination meta={data.pagination} onPage={setPage} />
+          </div>
+        )}
+      </DataState>
+    </Modal>
+  );
+}
+
+/**
+ * Two-step confirmation: the admin's password, then the 6-digit code emailed to them.
+ * The server removes exactly the records reviewed as of the page's time, or refuses.
+ */
+function CleanupDialog({ data, onClose, onDone }: { data: DataOverview; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [challenge, setChallenge] = useState<CleanupChallenge | null>(null);
+  const [errors, setErrors] = useState<{ password?: string; code?: string; form?: string }>({});
+  const [busy, setBusy] = useState(false);
+  const due = data.health.cleanup.due;
+  const customers = due.inactive_customers ?? 0;
+  const total = recordTotal(due);
+
+  const fail = (err: unknown, field: 'password' | 'code') => {
+    if (redirectIfSignedOut(err)) return;
+    // The records changed, or the review is over 30 minutes old: show the current list.
+    if (err instanceof ApiError && (err.statusCode === 409 || err.errorCode === 'REVIEW_EXPIRED')) {
+      toast.error(errorMessage(err));
+      onDone();
+      return;
+    }
+    if (err instanceof ApiError && err.statusCode === 410) {
+      // Expired, used or too many wrong codes: start again from the password.
+      setChallenge(null);
+      setCode('');
+      setPassword('');
+      setErrors({ form: errorMessage(err) });
+      return;
+    }
+    const fields = fieldErrors(err);
+    setErrors(fields[field] ? { [field]: errorMessage(err) } : { form: errorMessage(err) });
+  };
+
+  const sendCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!password) {
+      setErrors({ password: 'Enter your admin password.' });
+      return;
+    }
+    setBusy(true);
+    setErrors({});
+    try {
+      setChallenge(await adminVerifyCleanup(password, data.health.as_of));
+      setPassword('');
+    } catch (err) {
+      fail(err, 'password');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!challenge || code.length !== 6) return;
+    setBusy(true);
+    setErrors({});
+    try {
+      const { removed } = await adminRunCleanup(challenge.confirmation_id, code);
+      toast.success(`Clean-up finished: ${recordTotal(removed).toLocaleString()} old records removed. All admins have been emailed.`);
+      onDone();
+    } catch (err) {
+      fail(err, 'code');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const summary = (
+    <ul className="divide-y divide-[#f3f4f6] rounded-lg border border-[#e5e7eb] text-[13px]">
+      {Object.entries(due)
+        .filter(([, n]) => n > 0)
+        .map(([key, n]) => (
+          <li key={key} className="flex justify-between gap-3 px-3 py-1.5">
+            <span className="text-[#374151]">{data.labels[key] ?? key}</span>
+            <span className="font-semibold tabular-nums">{n.toLocaleString()}</span>
+          </li>
+        ))}
+    </ul>
+  );
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      busy={busy}
+      title={challenge ? 'Enter the code from your email' : 'Confirm it’s you'}
+      description={
+        challenge
+          ? undefined
+          : `${total.toLocaleString()} records you reviewed (as of ${formatDateTime(data.health.as_of)}) will be permanently removed.`
+      }
+      footer={
+        <>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          {challenge ? (
+            <Button type="submit" form="cleanup-code" variant="danger" loading={busy} disabled={code.length !== 6}>
+              Delete permanently
+            </Button>
+          ) : (
+            <Button type="submit" form="cleanup-password" variant="primary" loading={busy}>
+              Send code to my email
+            </Button>
+          )}
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        {errors.form && <Notice tone="danger">{errors.form}</Notice>}
+        {!challenge ? (
+          <form id="cleanup-password" onSubmit={sendCode} className="flex flex-col gap-4" noValidate>
+            {summary}
+            <Notice tone="warning">
+              This can&apos;t be undone.
+              {customers > 0 && ` ${customers.toLocaleString()} inactive ${customers === 1 ? 'customer loses their' : 'customers lose their'} account and personal details.`}{' '}
+              Order totals, payments and refunds are kept.
+            </Notice>
+            <Field label="Your admin password" error={errors.password} required>
+              {(p) => (
+                <TextInput
+                  {...p}
+                  data-autofocus
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              )}
+            </Field>
+          </form>
+        ) : (
+          <form id="cleanup-code" onSubmit={confirm} className="flex flex-col gap-4" noValidate>
+            <p className="text-[13px] leading-relaxed text-[#374151]">
+              We emailed a 6-digit code to <strong>{challenge.sent_to}</strong>. It works once, until {formatDateTime(challenge.expires_at)}.
+            </p>
+            {challenge.mail_mode === 'log_only' && (
+              <Notice>
+                Email is in log-only mode on this server, so the code is in <code className="font-mono text-xs">backend/storage/logs/mail.log</code>.
+              </Notice>
+            )}
+            <Field label="Code" error={errors.code} required>
+              {(p) => (
+                <TextInput
+                  {...p}
+                  data-autofocus
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="font-mono text-lg tracking-[0.4em]"
+                />
+              )}
+            </Field>
+            {summary}
+            <button
+              type="button"
+              className="self-start text-xs font-semibold text-[#111827] underline-offset-2 hover:underline disabled:opacity-50"
+              disabled={busy}
+              onClick={() => {
+                setChallenge(null);
+                setCode('');
+                setErrors({});
+              }}
+            >
+              Didn&apos;t get it? Send a new code
+            </button>
+          </form>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function RetentionPanel({ data, onSaved }: { data: DataOverview; onSaved: () => void }) {
   const toast = useToast();
-  const confirm = useConfirm();
   const [values, setValues] = useState<DataSettings>(data.settings);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -249,29 +577,10 @@ function RetentionPanel({ data, onSaved }: { data: DataOverview; onSaved: () => 
   }
 
   const changed = SETTINGS.map((s) => s.key).filter((key) => values[key] !== data.settings[key]);
-  const shorterCustomerPeriod =
-    values.retention_customer_days > 0 &&
-    (data.settings.retention_customer_days === 0 || values.retention_customer_days < data.settings.retention_customer_days);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (changed.length === 0) return;
-    if (shorterCustomerPeriod) {
-      const period = optionLabel('retention_customer_days', values.retention_customer_days);
-      const ok = await confirm({
-        title: `Remove customers inactive for ${period}?`,
-        message: (
-          <>
-            From the next clean-up (daily, or when you press “Clean up now”), customers with no sign-in and no order for {period} lose their account
-            and the personal details on their orders. This can&apos;t be undone. Order totals and payments are kept.
-          </>
-        ),
-        confirmLabel: 'Save',
-        tone: 'danger',
-      });
-      if (!ok) return;
-    }
-
     const payload: Partial<DataSettings> = {};
     changed.forEach((key) => {
       payload[key] = values[key];
@@ -280,7 +589,7 @@ function RetentionPanel({ data, onSaved }: { data: DataOverview; onSaved: () => 
     setErrors({});
     try {
       await adminUpdateDataSettings(payload);
-      toast.success('Data settings saved.');
+      toast.success('Saved. Records past the new periods are listed for your review; nothing was removed.');
       onSaved();
     } catch (err) {
       if (redirectIfSignedOut(err)) return;
@@ -297,8 +606,8 @@ function RetentionPanel({ data, onSaved }: { data: DataOverview; onSaved: () => 
       <form onSubmit={save} className="flex flex-col gap-4" noValidate>
         {data.settings.retention_customer_days === 0 && (
           <Notice>
-            Customer records are kept for ever at the moment. Choose a period so personal data of people who stopped shopping with you isn&apos;t
-            kept longer than needed (the Nigeria Data Protection Act asks for this). 1 year is a common choice.
+            Customer records are kept for ever at the moment. Choose a period so you are alerted about personal data of people who stopped
+            shopping with you (the Nigeria Data Protection Act asks you not to keep it longer than needed). 1 year is a common choice.
           </Notice>
         )}
         <div className="grid gap-4 sm:grid-cols-2">
@@ -317,8 +626,9 @@ function RetentionPanel({ data, onSaved }: { data: DataOverview; onSaved: () => 
           ))}
         </div>
         <p className="text-xs leading-relaxed text-[#6b7280]">
-          Never removed: order totals and items, payments and refunds (tax rules require you to keep business records for six years), orders that need
-          your attention, and active newsletter subscriptions.
+          Saving never removes anything: records past these periods are listed above for your review. Never removed at all: order totals and items,
+          payments and refunds (tax rules require you to keep business records for six years), orders that need your attention, and active
+          newsletter subscriptions.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <Button type="submit" variant="primary" loading={saving} disabled={changed.length === 0}>
@@ -338,87 +648,6 @@ function RetentionPanel({ data, onSaved }: { data: DataOverview; onSaved: () => 
           )}
         </div>
       </form>
-    </Panel>
-  );
-}
-
-function CleanupPanel({ data, onDone }: { data: DataOverview; onDone: () => void }) {
-  const toast = useToast();
-  const confirm = useConfirm();
-  const [running, setRunning] = useState(false);
-  const waiting = data.health.cleanup.waiting ?? {};
-  // In the order of the labels, so the customer rows stay together under their heading row.
-  const order = Object.keys(data.labels);
-  const rows = Object.entries(waiting)
-    .filter(([key, count]) => count > 0 && key !== 'inactive_customers')
-    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b));
-  const customers = waiting.inactive_customers ?? 0;
-  const total = rows.reduce((sum, [, count]) => sum + count, 0);
-
-  const run = async () => {
-    const ok = await confirm({
-      title: 'Clean up now?',
-      message: (
-        <>
-          {total.toLocaleString()} old {total === 1 ? 'record is' : 'records are'} removed for good
-          {customers > 0 && (
-            <>
-              , including the personal details of <strong>{customers.toLocaleString()} inactive {customers === 1 ? 'customer' : 'customers'}</strong>
-            </>
-          )}
-          . This can&apos;t be undone.
-        </>
-      ),
-      confirmLabel: 'Clean up',
-      tone: 'danger',
-    });
-    if (!ok) return;
-    setRunning(true);
-    try {
-      const { removed } = await adminRunCleanup(customers);
-      const count = Object.entries(removed)
-        .filter(([key]) => key !== 'inactive_customers')
-        .reduce((sum, [, n]) => sum + n, 0);
-      toast.success(count > 0 ? `Clean-up finished: ${count.toLocaleString()} old records removed.` : 'Clean-up finished: nothing to remove.');
-      onDone();
-    } catch (err) {
-      if (redirectIfSignedOut(err)) return;
-      toast.error(errorMessage(err, 'The clean-up could not run.'));
-      onDone();
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  return (
-    <Panel title="Clean up now" bodyClassName="p-0">
-      {rows.length === 0 ? (
-        <p className="px-4 py-4 text-[13px] text-[#6b7280]">Nothing to clean up right now: everything is within your keep periods.</p>
-      ) : (
-        <ul className="divide-y divide-[#f3f4f6]">
-          {customers > 0 && (
-            <li className="flex items-center justify-between gap-3 bg-amber-50/60 px-4 py-2.5 text-[13px]">
-              <span className="font-medium text-[#111827]">{data.labels.inactive_customers}</span>
-              <span className="font-semibold tabular-nums text-[#111827]">{customers.toLocaleString()}</span>
-            </li>
-          )}
-          {rows.map(([key, count]) => (
-            <li key={key} className="flex items-center justify-between gap-3 px-4 py-2.5 text-[13px]">
-              <span className="text-[#374151]">{data.labels[key] ?? key}</span>
-              <span className="font-semibold tabular-nums text-[#111827]">{count.toLocaleString()}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="flex flex-col gap-3 border-t border-[#f3f4f6] px-4 py-3">
-        <Button variant="danger" onClick={run} loading={running} disabled={rows.length === 0} className="self-start">
-          Clean up now
-        </Button>
-        <p className="text-xs leading-relaxed text-[#6b7280]">
-          Runs by itself every day once <code className="font-mono">backend/scripts/cleanup_database.php</code> is scheduled (Task Scheduler or cron, see
-          backend/README.md). The daily run also emails you when the database needs attention.
-        </p>
-      </div>
     </Panel>
   );
 }

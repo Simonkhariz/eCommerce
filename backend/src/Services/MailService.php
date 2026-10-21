@@ -125,16 +125,9 @@ class MailService
         $data = $payload['data'];
         $data['claimed_at'] = $claimedAt;
 
-        $recipients = array_column($this->db->fetchAll(
-            "SELECT `email` FROM `users` WHERE `role` IN ('admin', 'super_admin') AND `status` = 'active'"
-        ), 'email');
-        if ($recipients === []) {
-            $contact = $this->db->fetchOne("SELECT `value` FROM `store_settings` WHERE `key_name` = 'store_contact_email'");
-            $recipients = [trim((string) ($contact['value'] ?? ''))];
-        }
 
         $queued = 0;
-        foreach (array_unique(array_map('strtolower', $recipients)) as $email) {
+        foreach ($this->adminRecipients() as $email) {
             if ($this->queue($email, 'payment_claimed', $data, "payment_claimed:{$data['order_number']}:{$email}")) {
                 $queued++;
             }
@@ -150,6 +143,25 @@ class MailService
      */
     public function sendStorageAlertToAdmins(array $report): int
     {
+
+        $data = ['level' => (string) $report['level'], 'issues' => $report['issues']];
+        $week = date('o-\WW');
+        $queued = 0;
+        foreach ($this->adminRecipients() as $email) {
+            if ($this->queue($email, 'storage_alert', $data, "storage_alert:{$data['level']}:{$week}:{$email}")) {
+                $queued++;
+            }
+        }
+        return $queued;
+    }
+
+    /**
+     * Active admin accounts, or the store contact email when there are none.
+     *
+     * @return list<string>
+     */
+    private function adminRecipients(): array
+    {
         $recipients = array_column($this->db->fetchAll(
             "SELECT `email` FROM `users` WHERE `role` IN ('admin', 'super_admin') AND `status` = 'active'"
         ), 'email');
@@ -157,16 +169,7 @@ class MailService
             $contact = $this->db->fetchOne("SELECT `value` FROM `store_settings` WHERE `key_name` = 'store_contact_email'");
             $recipients = [trim((string) ($contact['value'] ?? ''))];
         }
-
-        $data = ['level' => (string) $report['level'], 'issues' => $report['issues']];
-        $week = date('o-\WW');
-        $queued = 0;
-        foreach (array_unique(array_map('strtolower', $recipients)) as $email) {
-            if ($this->queue($email, 'storage_alert', $data, "storage_alert:{$data['level']}:{$week}:{$email}")) {
-                $queued++;
-            }
-        }
-        return $queued;
+        return array_values(array_unique(array_map('strtolower', $recipients)));
     }
 
     public function sendShipmentTracking(array $order, array $shipment): bool
@@ -259,6 +262,64 @@ class MailService
         }
 
         return $ok;
+    }
+
+    /**
+     * The one-time code an admin types to confirm a data clean-up. Delivered immediately like
+     * a sign-in link; the code itself is never stored (the outbox row only records the send).
+     *
+     * @param array<string, int> $summary label => number of records
+     */
+    public function sendAdminConfirmCode(string $email, string $name, string $code, string $confirmationId, array $summary, string $expiresAt): bool
+    {
+        $email = strtolower(trim($email));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return false;
+        }
+
+        $templates = $this->templates();
+        $rendered = $templates->render('admin_confirm_code', ['name' => $name, 'code' => $code, 'summary' => $summary, 'expires_at' => $expiresAt]);
+        [$ok, $transport, $error] = $this->transmit($email, $rendered, $templates->storeName(), 'admin_confirm_code');
+
+        try {
+            $this->db->insert(
+                "INSERT INTO `email_outbox` (`recipient_email`, `subject`, `template`, `dedup_key`, `payload`, `status`, `transport`, `attempt_count`, `last_error`, `sent_at`)
+                 VALUES (?, ?, 'admin_confirm_code', ?, ?, ?, ?, 1, ?, ?)",
+                'ssssssss',
+                [
+                    $email,
+                    $rendered['subject'],
+                    'admin_confirm:' . $confirmationId,
+                    json_encode(['v' => MailTemplates::VERSION, 'summary' => $summary]),
+                    $ok ? 'sent' : 'failed',
+                    $transport,
+                    $error,
+                    $ok ? date('Y-m-d H:i:s') : null,
+                ]
+            );
+        } catch (Throwable $e) {
+            error_log('[MailService] Could not record confirmation email: ' . $e->getMessage());
+        }
+
+        return $ok;
+    }
+
+    /**
+     * Tell every admin that a data clean-up ran (who, when, from where, what was removed).
+     *
+     * @param array<string, int> $removed label => number of records
+     * @return int Number of emails queued
+     */
+    public function sendCleanupDoneToAdmins(string $adminName, string $ip, array $removed): int
+    {
+        $data = ['admin_name' => $adminName, 'ip' => $ip, 'at' => date('Y-m-d H:i:s'), 'removed' => $removed];
+        $queued = 0;
+        foreach ($this->adminRecipients() as $email) {
+            if ($this->queue($email, 'data_cleanup_done', $data, null)) {
+                $queued++;
+            }
+        }
+        return $queued;
     }
 
     // =========================================================================
@@ -425,6 +486,9 @@ class MailService
         }
         if ($row['template'] === 'magic_link' || $row['template'] === 'account_verification') {
             return ['ok' => false, 'message' => 'Sign-in links cannot be re-sent. Ask the customer to request a new link.'];
+        }
+        if ($row['template'] === 'admin_confirm_code') {
+            return ['ok' => false, 'message' => 'Confirmation codes cannot be re-sent. Start the clean-up again to get a new code.'];
         }
         $payload = json_decode((string) $row['payload'], true);
         if (!is_array($payload) || (int) ($payload['v'] ?? 0) !== MailTemplates::VERSION || !in_array($row['template'], MailTemplates::RENDERABLE, true)) {

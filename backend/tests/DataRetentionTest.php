@@ -3,9 +3,10 @@
 declare(strict_types=1);
 
 /**
- * Data retention (admin → Data & storage): inactive customers lose their account and the
- * personal details on their orders, money records stay; storage health and the slow-request
- * log; the admin endpoints.
+ * Data retention (admin → Data & storage): records past the keep periods are only listed;
+ * nothing is removed until an admin reviews them and confirms with their password and an
+ * emailed code. Inactive customers lose their account and the personal details on their
+ * orders, money records stay. Also the daily check, storage health and the slow-request log.
  *
  *   php backend/tests/run.php DataRetention
  */
@@ -89,8 +90,21 @@ $order = static function (string $email, string $status, int $daysAgo, ?int $use
     return $oid;
 };
 
+/** An old payment notification: a quick way to have something past its keep period. */
+$oldNotification = static function () use ($t): int {
+    $id = (int) $t->db->insert(
+        "INSERT INTO `payment_webhook_events` (`provider`, `event_reference`, `event_type`, `processing_result`, `received_at`)
+         VALUES ('kora', ?, 'charge.success', 'processed', DATE_SUB(NOW(), INTERVAL 400 DAY))",
+        's',
+        ['RET-EVT-' . bin2hex(random_bytes(5))]
+    );
+    $t->cleanup(fn () => $t->sql("DELETE FROM `payment_webhook_events` WHERE `id` = ?", 'i', [$id]));
+    return $id;
+};
+
 $row = static fn (int $id): ?array => $t->db->fetchOne("SELECT * FROM `orders` WHERE `id` = ?", 'i', [$id]);
 $userExists = static fn (int $id): bool => (int) $t->scalar("SELECT COUNT(*) FROM `users` WHERE `id` = ?", 'i', [$id]) === 1;
+$now = static fn (): string => date('Y-m-d H:i:s');
 
 // -----------------------------------------------------------------------------
 $t->section('Settings');
@@ -131,18 +145,61 @@ $orders = [
 $t->ok('test orders placed', !in_array(null, $orders, true));
 $t->sql("UPDATE `orders` SET `requires_attention` = 1, `attention_reason` = 'test', `updated_at` = `updated_at` WHERE `id` = ?", 'i', [$orders['flaggedOld']]);
 $before = $row($orders['guestOld']);
-
-// -----------------------------------------------------------------------------
-$t->section('Preview');
 $setting('retention_customer_days', '90');
-$preview = $cleanup->run(true);
-$t->ok('preview counts at least the two inactive customers', ($preview['inactive_customers'] ?? 0) >= 2, json_encode($preview));
-$t->ok('preview counts the account', ($preview['inactive_customer_accounts'] ?? 0) >= 1);
-$t->ok('preview changes nothing', $userExists($acctOldId) && $row($orders['guestOld'])['guest_email'] === $guestOld);
 
 // -----------------------------------------------------------------------------
-$t->section('Clean-up');
-$removed = $cleanup->run(false, 'admin');
+$t->section('Review lists exactly what would go');
+$asOf = $now();
+$snap = $cleanup->snapshot($asOf);
+$people = $snap['ids']['inactive_customers'] ?? [];
+$orderIds = $snap['ids']['inactive_customer_orders'] ?? [];
+$t->ok('inactive guest listed', in_array($guestOld, $people, true));
+$t->ok('unused account listed', in_array($acctOld, $people, true) && in_array((string) $acctOldId, $snap['ids']['inactive_customer_accounts'] ?? [], true));
+$t->ok('their orders listed', in_array((string) $orders['guestOld'], $orderIds, true) && in_array((string) $orders['acctOld'], $orderIds, true));
+foreach (['returning' => $returning, 'shipped' => $shippedOld, 'active' => $activeAcct, 'flagged' => $flaggedOld, 'admin' => $adminOld] as $who => $email) {
+    $t->ok("{$who} customer not listed", !in_array($email, $people, true));
+}
+$t->check('counts match the lists', count($people), $snap['counts']['inactive_customers']);
+
+$page = $cleanup->records('inactive_customers', $asOf, 1, 500);
+$listed = array_column($page['items'], null, 'email');
+$t->check('customer page shows the name', 'Retention Buyer', $listed[$guestOld]['name'] ?? null);
+$t->check('customer page shows the account is deleted', 'Yes (deleted)', $listed[$acctOld]['account'] ?? null);
+$orderPage = $cleanup->records('inactive_customer_orders', $asOf, 1, 500);
+$t->ok('order page shows order numbers and totals', in_array($before['order_number'], array_column($orderPage['items'], 'order_number'), true)
+    && array_key_exists('grand_total', $orderPage['items'][0] ?? []));
+$t->ok('order page has column headings', in_array('Total (kept)', array_column($orderPage['columns'], 'label'), true));
+$t->ok('reviewing changes nothing', $userExists($acctOldId) && $row($orders['guestOld'])['guest_email'] === $guestOld);
+
+// -----------------------------------------------------------------------------
+$t->section('Nothing is removed automatically');
+$health = (new StorageHealth($t->db))->report($now(), false);
+$t->ok('health flags records past the keep periods', in_array('due', array_column($health['issues'], 'code'), true));
+$t->cleanup(fn () => $t->sql("DELETE FROM `email_outbox` WHERE `template` = 'storage_alert'"));
+$proc = proc_open([PHP_BINARY, BASE_PATH . '/scripts/check_database.php'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, BASE_PATH);
+$output = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+$t->check('daily check runs', 0, proc_close($proc), $output);
+$t->ok('daily check lists what is due', str_contains($output, 'nothing removed'));
+$t->ok('daily check removed nothing', $userExists($acctOldId) && $row($orders['guestOld'])['guest_email'] === $guestOld);
+$t->ok('daily check alerted the admins', (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `template` = 'storage_alert'") >= 1);
+
+// -----------------------------------------------------------------------------
+$t->section('A list that changed after review is refused');
+$t->sql("UPDATE `orders` SET `updated_at` = NOW() WHERE `id` = ?", 'i', [$orders['guestOld']]); // the customer is back
+try {
+    $cleanup->execute($asOf, $snap['fingerprint']);
+    $t->ok('changed list refused', false);
+} catch (DomainException) {
+    $t->ok('changed list refused', true);
+}
+$t->sql("UPDATE `orders` SET `updated_at` = ? WHERE `id` = ?", 'si', [$before['updated_at'], $orders['guestOld']]);
+$t->ok('and nothing was removed', $userExists($acctOldId));
+
+// -----------------------------------------------------------------------------
+$t->section('Clean-up of the reviewed records');
+$asOf = $now();
+$snap = $cleanup->snapshot($asOf);
+$removed = $cleanup->execute($asOf, $snap['fingerprint'], 'Test Admin');
 $t->ok('inactive customers handled', ($removed['inactive_customers'] ?? 0) >= 2, json_encode($removed));
 
 $g = $row($orders['guestOld']);
@@ -168,12 +225,7 @@ $t->ok('recently active account is kept', $userExists($activeAcctId));
 $t->check('and its old order keeps the details', $activeAcct, $row($orders['activeAcct'])['guest_email']);
 $t->check('order flagged for the admin is untouched', $flaggedOld, $row($orders['flaggedOld'])['guest_email']);
 $t->ok('admin account is never removed', $userExists($adminOldId));
-$t->check('a second run finds nothing new for these customers', 0, (int) $t->scalar(
-    "SELECT COUNT(*) FROM `orders` WHERE `id` IN (?, ?) AND `personal_data_removed_at` IS NULL",
-    'ii',
-    [$orders['guestOld'], $orders['acctOld']]
-));
-$t->check('the run is recorded', 'admin', $cleanup->lastRun()['source'] ?? null);
+$t->check('the run is recorded', 'Test Admin', $cleanup->lastRun()['by'] ?? null);
 
 // -----------------------------------------------------------------------------
 $t->section('Signing in counts as activity');
@@ -196,18 +248,16 @@ $slow = $t->db->fetchOne("SELECT `hits`, `max_ms` FROM `api_slow_requests` WHERE
 $t->check('two slow requests counted in one row', 2, (int) ($slow['hits'] ?? 0));
 $t->ok('slowest time kept', (int) ($slow['max_ms'] ?? 0) >= 2900);
 
-$health = (new StorageHealth($t->db))->report(true);
+$health = (new StorageHealth($t->db))->report($now(), true);
 $t->ok('health has a level', in_array($health['level'], ['ok', 'warning', 'critical'], true));
 $t->ok('database size measured', $health['database']['size_bytes'] > 0);
 $t->ok('slow requests in the report', $health['slow_requests']['last_24h'] >= 2);
 $t->ok('typical query time measured', isset($health['queries']['typical_ms']));
-$t->ok('clean-up ran just now, so no overdue warning', !in_array('cleanup', array_column($health['issues'], 'code'), true));
-
 $setting('storage_alert_mb', '1');
 $t->check('an unknown size limit falls back to 500 MB', 500, (new StorageHealth($t->db))->alertMb());
 
 // -----------------------------------------------------------------------------
-$t->section('Admin endpoints');
+$t->section('Admin: review pages');
 $t->check('signed out: 401', 401, $t->http('GET', '/admin/data')['status']);
 $admin = $t->adminSession('retention');
 $A = static fn (string $method, string $path, array $opts = []): array
@@ -218,8 +268,19 @@ $t->check('overview 200', 200, $overview['status']);
 $t->check('overview has the saved customer period', 90, TestKit::get($overview, 'data.settings.retention_customer_days'));
 $t->ok('overview lists the choices', in_array(365, (array) TestKit::get($overview, 'data.options.retention_customer_days'), true));
 $t->ok('overview has the health report', TestKit::get($overview, 'data.health.database.size_bytes') > 0);
-$t->ok('overview has what a clean-up would remove', is_array(TestKit::get($overview, 'data.health.cleanup.waiting')));
+$t->ok('overview says what is due', is_array(TestKit::get($overview, 'data.health.cleanup.due')));
+$pageAsOf = (string) TestKit::get($overview, 'data.health.as_of');
+$t->ok('overview gives the review time', $pageAsOf !== '');
 $t->ok('alert endpoint answers', in_array(TestKit::get($A('GET', '/admin/data/alert'), 'data.level'), ['ok', 'warning', 'critical'], true));
+
+$evt = $oldNotification();
+$records = $A('GET', '/admin/data/records?rule=old_gateway_notifications&as_of=' . rawurlencode($now()));
+$t->check('records page 200', 200, $records['status']);
+$t->ok('records page lists the old notification', in_array('charge.success', array_column((array) TestKit::get($records, 'data.items'), 'event_type'), true));
+$t->ok('records page has columns', count((array) TestKit::get($records, 'data.columns')) > 0);
+$t->check('unknown rule: 422', 422, $A('GET', '/admin/data/records?rule=users&as_of=' . rawurlencode($now()))['status']);
+$t->check('a review older than 30 minutes: 422', 422, $A('GET', '/admin/data/records?rule=old_gateway_notifications&as_of=' . rawurlencode(date('Y-m-d H:i:s', time() - 3600)))['status']);
+$t->check('a made-up review time: 422', 422, $A('GET', '/admin/data/records?rule=old_gateway_notifications&as_of=yesterday')['status']);
 
 $t->check('a value that is not offered: 422', 422, $A('PUT', '/admin/data/settings', ['json' => ['retention_customer_days' => 45]])['status']);
 $t->check('an unknown setting: 422', 422, $A('PUT', '/admin/data/settings', ['json' => ['store_name' => 'x']])['status']);
@@ -228,18 +289,86 @@ $t->check('valid settings saved', 365, TestKit::get($saved, 'data.retention_cust
 $t->check('size limit saved', 1000, TestKit::get($saved, 'data.storage_alert_mb'));
 $t->ok('change is in the audit log', (int) $t->scalar("SELECT COUNT(*) FROM `admin_audit_logs` WHERE `admin_id` = ? AND `action` = 'data_retention.update'", 'i', [$admin['id']]) === 1);
 $t->check('settings change needs CSRF', 403, $t->http('PUT', '/admin/data/settings', ['jar' => $admin['jar'], 'json' => ['retention_unpaid_days' => 7]])['status']);
+$t->ok('saving a period removes nothing', (int) $t->scalar("SELECT COUNT(*) FROM `payment_webhook_events` WHERE `id` = ?", 'i', [$evt]) === 1);
 
-$waitingCustomers = (int) TestKit::get($A('GET', '/admin/data'), 'data.health.cleanup.waiting.inactive_customers');
-$t->check('clean-up without the reviewed count: 409', 409, $A('POST', '/admin/data/cleanup', ['json' => []])['status']);
-$t->check('clean-up with a stale count: 409', 409, $A('POST', '/admin/data/cleanup', ['json' => ['expected_customers' => $waitingCustomers + 1]])['status']);
-$run = $A('POST', '/admin/data/cleanup', ['json' => ['expected_customers' => $waitingCustomers]]);
-$t->check('clean-up runs', 200, $run['status']);
-$t->ok('clean-up reports what it removed', is_array(TestKit::get($run, 'data.removed')));
+// -----------------------------------------------------------------------------
+$t->section('Admin: password and emailed code');
+$verify = static fn (array $json) => $A('POST', '/admin/data/cleanup/verify', ['json' => $json]);
+$run = static fn (array $json) => $A('POST', '/admin/data/cleanup', ['json' => $json]);
+$evtExists = static fn (int $id): bool => (int) $t->scalar("SELECT COUNT(*) FROM `payment_webhook_events` WHERE `id` = ?", 'i', [$id]) === 1;
+
+$t->check('the old one-step clean-up is gone (needs a code)', 410, $run(['expected_customers' => 0])['status']);
+$t->check('verify needs CSRF', 403, $t->http('POST', '/admin/data/cleanup/verify', ['jar' => $admin['jar'], 'json' => ['password' => $admin['password'], 'as_of' => $now()]])['status']);
+$wrong = $verify(['password' => 'not-the-password', 'as_of' => $now()]);
+$t->check('wrong password: 422', 422, $wrong['status']);
+$t->check('wrong password says so', 'WRONG_PASSWORD', TestKit::get($wrong, 'error.code'));
+$t->ok('wrong password is audited', (int) $t->scalar("SELECT COUNT(*) FROM `admin_audit_logs` WHERE `admin_id` = ? AND `action` = 'data.cleanup_password_failed'", 'i', [$admin['id']]) === 1);
+$t->check('a stale review is refused', 422, $verify(['password' => $admin['password'], 'as_of' => date('Y-m-d H:i:s', time() - 3600)])['status']);
+
+$ok = $verify(['password' => $admin['password'], 'as_of' => $now()]);
+$t->check('right password: code sent', 200, $ok['status']);
+$confirmId = (string) TestKit::get($ok, 'data.confirmation_id');
+$t->ok('email address shown masked', str_contains((string) TestKit::get($ok, 'data.sent_to'), '•'));
+$code = $t->confirmationCode(strtolower($admin['email']));
+$t->ok('code delivered by email', $code !== null && strlen($code) === 6);
+$t->check('code is never stored', 0, (int) $t->scalar("SELECT COUNT(*) FROM `admin_confirmations` WHERE `id` = ? AND `code_hash` = ?", 'ss', [$confirmId, (string) $code]));
+$t->ok('nothing removed yet', $evtExists($evt));
+
+$bad = $run(['confirmation_id' => $confirmId, 'code' => $code === '000000' ? '111111' : '000000']);
+$t->check('wrong code: 422', 422, $bad['status']);
+$t->ok('wrong code says how many tries are left', str_contains((string) TestKit::get($bad, 'error.message'), '4 tries left'));
+
+$other = $t->http('POST', '/auth/login', ['json' => ['email' => $admin['email'], 'password' => $admin['password']], 'jar' => 'retention-other']);
+$t->check('a code from another sign-in session is refused', 410, $t->http('POST', '/admin/data/cleanup', [
+    'jar' => 'retention-other',
+    'csrf' => (string) TestKit::get($other, 'data.csrf_token'),
+    'json' => ['confirmation_id' => $confirmId, 'code' => $code],
+])['status']);
+
+$done = $run(['confirmation_id' => $confirmId, 'code' => $code]);
+$t->check('right code: clean-up runs', 200, $done['status']);
+$t->ok('reviewed record removed', !$evtExists($evt));
+$t->ok('clean-up reports what it removed', (int) TestKit::get($done, 'data.removed.old_gateway_notifications') >= 1);
 $t->ok('clean-up is in the audit log', (int) $t->scalar("SELECT COUNT(*) FROM `admin_audit_logs` WHERE `admin_id` = ? AND `action` = 'data.cleanup'", 'i', [$admin['id']]) === 1);
+$t->ok('all admins are told', (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `template` = 'data_cleanup_done' AND `recipient_email` = ?", 's', [strtolower($admin['email'])]) === 1);
+$t->cleanup(fn () => $t->sql("DELETE FROM `email_outbox` WHERE `template` IN ('data_cleanup_done', 'admin_confirm_code')"));
+$t->check('a used code cannot be used again', 410, $run(['confirmation_id' => $confirmId, 'code' => $code])['status']);
+
+$t->check('nothing to clean: no code sent', 422, $verify(['password' => $admin['password'], 'as_of' => $now()])['status']);
+
+// Expired code.
+$evt2 = $oldNotification();
+$second = $verify(['password' => $admin['password'], 'as_of' => $now()]);
+$t->sql("UPDATE `admin_confirmations` SET `expires_at` = DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE `id` = ?", 's', [(string) TestKit::get($second, 'data.confirmation_id')]);
+$t->check('an expired code is refused', 410, $run(['confirmation_id' => (string) TestKit::get($second, 'data.confirmation_id'), 'code' => (string) $t->confirmationCode(strtolower($admin['email']))])['status']);
+$t->ok('and nothing was removed', $evtExists($evt2));
+
+// Five wrong codes burn the confirmation.
+$third = $verify(['password' => $admin['password'], 'as_of' => $now()]);
+$thirdId = (string) TestKit::get($third, 'data.confirmation_id');
+$thirdCode = (string) $t->confirmationCode(strtolower($admin['email']));
+for ($i = 0; $i < 5; $i++) {
+    $run(['confirmation_id' => $thirdId, 'code' => $thirdCode === '000000' ? '111111' : '000000']);
+}
+$t->check('after five wrong codes even the right one fails', 410, $run(['confirmation_id' => $thirdId, 'code' => $thirdCode])['status']);
+$t->ok('and nothing was removed', $evtExists($evt2));
+
+// Records that change between review and confirmation.
+$reviewedAt = $now();
+$fourth = $verify(['password' => $admin['password'], 'as_of' => $reviewedAt]);
+$oldNotification(); // a record the admin did not see
+$t->check('records that changed after review are refused', 409, $run(['confirmation_id' => (string) TestKit::get($fourth, 'data.confirmation_id'), 'code' => (string) $t->confirmationCode(strtolower($admin['email']))])['status']);
+$t->ok('and nothing was removed', $evtExists($evt2));
+
+// Password lock-out.
+for ($i = 0; $i < 5; $i++) {
+    $verify(['password' => 'still-wrong', 'as_of' => $now()]);
+}
+$t->check('five wrong passwords lock the clean-up for a while', 429, $verify(['password' => $admin['password'], 'as_of' => $now()])['status']);
 
 // -----------------------------------------------------------------------------
 $t->section('Alert email to the admins');
-$t->cleanup(fn () => $t->sql("DELETE FROM `email_outbox` WHERE `template` = 'storage_alert'"));
+$t->sql("DELETE FROM `email_outbox` WHERE `template` = 'storage_alert'");
 $report = ['level' => 'warning', 'issues' => [['level' => 'warning', 'code' => 'size', 'title' => 'The database is getting large', 'detail' => 'It is 420 MB.']]];
 $mail = new MailService($t->db);
 $t->ok('alert queued for the admins', $mail->sendStorageAlertToAdmins($report) >= 1);
