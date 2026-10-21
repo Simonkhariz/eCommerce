@@ -47,6 +47,10 @@ final class SessionGuard
             return null;
         }
 
+        // For the data-retention rule (accounts unused for the chosen period are removed).
+        // Written at most once an hour per user.
+        (new UserRepository())->markSeen((int) $user['id']);
+
         return ['token' => $token, 'session' => $session, 'user' => $user];
     }
 

@@ -142,6 +142,33 @@ class MailService
         return $queued;
     }
 
+    /**
+     * Tell the admins the database is getting too big or the site slow (a StorageHealth
+     * report). Sent at most once a week per problem level.
+     *
+     * @return int Number of emails queued
+     */
+    public function sendStorageAlertToAdmins(array $report): int
+    {
+        $recipients = array_column($this->db->fetchAll(
+            "SELECT `email` FROM `users` WHERE `role` IN ('admin', 'super_admin') AND `status` = 'active'"
+        ), 'email');
+        if ($recipients === []) {
+            $contact = $this->db->fetchOne("SELECT `value` FROM `store_settings` WHERE `key_name` = 'store_contact_email'");
+            $recipients = [trim((string) ($contact['value'] ?? ''))];
+        }
+
+        $data = ['level' => (string) $report['level'], 'issues' => $report['issues']];
+        $week = date('o-\WW');
+        $queued = 0;
+        foreach (array_unique(array_map('strtolower', $recipients)) as $email) {
+            if ($this->queue($email, 'storage_alert', $data, "storage_alert:{$data['level']}:{$week}:{$email}")) {
+                $queued++;
+            }
+        }
+        return $queued;
+    }
+
     public function sendShipmentTracking(array $order, array $shipment): bool
     {
         $payload = $this->orderPayload((string) ($order['order_number'] ?? ''));

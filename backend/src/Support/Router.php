@@ -16,6 +16,9 @@ class Router
     /** @var array<int, callable> */
     private array $globalMiddleware = [];
 
+    /** The route pattern that matched the current request (e.g. /api/v1/products/{id}), if any. */
+    public static ?string $matchedRoute = null;
+
     /**
      * Register a global middleware executed before every matched route.
      *
@@ -132,6 +135,7 @@ class Router
                 $allowedMethods[] = $route['method'];
 
                 if ($route['method'] === $requestMethod) {
+                    self::$matchedRoute = $route['pattern'];
                     // Extract named parameters
                     array_shift($matches); // drop full match
                     $params = [];

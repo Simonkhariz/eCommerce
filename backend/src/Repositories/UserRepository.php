@@ -165,6 +165,19 @@ class UserRepository
     }
 
     /**
+     * Record that the user is active (at most once an hour; updated_at keeps its value).
+     */
+    public function markSeen(int $id): void
+    {
+        $this->db->execute(
+            "UPDATE `users` SET `last_seen_at` = NOW(), `updated_at` = `updated_at`
+             WHERE `id` = ? AND (`last_seen_at` IS NULL OR `last_seen_at` < DATE_SUB(NOW(), INTERVAL 1 HOUR))",
+            'i',
+            [$id]
+        );
+    }
+
+    /**
      * Strip internal sensitive properties like password_hash.
      */
     public static function toSafeUser(?array $user): ?array

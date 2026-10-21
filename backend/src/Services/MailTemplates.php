@@ -29,6 +29,7 @@ final class MailTemplates
         'refund_processed',
         'marketing_broadcast',
         'payment_claimed',
+        'storage_alert',
     ];
 
     private string $frontendUrl;
@@ -71,6 +72,7 @@ final class MailTemplates
             'marketing_broadcast' => $this->marketingBroadcast($p),
             'magic_link' => $this->magicLink($p),
             'payment_claimed' => $this->paymentClaimed($p),
+            'storage_alert' => $this->storageAlert($p),
             default => throw new InvalidArgumentException("Unknown email template '{$template}'."),
         };
     }
@@ -240,6 +242,36 @@ final class MailTemplates
             . $this->itemsText($p)
             . "\nOpen the order: {$adminUrl}\n"
             . $this->footerText();
+
+        return compact('subject', 'html', 'text');
+    }
+
+    /** To the admins: the database is getting too big or the site slow (from the daily clean-up). */
+    private function storageAlert(array $p): array
+    {
+        $critical = ($p['level'] ?? '') === 'critical';
+        $subject = $critical ? 'Your store database needs attention now' : 'Your store database needs attention';
+        $adminUrl = $this->frontendUrl . '/admin/data';
+        $issues = is_array($p['issues'] ?? null) ? $p['issues'] : [];
+
+        $list = '';
+        $text = '';
+        foreach ($issues as $issue) {
+            $title = (string) ($issue['title'] ?? '');
+            $detail = (string) ($issue['detail'] ?? '');
+            $list .= '<li style="margin:0 0 8px"><strong>' . $this->e($title) . '</strong><br>' . $this->e($detail) . '</li>';
+            $text .= "- {$title}: {$detail}\n";
+        }
+
+        $html = $this->layout(
+            $critical ? 'Database problem' : 'Database check',
+            '<p style="margin:0 0 12px">The daily check of your store database found:</p>'
+            . '<ul style="margin:0 0 16px;padding-left:20px">' . $list . '</ul>'
+            . '<p style="margin:0 0 16px">Open Data &amp; storage in admin to see the details and clean up old data.</p>'
+            . $this->button($adminUrl, 'Open Data & storage')
+        );
+
+        $text = "The daily check of your store database found:\n\n{$text}\nOpen Data & storage in admin: {$adminUrl}\n" . $this->footerText();
 
         return compact('subject', 'html', 'text');
     }

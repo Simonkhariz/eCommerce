@@ -8,7 +8,7 @@ import { ExternalLink, LogOut } from 'lucide-react';
 import { AdminIcon } from '@/components/admin/AdminIcon';
 import { useAdminSession } from '@/components/admin/AdminAuthGate';
 import { ADMIN_NAV, AdminNavItem, findAdminNav, isActiveAdminLink } from '@/lib/admin-nav';
-import { adminGetOrders } from '@/lib/admin-api';
+import { adminGetOrders, adminGetStorageAlert } from '@/lib/admin-api';
 
 /**
  * Admin chrome: sidebar navigation (real links), header breadcrumb, attention bell and sign-out.
@@ -19,6 +19,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [alerts, setAlerts] = useState<{ claimed: number; attention: number } | null>(null);
+  // The first database problem found (null when size, speed and clean-ups are fine).
+  const [storage, setStorage] = useState<string | null>(null);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const alertsRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -34,6 +36,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   // Bell: WhatsApp transfers customers marked as paid (to check and confirm) and orders flagged
   // for attention (late / duplicate / mismatched payments). Refreshed on navigation and every
   // minute while the admin is open, so a new "Mark as paid" shows up without reloading.
+  // Database size / speed problems are checked on navigation only (they change slowly).
   useEffect(() => {
     let cancelled = false;
     const load = () => {
@@ -45,6 +48,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         .catch(() => !cancelled && setAlerts(null));
     };
     load();
+    adminGetStorageAlert()
+      .then((r) => !cancelled && setStorage(r.level === 'ok' ? null : (r.issues[0]?.title ?? 'Database needs attention')))
+      .catch(() => !cancelled && setStorage(null));
     const timer = setInterval(load, 60_000);
     document.addEventListener('visibilitychange', load);
     return () => {
@@ -70,7 +76,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     };
   }, [alertsOpen]);
 
-  const alertTotal = alerts ? alerts.claimed + alerts.attention : 0;
+  const alertTotal = (alerts ? alerts.claimed + alerts.attention : 0) + (storage ? 1 : 0);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -164,8 +170,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 onClick={() => setAlertsOpen((o) => !o)}
                 aria-expanded={alertsOpen}
                 aria-haspopup="true"
-                aria-label={alertTotal ? `${alertTotal} order alerts` : 'Order alerts'}
-                title="Order alerts"
+                aria-label={alertTotal ? `${alertTotal} alerts` : 'Alerts'}
+                title="Alerts"
                 className="relative rounded-md p-2.5 outline-none sm:p-1.5 transition-colors hover:bg-black/[0.05] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
               >
                 <AdminIcon name="bell" />
@@ -180,6 +186,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                   {[
                     { href: '/admin/orders?status=payment_claimed', title: 'Customers say they have paid', hint: 'WhatsApp transfers to check and confirm', count: alerts?.claimed },
                     { href: '/admin/orders?status=attention', title: 'Orders need attention', hint: 'Late, duplicate or mismatched payments', count: alerts?.attention },
+                    {
+                      href: '/admin/data',
+                      title: 'Database & storage',
+                      hint: storage ?? 'Size, speed and clean-ups are fine',
+                      count: storage ? 1 : 0,
+                    },
                   ].map((a) => (
                     <Link key={a.href} href={a.href} className="flex items-start justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-[#f3f4f6]">
                       <span className="min-w-0">

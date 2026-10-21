@@ -9,6 +9,8 @@ declare(strict_types=1);
  * -----------------------------------------------------------------------------
  */
 
+$requestStartedAt = microtime(true);
+
 // Define directory constants
 define('BASE_PATH', dirname(__DIR__));
 define('PUBLIC_PATH', __DIR__);
@@ -18,6 +20,7 @@ require_once BASE_PATH . '/src/autoload.php';
 
 use App\Config\Env;
 use App\Controllers\AdminCatalogController;
+use App\Controllers\AdminDataController;
 use App\Controllers\AdminDashboardController;
 use App\Controllers\AdminOperationsController;
 use App\Controllers\AdminOrderController;
@@ -37,6 +40,7 @@ use App\Middleware\JsonBodyMiddleware;
 use App\Support\Cache;
 use App\Support\Response;
 use App\Support\Router;
+use App\Support\SlowRequestLog;
 
 // 1. Load Environment Configuration
 Env::load(BASE_PATH . '/.env');
@@ -233,6 +237,11 @@ $router->put('/api/v1/admin/settings/payment-methods', [AdminOperationsControlle
 
 $router->get('/api/v1/admin/system-status', [AdminOperationsController::class, 'getSystemStatus'], $adminGuard);
 
+$router->get('/api/v1/admin/data', [AdminDataController::class, 'overview'], $adminGuard);
+$router->get('/api/v1/admin/data/alert', [AdminDataController::class, 'alert'], $adminGuard);
+$router->put('/api/v1/admin/data/settings', [AdminDataController::class, 'updateSettings'], $adminGuard);
+$router->post('/api/v1/admin/data/cleanup', [AdminDataController::class, 'runCleanup'], $adminGuard);
+
 $router->get('/api/v1/admin/marketing/subscribers', [AdminOperationsController::class, 'listMarketingSubscribers'], $adminGuard);
 $router->post('/api/v1/admin/marketing/broadcast', [AdminOperationsController::class, 'sendMarketingBroadcast'], $adminGuard);
 
@@ -245,6 +254,15 @@ $requestMethod = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if (!in_array($requestMethod, ['GET', 'HEAD', 'OPTIONS'], true) && str_starts_with($requestPath, '/api/v1/admin/')) {
     register_shutdown_function([Cache::class, 'bumpCatalog']);
+}
+
+// Slow page loads and checkout calls are counted for the storage health alert. CSV exports
+// and admin changes (uploads, sending email) are slow by nature and are left out.
+$isExport = str_ends_with($requestPath, '/export');
+if (($requestMethod === 'GET' && !$isExport) || ($requestMethod === 'POST' && str_starts_with($requestPath, '/api/v1/checkout/'))) {
+    register_shutdown_function(static function () use ($requestMethod, $requestStartedAt): void {
+        SlowRequestLog::record($requestMethod, Router::$matchedRoute, $requestStartedAt);
+    });
 }
 
 // 6. Dispatch Request

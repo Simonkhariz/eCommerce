@@ -376,6 +376,12 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
 
         <div className="flex min-w-0 flex-col gap-4">
           <Panel title="Customer & delivery" bodyClassName="px-4 py-3">
+            {order.personal_data_removed_at && (
+              <p className="mb-3 rounded-lg bg-[#f9fafb] px-3 py-2 text-[13px] text-[#374151]">
+                The customer&apos;s name, contact details and street address were removed on {formatDateTime(order.personal_data_removed_at)}{' '}
+                under your <Link href="/admin/data" className="font-semibold underline">data retention setting</Link>. Items, totals and payments are kept.
+              </p>
+            )}
             <DetailList
               items={[
                 { label: 'Name', value: addr.full_name || '—' },

@@ -96,6 +96,8 @@ export interface AdminOrderListItem {
   attention_reason: string | null;
   /** The customer tapped "Mark as paid" for a WhatsApp transfer (not a confirmation). */
   customer_marked_paid_at?: string | null;
+  /** The customer's name, contact details and street address were removed (Data & storage). */
+  personal_data_removed_at?: string | null;
   payment_provider: string | null;
   payment_reference: string | null;
   payment_record_status: string | null;
@@ -725,6 +727,71 @@ export interface SystemStatus {
 
 export function adminGetSystemStatus() {
   return apiRequest<SystemStatus>('/admin/system-status');
+}
+
+// =============================================================================
+// Data & storage (retention and database health)
+// =============================================================================
+
+export type RetentionKey = 'retention_customer_days' | 'retention_unpaid_days' | 'retention_message_days' | 'retention_activity_days';
+export type DataSettingKey = RetentionKey | 'storage_alert_mb';
+export type DataSettings = Record<DataSettingKey, number>;
+export type HealthLevel = 'ok' | 'warning' | 'critical';
+
+export interface HealthIssue {
+  level: Exclude<HealthLevel, 'ok'>;
+  code: 'size' | 'slow' | 'queries' | 'cleanup' | 'backlog';
+  title: string;
+  detail: string;
+}
+
+export interface CleanupRun {
+  at: string;
+  source: 'schedule' | 'admin';
+  removed: Record<string, number>;
+}
+
+export interface StorageHealthReport {
+  level: HealthLevel;
+  issues: HealthIssue[];
+  checked_at: string;
+  database: {
+    size_bytes: number;
+    alert_mb: number;
+    used_percent: number;
+    tables: Array<{ name: string; rows: number; bytes: number; free_bytes: number }>;
+  };
+  slow_requests: {
+    threshold_ms: number;
+    last_24h: number;
+    slowest_ms: number;
+    routes: Array<{ method: string; route: string; hits: number; avg_ms: number; max_ms: number }>;
+  };
+  queries?: { typical_ms: number };
+  cleanup: { last_run: CleanupRun | null; days_since: number | null; waiting?: Record<string, number> };
+}
+
+export interface DataOverview {
+  settings: DataSettings;
+  options: Record<DataSettingKey, number[]>;
+  labels: Record<string, string>;
+  health: StorageHealthReport;
+}
+
+export function adminGetDataOverview() {
+  return apiRequest<DataOverview>('/admin/data');
+}
+
+export function adminGetStorageAlert() {
+  return apiRequest<{ level: HealthLevel; issues: HealthIssue[] }>('/admin/data/alert');
+}
+
+export function adminUpdateDataSettings(data: Partial<DataSettings>) {
+  return send<DataSettings>('/admin/data/settings', 'PUT', data);
+}
+
+export function adminRunCleanup(expectedCustomers: number) {
+  return send<{ removed: Record<string, number> }>('/admin/data/cleanup', 'POST', { expected_customers: expectedCustomers });
 }
 
 export interface AdminAccount {

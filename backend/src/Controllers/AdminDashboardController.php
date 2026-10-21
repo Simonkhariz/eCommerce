@@ -354,7 +354,7 @@ class AdminDashboardController
 
         $customers = $this->db->fetchOne(
             "SELECT COUNT(*) AS paying, COALESCE(SUM(cnt >= 2), 0) AS repeat_customers FROM (
-                 SELECT COALESCE(CAST(o.user_id AS CHAR), LOWER(o.guest_email)) AS customer_key, COUNT(*) AS cnt
+                 SELECT COALESCE(CAST(o.user_id AS CHAR), NULLIF(LOWER(o.guest_email), ''), CONCAT('order:', o.id)) AS customer_key, COUNT(*) AS cnt
                  FROM `orders` o WHERE o.id IN ({$paidInWindow})
                  GROUP BY customer_key
              ) t",

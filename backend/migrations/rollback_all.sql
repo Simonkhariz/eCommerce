@@ -5,6 +5,7 @@
 SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS `schema_migrations`;
+DROP TABLE IF EXISTS `api_slow_requests`;
 DROP TABLE IF EXISTS `rate_limits`;
 DROP TABLE IF EXISTS `reviews`;
 DROP TABLE IF EXISTS `newsletter_subscribers`;

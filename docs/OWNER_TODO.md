@@ -11,8 +11,10 @@ Things left for the store owner after the speed, scale and bug-fix work (commits
       See [section 2](#2-sharp-done-with-nextjs-16).
 - [ ] **Production web server.** Host the API on Apache or nginx with PHP-FPM; `php -S` handles
       one request at a time. Steps in [section 3](#3-a-proper-web-server-for-the-api).
-- [ ] **Broken pictures.** Three home banners and all six categories point to picture files that
-      don't exist (`/images/categories/*.jpg`). Upload new ones in admin.
+- [x] **Broken pictures.** Done: every product, banner, category and style now has a WebP picture.
+- [ ] **Choose how long to keep customer records** in admin → Data & storage (off until you pick:
+      3 months to 2 years; 1 year is a common choice). Customers with no sign-in and no order for
+      that long are then removed by the daily clean-up; order totals and payments are kept.
 - [x] **Merge.** Done: `main` already contains `mobile-responsive` and the earlier `shop-todos`
       branch (main is at 1c1b511). Restart the :3000 dev server once if it has been running since
       before the merge, so it picks up the self-hosted fonts.
@@ -21,7 +23,8 @@ Also still open from earlier work:
 
 - [ ] Live Kora / Monnify keys and webhooks
 - [ ] SMTP settings for real email
-- [ ] Schedule `expire_pending_orders`, `process_outbox` and `cleanup_database` (see `backend/README.md`)
+- [ ] Schedule `expire_pending_orders`, `process_outbox` and `cleanup_database` (see `backend/README.md`).
+      `cleanup_database` also checks the database size and speed and emails you when it needs attention.
 - [ ] Site-content TODOs (about, contact, policies)
 
 ---
