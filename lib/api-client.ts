@@ -1167,7 +1167,8 @@ export async function apiCreateCheckoutOrder(data: {
  */
 export async function apiGetOrder(
   orderNumber: string,
-  verification?: string | { token?: string; email?: string; reference?: string }
+  verification?: string | { token?: string; email?: string; reference?: string },
+  signal?: AbortSignal
 ): Promise<ApiOrder> {
   const headers: Record<string, string> = {};
   const token = typeof verification === 'string' ? verification : verification?.token;
@@ -1176,7 +1177,7 @@ export async function apiGetOrder(
   if (token) headers['X-Guest-Access-Token'] = token;
   if (email) headers['X-Order-Email'] = email.trim();
 
-  return fetchFromApi<ApiOrder>(`/checkout/orders/${encodeURIComponent(orderNumber)}`, { headers });
+  return fetchFromApi<ApiOrder>(`/checkout/orders/${encodeURIComponent(orderNumber)}`, { headers, signal });
 }
 
 /**
@@ -1289,7 +1290,8 @@ export interface PaymentVerificationResponse {
 export async function apiVerifyPayment(
   orderNumber: string,
   guestAccessToken?: string,
-  reference?: string
+  reference?: string,
+  signal?: AbortSignal
 ): Promise<PaymentVerificationResponse> {
   const params = new URLSearchParams();
   if (reference) {
@@ -1310,6 +1312,7 @@ export async function apiVerifyPayment(
     {
       method: 'GET',
       headers,
+      signal,
     }
   );
 }

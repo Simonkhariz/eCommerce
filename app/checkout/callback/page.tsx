@@ -1,35 +1,27 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { CheckmarkBadge01Icon, AlertCircleIcon, Clock01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
 import { Printer, Download } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import { formatPrice } from '@/lib/currency';
-import {
-  ApiError,
-  ApiOrder,
-  apiVerifyPayment,
-  apiGetOrder,
-  apiInitializePayment,
-  apiMarkPaymentSent,
-  errorMessage,
-  PaymentVerificationResponse,
-} from '@/lib/api-client';
+import { ApiError, apiInitializePayment, apiMarkPaymentSent, errorMessage } from '@/lib/api-client';
+import { POLL_DELAYS, paymentOrderQuery, paymentStatusQuery, paymentViewFor, type PaymentView } from '@/lib/payment-queries';
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptUrl, formatSupportPhone, whatsAppOrderFrom } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useCart } from '@/context/CartContext';
-import { clearPendingOrder, markInvoiceSent, readGuestToken, saveGuestToken } from '@/lib/pending-order';
+import { clearPendingOrder, markInvoiceSent, saveGuestToken } from '@/lib/pending-order';
 import { useGuestToken, useInvoiceSent } from '@/lib/use-order-data';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 
-type ViewState = 'checking' | 'paid' | 'pending' | 'failed' | 'cancelled' | 'late' | 'error';
+type ViewState = 'checking' | PaymentView | 'error';
 
-/** Poll delays (ms) while a payment is still settling: about two minutes in total. */
-const POLL_DELAYS = [3000, 3000, 5000, 5000, 8000, 10000, 15000, 15000, 20000, 20000, 20000];
+const noSubscribe = () => () => {};
 
 function readParam(searchParams: URLSearchParams, keys: string[]): string {
   for (const key of keys) {
@@ -54,12 +46,9 @@ function CheckoutCallbackContent() {
   // Guest access key and "invoice sent", as saved on this device (they update when saved).
   const token = useGuestToken(orderNumber);
   const invoiceSent = useInvoiceSent(orderNumber);
-  const [view, setView] = useState<ViewState>('checking');
-  const [result, setResult] = useState<PaymentVerificationResponse | null>(null);
-  const [order, setOrder] = useState<ApiOrder | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [pollIndex, setPollIndex] = useState(0);
+  // The saved access key can only be read once the page is running in the browser; checking
+  // before that would ask without it.
+  const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false);
   const [keyInput, setKeyInput] = useState('');
   // The shopper's choice; until they pick, the store's default method.
   const [chosenRetryMethod, setRetryMethod] = useState<string>('');
@@ -69,6 +58,92 @@ function CheckoutCallbackContent() {
   const [isSavingJpeg, setIsSavingJpeg] = useState(false);
   const [awaitingFlash, setAwaitingFlash] = useState(false);
   const celebrated = useRef(false);
+  const settled = useRef(false);
+
+  // Payment status (lib/payment-queries.ts). While it is pending the page checks again on the
+  // back-off schedule, only while the tab is visible, and once more when the shopper comes
+  // back to it. pollBase marks where "Check again" restarted the schedule.
+  const [pollBase, setPollBase] = useState(0);
+  const queryClient = useQueryClient();
+  const statusQuery = paymentStatusQuery(orderNumber, token ?? null, reference || null);
+  const status = useQuery({
+    ...statusQuery,
+    enabled: hydrated && !!orderNumber,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data || query.state.status === 'error' || paymentViewFor(data) !== 'pending') return false;
+      const next = query.state.dataUpdateCount - 1 - pollBase;
+      return next >= 0 && next < POLL_DELAYS.length ? POLL_DELAYS[next] : false;
+    },
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: (query) => !!query.state.data && paymentViewFor(query.state.data) === 'pending',
+  });
+  const result = status.data ?? null;
+  // Answers received so far for this question (the page re-renders after each one).
+  const answers = queryClient.getQueryState(statusQuery.queryKey)?.dataUpdateCount ?? 0;
+  const pollIndex = Math.max(0, answers - 1 - pollBase);
+  const isRefreshing = status.isFetching;
+  const view: ViewState = !orderNumber
+    ? 'error'
+    : status.status === 'error'
+      ? 'error'
+      : result
+        ? paymentViewFor(result)
+        : 'checking';
+  const message = !orderNumber
+    ? 'This page is missing the order number. Use "Track order" with your order number and email instead.'
+    : status.status === 'error'
+      ? status.error instanceof ApiError && status.error.statusCode === 404
+        ? 'We could not open this order from this device. Enter the access key from your order confirmation, or use "Track order" with your email.'
+        : errorMessage(status.error, 'We could not check the payment right now.')
+      : (result?.message ?? null);
+
+  // Receipt details: asked once while the payment is open, and again once it is paid.
+  const orderDetails = useQuery({
+    ...paymentOrderQuery(orderNumber, token ?? null, view === 'paid' ? 'paid' : 'open'),
+    enabled: hydrated && !!orderNumber && (view === 'paid' || view === 'pending' || view === 'failed'),
+  });
+  const order = orderDetails.data ?? null;
+  const paidOrderSettled = view === 'paid' && (orderDetails.isSuccess || orderDetails.isError);
+
+  // Once the payment is verified (and the receipt has loaded or been refused), empty the cart of
+  // this order's items, once per order, so reopening this receipt never removes items added
+  // later. The order's own items are used for a payment made in the last two days; an older
+  // receipt only clears the cart it was placed from (never items bought again since).
+  useEffect(() => {
+    if (!paidOrderSettled || settled.current) return;
+    settled.current = true;
+    const paidOrder = orderDetails.data ?? null;
+    const paidAtMs = new Date(String(result?.verified_at || paidOrder?.payment?.verified_at || '').replace(' ', 'T')).getTime();
+    const recent = Number.isFinite(paidAtMs) && Date.now() - paidAtMs < 2 * 24 * 60 * 60 * 1000;
+    completePaidOrder(
+      orderNumber,
+      recent && paidOrder && Array.isArray(paidOrder.items)
+        ? paidOrder.items.map((it) => ({ variant_id: it.variant_id ? Number(it.variant_id) : null, quantity: Number(it.quantity) }))
+        : undefined
+    );
+  }, [paidOrderSettled, orderDetails.data, result?.verified_at, orderNumber, completePaidOrder]);
+
+  useEffect(() => {
+    if (view !== 'paid' || celebrated.current) return;
+    celebrated.current = true;
+    try {
+      confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
+    } catch {
+      // decorative only
+    }
+  }, [view]);
+
+  // Closed without payment: checkout should start a new order, not resume this one.
+  useEffect(() => {
+    if (view === 'cancelled') clearPendingOrder(orderNumber);
+  }, [view, orderNumber]);
+
+  const checkAgain = async () => {
+    if (!orderNumber) return null;
+    setPollBase(answers);
+    return status.refetch();
+  };
 
   // A legacy link carried the guest access key in the URL: keep it on this device only and
   // take it out of the address bar (never trusted beyond reading it once).
@@ -78,105 +153,6 @@ function CheckoutCallbackContent() {
     saveGuestToken(orderNumber, legacy);
     window.history.replaceState(null, '', `/checkout/callback?order=${encodeURIComponent(orderNumber)}${reference ? `&reference=${encodeURIComponent(reference)}` : ''}`);
   }, [orderNumber, reference, searchParams]);
-
-  const loadOrder = useCallback(
-    async (accessToken?: string) => {
-      try {
-        const data = await apiGetOrder(orderNumber, accessToken ? { token: accessToken } : undefined);
-        setOrder(data);
-        return data;
-      } catch {
-        return null; // Receipt details need the access key or sign-in; status still shows.
-      }
-    },
-    [orderNumber]
-  );
-
-  const verify = useCallback(
-    async (accessToken?: string) => {
-      if (!orderNumber) {
-        setView('error');
-        setMessage('This page is missing the order number. Use "Track order" with your order number and email instead.');
-        return;
-      }
-      setIsRefreshing(true);
-      try {
-        const res = await apiVerifyPayment(orderNumber, accessToken, reference || undefined);
-        setResult(res);
-        setMessage(res.message ?? null);
-        const orderStatus = String(res.order_status || '');
-
-        if (res.status === 'successful') {
-          if (orderStatus === 'cancelled') {
-            setView('late');
-          } else {
-            setView('paid');
-            const paidOrder = await loadOrder(accessToken);
-            // The cart is emptied only now that payment is verified: the order's items leave it
-            // (once per order, so reopening this receipt never removes items added later).
-            // The order's own items are used for a payment made in the last two days; an older
-            // receipt only clears the cart it was placed from (never items bought again since).
-            const paidAtMs = new Date(String(res.verified_at || paidOrder?.payment?.verified_at || '').replace(' ', 'T')).getTime();
-            const recent = Number.isFinite(paidAtMs) && Date.now() - paidAtMs < 2 * 24 * 60 * 60 * 1000;
-            completePaidOrder(
-              orderNumber,
-              recent && paidOrder && Array.isArray(paidOrder.items)
-                ? paidOrder.items.map((it) => ({ variant_id: it.variant_id ? Number(it.variant_id) : null, quantity: Number(it.quantity) }))
-                : undefined
-            );
-            if (!celebrated.current) {
-              celebrated.current = true;
-              try {
-                confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
-              } catch {
-                // decorative only
-              }
-            }
-          }
-        } else if (orderStatus === 'cancelled') {
-          // Closed without payment: checkout should start a new order, not resume this one.
-          clearPendingOrder(orderNumber);
-          setView('cancelled');
-        } else if (res.status === 'failed') {
-          setView('failed');
-          loadOrder(accessToken);
-        } else {
-          setView('pending');
-          loadOrder(accessToken);
-        }
-        return res.status;
-      } catch (err) {
-        setView('error');
-        setMessage(
-          err instanceof ApiError && err.statusCode === 404
-            ? 'We could not open this order from this device. Enter the access key from your order confirmation, or use "Track order" with your email.'
-            : errorMessage(err, 'We could not check the payment right now.')
-        );
-        return null;
-      } finally {
-        setIsRefreshing(false);
-      }
-    },
-    [orderNumber, reference, loadOrder, completePaidOrder]
-  );
-
-  // First check once the access key (if any) has been read.
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current || token === undefined && orderNumber && readGuestToken(orderNumber)) return;
-    started.current = true;
-    verify(token);
-  }, [token, orderNumber, verify]);
-
-  // Background polling with back-off while the payment is settling.
-  useEffect(() => {
-    if (view !== 'pending' || pollIndex >= POLL_DELAYS.length) return;
-    const timer = setTimeout(() => {
-      setPollIndex((i) => i + 1);
-      verify(token);
-    }, POLL_DELAYS[pollIndex]);
-    return () => clearTimeout(timer);
-  }, [view, pollIndex, verify, token]);
 
   const handleRetryPayment = async () => {
     if (!orderNumber || !retryMethod) return;
@@ -213,11 +189,11 @@ function CheckoutCallbackContent() {
   // WhatsApp transfers are confirmed by the store by hand: "Mark as paid" asks the server, which
   // opens the receipt once the store has confirmed, and otherwise says it is still awaited.
   const handleMarkPaid = async () => {
-    setPollIndex(0);
-    const status = await verify(token);
-    if (status !== 'successful') {
+    const answer = await checkAgain();
+    const paymentStatus = answer?.isSuccess ? answer.data.status : null;
+    if (paymentStatus !== 'successful') {
       // Not confirmed yet: let the store know the transfer was sent (it alerts the admin).
-      if (status === 'pending') await apiMarkPaymentSent(orderNumber, token).catch(() => null);
+      if (paymentStatus === 'pending') await apiMarkPaymentSent(orderNumber, token).catch(() => null);
       setAwaitingFlash(true);
       setTimeout(() => setAwaitingFlash(false), 3000);
     }
@@ -319,8 +295,7 @@ function CheckoutCallbackContent() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!keyInput) return;
-                  saveGuestToken(orderNumber, keyInput); // the saved key becomes `token`
-                  verify(keyInput);
+                  saveGuestToken(orderNumber, keyInput); // the saved key becomes `token`, which starts a new check
                 }}
               >
                 <label htmlFor="access-key" className="sr-only">Order access key</label>
@@ -337,7 +312,7 @@ function CheckoutCallbackContent() {
               </form>
             )}
             <div className="flex flex-col gap-2.5">
-              <button type="button" onClick={() => verify(token)} className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm">
+              <button type="button" onClick={() => void checkAgain()} className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm">
                 Try again
               </button>
               <Link href={`/track-order${orderNumber ? `?order=${encodeURIComponent(orderNumber)}` : ''}`} className="w-full bg-neutral-100 hover:bg-neutral-200 font-semibold py-3 rounded-full text-sm">
@@ -511,10 +486,7 @@ function CheckoutCallbackContent() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => {
-                    setPollIndex(0);
-                    verify(token);
-                  }}
+                  onClick={() => void checkAgain()}
                   disabled={isRefreshing}
                   className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm disabled:opacity-60"
                 >

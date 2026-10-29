@@ -433,6 +433,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const checkPendingOrder = useCallback(async (force = false): Promise<PendingOrderOutcome> => {
     const pending = readPendingOrder();
     if (!pending) return 'none';
+    // The payment return page checks its order itself (lib/payment-queries.ts) and settles the
+    // cart when it is paid; asking the server for the same payment again there is a duplicate.
+    if (!force && window.location.pathname === '/checkout/callback') return 'pending';
     if (!force && Date.now() - lastPendingCheck.current < PENDING_CHECK_INTERVAL_MS) return 'pending';
     lastPendingCheck.current = Date.now();
     try {
