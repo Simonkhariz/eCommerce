@@ -40,6 +40,7 @@ backend/storage/cache/*
 backend/storage/test-uploads/
 backend/storage/backups/
 backend/storage/migrations/
+backend/storage/loadtest/
 !backend/storage/**/.gitkeep
 backend/public/uploads/*
 !backend/public/uploads/.gitkeep
