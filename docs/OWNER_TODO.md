@@ -25,6 +25,9 @@ Also still open from earlier work:
 - [ ] Live Kora / Monnify keys and webhooks
 - [ ] SMTP settings for real email
 - [ ] Schedule `expire_pending_orders`, `process_outbox` and `check_database` (see `backend/README.md`).
+      The email sender matters most: order emails are now sent just after the shopper's page
+      loads, and anything that fails is only retried by it. On this PC (PowerShell, once):
+      `schtasks /Create /SC MINUTE /MO 1 /TN "ShopCo Send Email" /TR "C:\xampp\php\php-win.exe C:\Users\smnkh\Desktop\E-templates\E-commerce\backend\scripts\process_outbox.php"`
       `check_database` deletes nothing: it emails you when the database is big or slow, or when old data waits for your review.
 - [ ] Site-content TODOs (about, contact, policies)
 - [ ] Optional: make admin changes show on the shop at once. Put one random value (at least 32

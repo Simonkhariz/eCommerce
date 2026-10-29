@@ -1,0 +1,217 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Email never makes the shopper or admin wait (roadmap Prompt 17): during a web request the
+ * delivery attempt runs after the response has been handed over. This suite starts its own
+ * fake SMTP server (with an adjustable delay) and a second test API that sends through it.
+ *
+ *   php backend/tests/run.php MailAsync
+ */
+
+require __DIR__ . '/support/TestKit.php';
+
+use App\Services\MailService;
+
+$t = new TestKit('MailAsync');
+$tmp = sys_get_temp_dir() . '/shopco-mailasync-' . getmypid();
+@mkdir($tmp, 0700, true);
+$delayFile = "{$tmp}/delay";
+$countFile = "{$tmp}/count";
+file_put_contents($delayFile, '0');
+file_put_contents($countFile, '');
+$smtpPort = 2600 + getmypid() % 300;
+$apiPort = (int) (getenv('TEST_MAIL_API_PORT') ?: 8102);
+$api = "http://127.0.0.1:{$apiPort}/api/v1";
+
+// A local SMTP stand-in: waits <delay> seconds before greeting, accepts every message.
+file_put_contents("{$tmp}/smtp.php", <<<'PHP'
+<?php
+[$self, $port, $delayFile, $countFile] = $argv;
+$server = stream_socket_server("tcp://127.0.0.1:{$port}", $errno, $errstr);
+echo $server ? "ready\n" : "failed {$errstr}\n";
+while ($server && ($conn = @stream_socket_accept($server, -1))) {
+    $delay = (float) trim((string) @file_get_contents($delayFile));
+    if ($delay > 0) usleep((int) ($delay * 1_000_000));
+    $say = static fn (string $l) => @fwrite($conn, $l . "\r\n");
+    $say('220 fake ESMTP');
+    $data = false;
+    while (($line = fgets($conn)) !== false) {
+        if ($data) {
+            if (rtrim($line, "\r\n") === '.') { $data = false; file_put_contents($countFile, "m\n", FILE_APPEND); $say('250 OK'); }
+            continue;
+        }
+        $cmd = strtoupper(substr(trim($line), 0, 4));
+        if ($cmd === 'EHLO' || $cmd === 'HELO') { $say('250-fake'); $say('250 8BITMIME'); }
+        elseif ($cmd === 'DATA') { $data = true; $say('354 go'); }
+        elseif ($cmd === 'QUIT') { $say('221 bye'); break; }
+        else { $say('250 OK'); }
+    }
+    fclose($conn);
+}
+PHP);
+$smtp = proc_open([PHP_BINARY, "{$tmp}/smtp.php", (string) $smtpPort, $delayFile, $countFile], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $smtpPipes);
+$t->check('fake SMTP server started', 'ready', trim((string) fgets($smtpPipes[1])));
+
+// A second test API on the same test database, sending through the fake server with a short
+// mail timeout (2 s).
+$envFile = "{$tmp}/env";
+$lines = array_values(array_filter(
+    file((string) getenv('SHOPCO_ENV_FILE'), FILE_IGNORE_NEW_LINES) ?: [],
+    static fn (string $l): bool => !preg_match('/^(MAIL_[A-Z_]+|STOREFRONT_REVALIDATE_URL|REVALIDATE_SECRET)=/', $l)
+));
+$lines = array_merge($lines, [
+    'MAIL_MAILER=smtp', 'MAIL_HOST=127.0.0.1', "MAIL_PORT={$smtpPort}", 'MAIL_ENCRYPTION=none', 'MAIL_USERNAME=', 'MAIL_PASSWORD=',
+    'MAIL_FROM_ADDRESS=store@example.test', 'MAIL_SEND_IMMEDIATELY=true', 'MAIL_TIMEOUT_SECONDS=2', 'MAIL_LOG_PATH=storage/logs/mail.testing.log',
+    'STOREFRONT_REVALIDATE_URL=', 'REVALIDATE_SECRET=',
+]);
+file_put_contents($envFile, implode("\n", $lines) . "\n");
+$apiProc = proc_open(
+    [PHP_BINARY, '-S', "127.0.0.1:{$apiPort}", '-t', BASE_PATH . '/public'],
+    [1 => ['file', "{$tmp}/api.log", 'w'], 2 => ['file', "{$tmp}/api.log", 'a']],
+    $apiPipes,
+    BASE_PATH,
+    array_merge(getenv(), ['SHOPCO_ENV_FILE' => $envFile])
+);
+$up = false;
+for ($i = 0; $i < 50 && !$up; $i++) {
+    usleep(200000);
+    $up = @file_get_contents("{$api}/health") !== false;
+}
+$t->check('second test API started', true, $up);
+
+$t->cleanup(function () use ($smtp, $apiProc, $tmp): void {
+    proc_terminate($apiProc);
+    proc_terminate($smtp);
+    array_map('unlink', glob("{$tmp}/*") ?: []);
+    @rmdir($tmp);
+});
+
+$messages = static fn (): int => count(file($countFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []);
+$waitFor = static function (callable $condition, float $seconds): bool {
+    $until = microtime(true) + $seconds;
+    while (microtime(true) < $until) {
+        if ($condition()) {
+            return true;
+        }
+        usleep(100000);
+    }
+    return (bool) $condition();
+};
+$variant = $t->variant(10);
+$placeOrder = function (string $email) use ($t, $api, $variant): array {
+    $t->sql("DELETE FROM `rate_limits`");
+    $start = microtime(true);
+    $res = $t->http('POST', "{$api}/checkout/orders", [
+        'headers' => ['Idempotency-Key: ' . bin2hex(random_bytes(16))],
+        'json' => [
+            'email' => $email,
+            'items' => [['product_id' => (int) $variant['product_id'], 'variant_id' => (int) $variant['variant_id'], 'quantity' => 1]],
+            'shipping_address' => ['full_name' => 'Mail Async', 'phone' => '08000000011', 'address_line1' => '11 Test Way', 'city' => 'Ikeja', 'state' => 'Lagos', 'country' => 'Nigeria'],
+        ],
+    ]);
+    $onum = (string) TestKit::get($res, 'data.order_number');
+    $t->cleanup(function () use ($t, $onum, $email): void {
+        $oid = (int) $t->scalar("SELECT `id` FROM `orders` WHERE `order_number` = ?", 's', [$onum]);
+        foreach (['payments', 'order_status_history', 'order_items'] as $table) {
+            $t->sql("DELETE FROM `{$table}` WHERE `order_id` = ?", 'i', [$oid]);
+        }
+        $t->sql("DELETE FROM `orders` WHERE `id` = ?", 'i', [$oid]);
+        $t->sql("DELETE FROM `email_outbox` WHERE `recipient_email` = ?", 's', [$email]);
+    });
+    return ['status' => $res['status'], 'seconds' => microtime(true) - $start, 'order' => $onum, 'headers' => $res['headers'], 'body' => $res['body']];
+};
+$outbox = static fn (string $email): ?array => $t->db->fetchOne(
+    "SELECT `status`, `attempt_count`, `last_error` FROM `email_outbox` WHERE `recipient_email` = ? AND `template` = 'order_received' ORDER BY `id` DESC LIMIT 1",
+    's',
+    [$email]
+);
+
+// -----------------------------------------------------------------------------
+$t->section('A slow mail server does not slow checkout');
+if ($variant === null) {
+    $t->ok('a published variant with stock exists', false);
+} else {
+    file_put_contents($delayFile, '1.5');
+    $before = $messages();
+    $email = $t->uniq('slow') . '@example.test';
+    $order = $placeOrder($email);
+    $t->check('order placed', 201, $order['status']);
+    $t->ok('checkout answers without waiting for the 1.5 s mail server', $order['seconds'] < 1.0, sprintf('%.2f s', $order['seconds']));
+    $t->ok('the order email is delivered right after', $waitFor(fn () => ($outbox($email)['status'] ?? null) === 'sent', 6), json_encode($outbox($email)));
+    $t->check('the mail server received it once', $before + 1, $messages());
+    $length = $order['headers']['content-length'] ?? null;
+    $t->check('the response states its length', (string) strlen($order['body']), $length);
+
+    // ---------------------------------------------------------------------------
+    $t->section('A stuck mail server costs at most the mail timeout, after the response');
+    file_put_contents($delayFile, '6');
+    $email = $t->uniq('stuck') . '@example.test';
+    $order = $placeOrder($email);
+    $t->check('order placed', 201, $order['status']);
+    $t->ok('checkout still answers at once', $order['seconds'] < 1.0, sprintf('%.2f s', $order['seconds']));
+    $t->ok('the attempt gives up after about 2 s and is kept for a retry', $waitFor(fn () => (int) ($outbox($email)['attempt_count'] ?? 0) === 1, 6), json_encode($outbox($email)));
+    $row = $outbox($email);
+    $t->check('still pending, to be retried by the worker', 'pending', $row['status'] ?? null);
+    file_put_contents($delayFile, '0');
+    sleep(5); // let the fake server finish the slow connection it was holding
+
+    // ---------------------------------------------------------------------------
+    $t->section('Tidying up expired orders adds no wait to checkout');
+    file_put_contents($delayFile, '1');
+    $expired = [];
+    for ($i = 1; $i <= 2; $i++) {
+        $num = 'MAEXP' . getmypid() . $i;
+        $mail = strtolower($num) . '@example.test';
+        $t->db->insert(
+            "INSERT INTO `orders` (`order_number`, `guest_email`, `guest_access_token_hash`, `subtotal`, `grand_total`, `order_status`, `payment_status`, `expires_at`)
+             VALUES (?, ?, SHA2(?, 256), 5000, 5000, 'pending_payment', 'pending', DATE_SUB(NOW(), INTERVAL 1 HOUR))",
+            'sss',
+            [$num, $mail, $num]
+        );
+        $expired[$num] = $mail;
+    }
+    $t->cleanup(function () use ($t, $expired): void {
+        foreach ($expired as $num => $mail) {
+            $oid = (int) $t->scalar("SELECT `id` FROM `orders` WHERE `order_number` = ?", 's', [$num]);
+            $t->sql("DELETE FROM `order_status_history` WHERE `order_id` = ?", 'i', [$oid]);
+            $t->sql("DELETE FROM `orders` WHERE `id` = ?", 'i', [$oid]);
+            $t->sql("DELETE FROM `email_outbox` WHERE `recipient_email` = ?", 's', [$mail]);
+        }
+    });
+    $before = $messages();
+    $email = $t->uniq('sweep') . '@example.test';
+    $order = $placeOrder($email);
+    $t->check('order placed', 201, $order['status']);
+    $t->ok('checkout answers at once although 3 emails (1 s each) follow', $order['seconds'] < 1.0, sprintf('%.2f s', $order['seconds']));
+    $t->check('the expired orders were cancelled', ['cancelled', 'cancelled'], array_map(
+        fn (string $num) => $t->scalar("SELECT `order_status` FROM `orders` WHERE `order_number` = ?", 's', [$num]),
+        array_keys($expired)
+    ));
+    $t->ok('all three emails are delivered after the response', $waitFor(fn () => $messages() >= $before + 3, 10), (string) ($messages() - $before));
+    file_put_contents($delayFile, '0');
+}
+
+// -----------------------------------------------------------------------------
+$t->section('The same email is never queued twice');
+$key = 'mailasync-dedup:' . bin2hex(random_bytes(4));
+$to = $t->uniq('dedup') . '@example.test';
+$t->cleanup(fn () => $t->sql("DELETE FROM `email_outbox` WHERE `recipient_email` = ?", 's', [$to]));
+$mailer = new MailService($t->db);
+$t->check('first queue call', true, $mailer->queue($to, 'payment_claimed', ['order_number' => 'ORD-TEST', 'amount' => 1000], $key, false));
+$t->check('second call with the same key reports it as queued', true, $mailer->queue($to, 'payment_claimed', ['order_number' => 'ORD-TEST', 'amount' => 1000], $key, false));
+$t->check('one row for the key', 1, (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `dedup_key` = ?", 's', [$key]));
+$duplicate = null;
+try {
+    $t->db->insert(
+        "INSERT INTO `email_outbox` (`recipient_email`, `subject`, `template`, `dedup_key`, `payload`, `status`, `attempt_count`) VALUES (?, 's', 'payment_claimed', ?, '{}', 'pending', 0)",
+        'ss',
+        [$to, $key]
+    );
+} catch (Throwable $e) {
+    $duplicate = (int) $e->getCode();
+}
+$t->check('the database refuses a second row with the same key (what two simultaneous requests would hit)', 1062, $duplicate);
+
+exit($t->finish());

@@ -150,12 +150,39 @@ class Response
                     $json = $compressed;
                 }
             }
+
+            // With the length known, the client has the whole answer as soon as it arrives, even
+            // while this request still does work after it (see finishForClient). PHP's own output
+            // compression would change the length, so it is left to that case.
+            if (!ini_get('zlib.output_compression')) {
+                header('Content-Length: ' . strlen($json));
+            }
         }
 
         echo $json;
         if (self::$exitOnResponse) {
             exit;
         }
+    }
+
+    /**
+     * Hand the finished response to the client now, so work done after this (sending email,
+     * refreshing the storefront) never makes the shopper or admin wait. Under PHP-FPM the
+     * request is completed; elsewhere the buffered response is flushed, and the client, which
+     * knows its length, does not wait for the rest.
+     */
+    public static function finishForClient(): void
+    {
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+            return;
+        }
+        while (ob_get_level() > 0) {
+            if (!@ob_end_flush()) {
+                break;
+            }
+        }
+        @flush();
     }
 
     public static bool $exitOnResponse = true;

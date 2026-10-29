@@ -38,7 +38,10 @@ final class SmtpTransport
         $this->password = (string) Env::get('MAIL_PASSWORD', '');
         $this->fromAddress = trim((string) Env::get('MAIL_FROM_ADDRESS', ''));
         $this->fromName = trim((string) Env::get('MAIL_FROM_NAME', ''));
-        $this->timeout = 20;
+        // Seconds to wait for the connection and for each reply from the mail server. A healthy
+        // server answers in well under a second; this bounds how long a stuck one can hold up a
+        // send (MAIL_TIMEOUT_SECONDS, 2-60, default 10).
+        $this->timeout = max(2, min(60, Env::int('MAIL_TIMEOUT_SECONDS', 10)));
     }
 
     public static function isConfigured(): bool

@@ -188,15 +188,25 @@ Optional `.env` settings: `ORDER_PAYMENT_WINDOW_MINUTES` (default 60) and
 
 ### Sending email (outbox)
 Every email is written to `email_outbox` first. Order emails (received, paid, shipped, cancelled,
-refunded) get one delivery attempt as soon as the order change is saved; newsletters, and any email
-whose attempt failed, are sent by the outbox worker with retries after 1, 5, 15 and 60 minutes (failed
-after 5 attempts). Sign-in links are sent immediately and never stored, so they cannot be re-sent.
+refunded) get one delivery attempt once the order change is saved, **after** the response has gone
+to the shopper or admin, so a slow or unreachable mail server never delays a checkout, a payment
+confirmation or an admin action (`Response::finishForClient`; responses carry `Content-Length`).
+Newsletters, and any email whose attempt failed, are sent by the outbox worker with retries after
+1, 5, 15 and 60 minutes (failed after 5 attempts). A dedup key is unique, so the same email is
+never queued twice. Sign-in links and admin confirmation codes are sent immediately (the person is
+waiting for them) and never stored, so they cannot be re-sent. `MAIL_TIMEOUT_SECONDS` (default 10)
+bounds each step of a send.
 ```bash
 php backend/scripts/process_outbox.php              # one batch of up to 100
 php backend/scripts/process_outbox.php --limit=500
 ```
+Schedule it **every minute** (php-win.exe runs without a console window; runs never overlap and
+two at once are safe, because each email is claimed before it is sent):
 ```powershell
-schtasks /Create /SC MINUTE /MO 5 /TN "ShopCo Send Email" /TR "C:\xampp\php\php.exe C:\path\to\E-commerce\backend\scripts\process_outbox.php"
+schtasks /Create /SC MINUTE /MO 1 /TN "ShopCo Send Email" /TR "C:\xampp\php\php-win.exe C:\path\to\E-commerce\backend\scripts\process_outbox.php"
+```
+```cron
+* * * * *  php /var/www/shopco/backend/scripts/process_outbox.php
 ```
 With `MAIL_MAILER=log` (the default) emails go to `backend/storage/logs/mail.log` and the admin outbox
 shows them as "Logged only". The admin Email outbox page also has "Send queued now".

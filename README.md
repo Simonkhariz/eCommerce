@@ -50,7 +50,7 @@ on its own, but nothing replaces the schedule on a quiet store.
 | Job | Every | What it does |
 | :--- | :--- | :--- |
 | `php backend/scripts/expire_pending_orders.php` | 10 min | Asks Kora/Monnify for the final status of overdue unpaid orders, then cancels the rest and releases their stock and promo use. |
-| `php backend/scripts/process_outbox.php` | 5 min | Sends queued email (newsletters, retries of failed order emails). |
+| `php backend/scripts/process_outbox.php` | 1 min | Sends queued email (newsletters, retries of failed order emails, anything not sent after the response). |
 | `php backend/scripts/check_database.php` | daily | Checks the database size, slow requests and data past the keep periods, and emails the admins when something needs attention. It removes nothing: admins review and confirm clean-ups in admin → Data & storage. |
 
 ### Email

@@ -34,10 +34,8 @@ final class StorefrontRefresh
         if (!is_int($status) || $status >= 400 || !self::isConfigured()) {
             return;
         }
-        // Under PHP-FPM, finish the admin's response first so they never wait for the storefront.
-        if (function_exists('fastcgi_finish_request')) {
-            fastcgi_finish_request();
-        }
+        // Hand the admin their response first so they never wait for the storefront.
+        Response::finishForClient();
         self::record(self::send());
     }
 

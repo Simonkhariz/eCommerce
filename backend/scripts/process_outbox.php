@@ -14,9 +14,10 @@ declare(strict_types=1);
  *   php backend/scripts/process_outbox.php            (one batch of up to 100)
  *   php backend/scripts/process_outbox.php --limit=500
  *
- * Windows Task Scheduler (every 5 minutes):
- *   schtasks /Create /SC MINUTE /MO 5 /TN "ShopCo Send Email" ^
- *     /TR "C:\xampp\php\php.exe C:\path\to\E-commerce\backend\scripts\process_outbox.php"
+ * Windows Task Scheduler (every minute; php-win.exe runs without a console window):
+ *   schtasks /Create /SC MINUTE /MO 1 /TN "ShopCo Send Email" ^
+ *     /TR "C:\xampp\php\php-win.exe C:\path\to\E-commerce\backend\scripts\process_outbox.php"
+ * cron (Linux):  * * * * *  php /var/www/shopco/backend/scripts/process_outbox.php
  */
 
 if (PHP_SAPI !== 'cli') {

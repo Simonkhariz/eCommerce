@@ -6,15 +6,18 @@ namespace App\Services;
 
 use App\Config\Env;
 use App\Database\Database;
+use App\Support\Response;
 use Throwable;
 
 /**
  * Store email, outbox first.
  *
  * Every email is a row in `email_outbox` whose payload holds everything needed to render it
- * (MailTemplates). Transactional emails get one immediate delivery attempt (they are queued from
- * afterCommit callbacks, so never inside an open transaction); anything that fails, and every
- * newsletter, is delivered by backend/scripts/process_outbox.php with retries and backoff.
+ * (MailTemplates). Transactional emails get one quick delivery attempt, but never while the
+ * shopper or admin waits: during a web request it runs after the response has been handed over
+ * (Response::finishForClient); command-line scripts deliver at once. Anything that fails, and
+ * every newsletter, is delivered by backend/scripts/process_outbox.php with retries and backoff.
+ * A dedup key is unique (migration 019), so the same email is never queued twice.
  *
  * Status is honest: 'sent' only when the SMTP server accepted the message or, in log mode, when it
  * was written to storage/logs/mail.log (transport = 'log', shown as "logged only" in the admin).
@@ -31,6 +34,8 @@ class MailService
     private const LEASE_MINUTES = 10;
 
     private static ?MailService $instance = null;
+    /** @var list<int> Outbox rows to deliver once this web request's response has gone out. */
+    private static array $afterResponse = [];
     private Database $db;
     private string $logPath;
     private ?MailTemplates $templates = null;
@@ -343,7 +348,8 @@ class MailService
     // =========================================================================
 
     /**
-     * Insert an outbox row (skipping exact duplicates) and optionally try to deliver it now.
+     * Insert an outbox row (skipping exact duplicates) and optionally make one quick delivery
+     * attempt: after the response during a web request, at once in a command-line script.
      * Returns false only when the email could not be queued at all.
      */
     public function queue(string $recipient, string $template, array $data, ?string $dedupKey, bool $deliverNow = true): bool
@@ -371,14 +377,46 @@ class MailService
                 [$recipient, mb_substr($subject, 0, 255), $template, $dedupKey, json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]
             );
         } catch (Throwable $e) {
+            // Another request queued the same email a moment earlier: it is already on its way.
+            if ($dedupKey !== null && (int) $e->getCode() === 1062) {
+                return true;
+            }
             error_log("[MailService] Could not queue {$template} for {$recipient}: " . $e->getMessage());
             return false;
         }
 
-        if ($deliverNow && !$this->db->inTransaction() && filter_var(Env::get('MAIL_SEND_IMMEDIATELY', 'true'), FILTER_VALIDATE_BOOLEAN)) {
-            $this->deliver($id);
+        if ($deliverNow && filter_var(Env::get('MAIL_SEND_IMMEDIATELY', 'true'), FILTER_VALIDATE_BOOLEAN)) {
+            if (PHP_SAPI !== 'cli') {
+                $this->deliverAfterResponse($id);
+            } elseif (!$this->db->inTransaction()) {
+                $this->deliver($id);
+            }
         }
         return true;
+    }
+
+    /**
+     * Deliver $id once the response has been handed to the client, so a slow or unreachable mail
+     * server never delays a checkout, a payment confirmation or an admin action. Whatever is still
+     * undelivered (also after a crash) is picked up by process_outbox.php.
+     */
+    private function deliverAfterResponse(int $id): void
+    {
+        if (self::$afterResponse === []) {
+            register_shutdown_function(static function (): void {
+                Response::finishForClient();
+                $ids = self::$afterResponse;
+                self::$afterResponse = [];
+                foreach ($ids as $queuedId) {
+                    try {
+                        self::getInstance()->deliver($queuedId);
+                    } catch (Throwable $e) {
+                        error_log("[MailService] Delivery after response failed for outbox #{$queuedId}: " . $e->getMessage());
+                    }
+                }
+            });
+        }
+        self::$afterResponse[] = $id;
     }
 
     /**
