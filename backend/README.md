@@ -258,6 +258,8 @@ schtasks /Create /SC DAILY /ST 03:00 /TN "ShopCo Database Check" /TR "C:\xampp\p
   chosen by `STORAGE_DRIVER`. `local` (default) keeps files in `public/uploads` (or `UPLOAD_DIR`).
   Keys are validated (`StorageKey`: no `..`, hidden files or odd characters) and the database only
   stores `/uploads/<key>`, so moving to an S3-compatible bucket later changes settings, not data.
+  `s3` keeps them in a private S3-compatible bucket (Cloudflare R2), and the API serves
+  `/uploads/<key>` from it (`MediaServer`). Setup: [`docs/STORAGE.md`](../docs/STORAGE.md).
 - The browser resizes photos to at most 2560 px and re-encodes them at quality 0.92 before upload
   (`lib/image-optimize.ts`); customers get copies sized for their screen from next/image (AVIF/WebP).
 - **Camera metadata is removed on upload** (`App\Support\ImageMetadata`: GPS location, device, owner,

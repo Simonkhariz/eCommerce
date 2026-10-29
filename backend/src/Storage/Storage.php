@@ -7,8 +7,9 @@ namespace App\Storage;
 use App\Config\Env;
 
 /**
- * The storage for uploaded pictures, chosen by STORAGE_DRIVER (default "local": the server's disk).
- * An S3-compatible bucket is added as another driver; callers only ever see ObjectStorage.
+ * The storage for uploaded pictures, chosen by STORAGE_DRIVER: "local" (default, the server's
+ * disk) or "s3" (an S3-compatible bucket such as Cloudflare R2; see S3Storage). Callers only ever
+ * see ObjectStorage.
  */
 final class Storage
 {
@@ -22,7 +23,8 @@ final class Storage
         $driver = strtolower(trim((string) Env::get('STORAGE_DRIVER', 'local'))) ?: 'local';
         return self::$uploads = match ($driver) {
             'local' => new LocalStorage(self::localRoot()),
-            default => throw new StorageError("Unknown STORAGE_DRIVER '{$driver}' (expected: local)."),
+            's3' => S3Storage::fromEnv(),
+            default => throw new StorageError("Unknown STORAGE_DRIVER '{$driver}' (expected: local or s3)."),
         };
     }
 

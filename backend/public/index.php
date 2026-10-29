@@ -38,6 +38,8 @@ use App\Middleware\CorsMiddleware;
 use App\Middleware\CustomerAuthMiddleware;
 use App\Middleware\JsonBodyMiddleware;
 use App\Services\MailService;
+use App\Storage\MediaServer;
+use App\Storage\Storage;
 use App\Support\Cache;
 use App\Support\Response;
 use App\Support\Router;
@@ -93,6 +95,17 @@ set_exception_handler(function (Throwable $e) use ($isDebug): void {
         $errorDetails
     );
 });
+
+// Pictures at /uploads/<key>: on the server's disk the web server sends the file before PHP
+// runs; when they live in a bucket (STORAGE_DRIVER=s3) the API serves them from there.
+$mediaMethod = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+$mediaPath = rawurldecode(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/');
+if (($mediaMethod === 'GET' || $mediaMethod === 'HEAD') && str_starts_with($mediaPath, '/uploads/')) {
+    $pictures = Storage::uploads();
+    if ($pictures->name() !== 'local') {
+        MediaServer::serve($pictures, substr($mediaPath, strlen('/uploads/')), $mediaMethod);
+    }
+}
 
 // 3. Handle CORS Allowlist & Browser Preflight
 CorsMiddleware::handle();
