@@ -17,13 +17,22 @@ interface ProductCardProps {
   product: Product;
   /** Load the photo straight away (for cards in the first row of a page). */
   preload?: boolean;
+  /** Cards per row from tablet width up (grid-cols-2 md:grid-cols-3 or md:grid-cols-4). */
+  columns?: 3 | 4;
 }
+
+// How wide the photo is shown, so the browser downloads a file that size: two per row on
+// phones, then three or four, and never wider than 300px once the page stops growing (1280px).
+const PHOTO_SIZES = {
+  3: '(max-width: 767px) 50vw, (max-width: 1023px) 33vw, (max-width: 1279px) 25vw, 300px',
+  4: '(max-width: 767px) 50vw, (max-width: 1279px) 25vw, 300px',
+} as const;
 
 /**
  * Catalogue card. The cart button never guesses an option: a product with a single option in
  * stock goes straight into the cart; otherwise a quick-add panel asks for colour and size.
  */
-export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = false }) => {
+export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = false, columns = 4 }) => {
   const router = useRouter();
   const { toggleWishlist, isInWishlist } = useWishlist();
   const { addToCart } = useCart();
@@ -61,7 +70,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = fal
             src={product.images[0]}
             alt=""
             fill
-            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+            sizes={PHOTO_SIZES[columns]}
             preload={preload}
             className={`object-cover group-hover:scale-105 transition-transform duration-300 ${soldOut ? 'opacity-60' : ''}`}
           />

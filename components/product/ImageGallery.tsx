@@ -75,7 +75,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, productName 
                 }`}
               >
                 {/* The first thumbnail is the main photo again: load it with the page like the main one. */}
-                <Image src={img} alt="" fill loading={idx === 0 ? 'eager' : undefined} sizes="(max-width: 640px) 33vw, 152px" className="object-cover object-center" />
+                <Image src={img} alt="" fill loading={idx === 0 ? 'eager' : undefined} sizes="(max-width: 639px) 120px, (max-width: 1023px) 112px, 168px" className="object-cover object-center" />
               </button>
             );
           })}

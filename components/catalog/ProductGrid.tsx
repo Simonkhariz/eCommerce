@@ -178,7 +178,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
           {products.map((product, index) => (
             // The first row (two cards on phones) is what the shopper sees first.
-            <ProductCard key={product.id} product={product} preload={index < 2} />
+            <ProductCard key={product.id} product={product} preload={index < 2} columns={3} />
           ))}
         </div>
       )}

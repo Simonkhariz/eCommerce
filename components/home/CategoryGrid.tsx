@@ -66,7 +66,7 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({ categories }) => {
                     fill
                     unoptimized={!canOptimizeImage(cat.image)}
                     onError={() => setFailed((f) => ({ ...f, [cat.slug]: true }))}
-                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw"
+                    sizes="(max-width: 767px) 50vw, (max-width: 1023px) 33vw, (max-width: 1279px) 16vw, 190px"
                     className="object-cover object-center group-hover:scale-110 transition-transform duration-500 opacity-90 group-hover:opacity-100"
                   />
                 )}
