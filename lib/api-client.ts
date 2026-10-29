@@ -6,6 +6,7 @@
 import { Product, ProductColor, ProductVariant, Review } from '@/types';
 import { optimizeImageForUpload } from '@/lib/image-optimize';
 import { productListFrom, productListPath } from '@/lib/catalog-query';
+import { clearQueryCache } from '@/lib/query-client';
 
 // Same-origin by default: next.config.mjs proxies /api/v1/* to the PHP backend so the
 // HTTP-only session cookies work without exposing session tokens to JavaScript.
@@ -562,6 +563,7 @@ export async function apiLogout(scope: 'customer' | 'admin' = 'customer'): Promi
       setMemoryCsrfToken(null);
     }
     clearApiCache();
+    clearQueryCache();
   }
 }
 

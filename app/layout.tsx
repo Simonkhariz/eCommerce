@@ -6,6 +6,7 @@ import { CartProvider } from '@/context/CartContext';
 import { WishlistProvider } from '@/context/WishlistContext';
 import { StoreShell } from '@/components/layout/StoreShell';
 import { StoreDataProvider, type StoreSeed } from '@/components/layout/StoreDataProvider';
+import { QueryProvider } from '@/components/layout/QueryProvider';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { serverApiGet } from '@/lib/server-api';
 
@@ -55,16 +56,18 @@ export default async function RootLayout({
   return (
     <html lang="en" className={`${satoshi.variable} ${spaceGrotesk.variable}`}>
       <body className="min-h-screen flex flex-col bg-white text-black antialiased selection:bg-black selection:text-white">
-        <StoreDataProvider seed={{ facets, shipping, payments }}>
-          <AuthProvider>
-            <CartProvider>
-              <WishlistProvider>
-                <StoreShell>{children}</StoreShell>
-                <AuthModal />
-              </WishlistProvider>
-            </CartProvider>
-          </AuthProvider>
-        </StoreDataProvider>
+        <QueryProvider>
+          <StoreDataProvider seed={{ facets, shipping, payments }}>
+            <AuthProvider>
+              <CartProvider>
+                <WishlistProvider>
+                  <StoreShell>{children}</StoreShell>
+                  <AuthModal />
+                </WishlistProvider>
+              </CartProvider>
+            </AuthProvider>
+          </StoreDataProvider>
+        </QueryProvider>
       </body>
     </html>
   );
