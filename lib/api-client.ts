@@ -5,6 +5,7 @@
 
 import { Product, ProductColor, ProductVariant, Review } from '@/types';
 import { optimizeImageForUpload } from '@/lib/image-optimize';
+import { productListFrom, productListPath } from '@/lib/catalog-query';
 
 // Same-origin by default: next.config.mjs proxies /api/v1/* to the PHP backend so the
 // HTTP-only session cookies work without exposing session tokens to JavaScript.
@@ -435,47 +436,8 @@ export async function getHomepageData(): Promise<HomepageData> {
  * Fetch filtered, searched, and paginated public product listing.
  */
 export async function getProducts(params: ProductQueryParams = {}): Promise<ProductListResponse> {
-  const query = new URLSearchParams();
-  if (params.category) query.set('category', params.category);
-  if (params.search) query.set('search', params.search);
-  if (params.min_price !== undefined) query.set('min_price', String(params.min_price));
-  if (params.max_price !== undefined) query.set('max_price', String(params.max_price));
-  if (params.dress_style) query.set('dress_style', params.dress_style);
-  if (params.colors && params.colors.length > 0) query.set('colors', params.colors.join(','));
-  if (params.sizes && params.sizes.length > 0) query.set('sizes', params.sizes.join(','));
-  if (params.on_sale) query.set('on_sale', '1');
-  if (params.is_featured) query.set('is_featured', '1');
-  if (params.flash_deals) query.set('flash_deals', '1');
-  if (params.sort) query.set('sort', params.sort);
-  if (params.page !== undefined) query.set('page', String(params.page));
-  if (params.per_page !== undefined) query.set('per_page', String(params.per_page));
-
-  const queryString = query.toString();
-  const endpoint = queryString ? `/products?${queryString}` : '/products';
-  
-  const json = await fetchFullFromApi<ApiProductSummary[]>(endpoint);
-
-  const rawItems = Array.isArray(json.data) ? json.data : [];
-  const meta = json.meta;
-
-  const pagination: PaginationMeta = meta
-    ? {
-        total: Number(meta.total ?? rawItems.length),
-        page: Number(meta.page ?? 1),
-        per_page: Number(meta.per_page ?? 12),
-        total_pages: Number(meta.total_pages ?? 1),
-      }
-    : {
-        total: rawItems.length,
-        page: 1,
-        per_page: 12,
-        total_pages: 1,
-      };
-
-  return {
-    items: rawItems,
-    pagination,
-  };
+  const json = await fetchFullFromApi<ApiProductSummary[]>(productListPath(params));
+  return productListFrom(json.data, json.meta);
 }
 
 /**

@@ -7,6 +7,14 @@
 const BACKEND_ORIGIN = (process.env.BACKEND_ORIGIN || 'http://127.0.0.1:8000').replace(/\/$/, '');
 
 export async function serverApiGet<T>(path: string, revalidate = 60): Promise<T | null> {
+  return (await serverApiGetFull<T>(path, revalidate))?.data ?? null;
+}
+
+/** Like serverApiGet, but keeps the response's `meta` (pagination on list endpoints). */
+export async function serverApiGetFull<T, M = Record<string, unknown>>(
+  path: string,
+  revalidate = 60
+): Promise<{ data: T; meta: M | null } | null> {
   try {
     const res = await fetch(`${BACKEND_ORIGIN}/api/v1${path}`, {
       headers: { Accept: 'application/json' },
@@ -14,8 +22,8 @@ export async function serverApiGet<T>(path: string, revalidate = 60): Promise<T 
       signal: AbortSignal.timeout(4000),
     });
     if (!res.ok) return null;
-    const json = (await res.json()) as { success?: boolean; data?: T };
-    return json.success && json.data !== undefined ? json.data : null;
+    const json = (await res.json()) as { success?: boolean; data?: T; meta?: M };
+    return json.success && json.data !== undefined ? { data: json.data, meta: json.meta ?? null } : null;
   } catch {
     return null;
   }

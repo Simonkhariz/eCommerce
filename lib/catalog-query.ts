@@ -4,6 +4,7 @@
  * Older parameter names (category, colors, sizes, newArrivals, topSelling...) are still read.
  */
 import type { FilterState } from '@/types';
+import type { ApiProductSummary, PaginationMeta, ProductListResponse, ProductQueryParams } from '@/lib/api-client';
 
 export const PAGE_SIZE = 12;
 
@@ -40,6 +41,16 @@ export function parseCatalogParams(params: URLSearchParams): FilterState {
     flashDeals: params.get('flash') === 'true' || params.get('flashDeals') === 'true',
     page: Math.max(1, Math.floor(num(params.get('page')) ?? 1)),
   };
+}
+
+/** A Next.js searchParams object as URLSearchParams (first value of a repeated key, like `get`). */
+export function urlParamsFrom(raw: Record<string, string | string[] | undefined>): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(raw)) {
+    const first = Array.isArray(value) ? value[0] : value;
+    if (first !== undefined) params.set(key, first);
+  }
+  return params;
 }
 
 export function buildCatalogUrl(f: FilterState): string {
@@ -87,6 +98,59 @@ export function apiSortFor(sortBy: FilterState['sortBy']): string {
     default:
       return 'best_selling';
   }
+}
+
+/** The /products request for a catalogue page. Used by the server render and the browser alike. */
+export function catalogApiParams(f: FilterState): ProductQueryParams {
+  return {
+    category: f.category || undefined,
+    search: f.searchQuery.trim() || undefined,
+    min_price: f.minPrice ?? undefined,
+    max_price: f.maxPrice ?? undefined,
+    dress_style: f.dressStyle || undefined,
+    colors: f.selectedColors.length ? f.selectedColors : undefined,
+    sizes: f.selectedSizes.length ? f.selectedSizes : undefined,
+    on_sale: f.onSale || undefined,
+    flash_deals: f.flashDeals || undefined,
+    sort: apiSortFor(f.sortBy),
+    page: f.page,
+    per_page: PAGE_SIZE,
+  };
+}
+
+/** API path for a product listing, e.g. "/products?category=hoodies&page=2". */
+export function productListPath(params: ProductQueryParams): string {
+  const query = new URLSearchParams();
+  if (params.category) query.set('category', params.category);
+  if (params.search) query.set('search', params.search);
+  if (params.min_price !== undefined) query.set('min_price', String(params.min_price));
+  if (params.max_price !== undefined) query.set('max_price', String(params.max_price));
+  if (params.dress_style) query.set('dress_style', params.dress_style);
+  if (params.colors && params.colors.length > 0) query.set('colors', params.colors.join(','));
+  if (params.sizes && params.sizes.length > 0) query.set('sizes', params.sizes.join(','));
+  if (params.on_sale) query.set('on_sale', '1');
+  if (params.is_featured) query.set('is_featured', '1');
+  if (params.flash_deals) query.set('flash_deals', '1');
+  if (params.sort) query.set('sort', params.sort);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.per_page !== undefined) query.set('per_page', String(params.per_page));
+
+  const queryString = query.toString();
+  return queryString ? `/products?${queryString}` : '/products';
+}
+
+/** A /products answer (data + meta) as items plus pagination. */
+export function productListFrom(data: unknown, meta?: Partial<PaginationMeta> | null): ProductListResponse {
+  const items = Array.isArray(data) ? (data as ApiProductSummary[]) : [];
+  const pagination: PaginationMeta = meta
+    ? {
+        total: Number(meta.total ?? items.length),
+        page: Number(meta.page ?? 1),
+        per_page: Number(meta.per_page ?? 12),
+        total_pages: Number(meta.total_pages ?? 1),
+      }
+    : { total: items.length, page: 1, per_page: 12, total_pages: 1 };
+  return { items, pagination };
 }
 
 export function hasActiveFilters(f: FilterState): boolean {
