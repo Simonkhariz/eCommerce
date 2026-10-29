@@ -4,6 +4,7 @@
  */
 
 import { API_BASE_URL, ApiError, PaginationMeta, apiRequest, apiRequestFull } from '@/lib/api-client';
+import { refreshAfter, refreshBellCounts, refreshStorageAlert } from '@/lib/admin-query-keys';
 
 export type { PaginationMeta };
 export { errorMessage } from '@/lib/api-client';
@@ -164,7 +165,7 @@ export function adminGetOrder(orderNumber: string) {
 }
 
 export function adminUpdateOrderStatus(orderNumber: string, status: OrderStatus, comment?: string) {
-  return send<AdminOrderDetail>(`/admin/orders/${encodeURIComponent(orderNumber)}/status`, 'PATCH', { status, comment });
+  return refreshAfter(send<AdminOrderDetail>(`/admin/orders/${encodeURIComponent(orderNumber)}/status`, 'PATCH', { status, comment }), refreshBellCounts);
 }
 
 export function adminAssignShipment(orderNumber: string, data: { carrier: string; tracking_number: string; tracking_url?: string; comment?: string }) {
@@ -177,7 +178,7 @@ export function adminConfirmDelivery(orderNumber: string, comment?: string) {
 
 /** Record a manual (bank transfer / WhatsApp) payment. The bank reference is required. */
 export function adminConfirmPayment(orderNumber: string, data: { reference: string; note?: string }) {
-  return send<AdminOrderDetail>(`/admin/orders/${encodeURIComponent(orderNumber)}/confirm-payment`, 'POST', data);
+  return refreshAfter(send<AdminOrderDetail>(`/admin/orders/${encodeURIComponent(orderNumber)}/confirm-payment`, 'POST', data), refreshBellCounts);
 }
 
 // =============================================================================
@@ -447,11 +448,11 @@ export function adminCreateRefund(data: {
   restock: boolean;
   provider_refund_reference?: string;
 }) {
-  return send<RefundRow>('/admin/refunds', 'POST', data);
+  return refreshAfter(send<RefundRow>('/admin/refunds', 'POST', data), refreshBellCounts);
 }
 
 export function adminResolveRefund(id: number, status: 'completed' | 'rejected') {
-  return send<RefundRow>(`/admin/refunds/${id}`, 'PATCH', { status });
+  return refreshAfter(send<RefundRow>(`/admin/refunds/${id}`, 'PATCH', { status }), refreshBellCounts);
 }
 
 // =============================================================================
@@ -818,7 +819,7 @@ export function adminGetStorageAlert(signal?: AbortSignal) {
 }
 
 export function adminUpdateDataSettings(data: Partial<DataSettings>) {
-  return send<DataSettings>('/admin/data/settings', 'PUT', data);
+  return refreshAfter(send<DataSettings>('/admin/data/settings', 'PUT', data), refreshStorageAlert);
 }
 
 export function adminGetDataRecords(rule: string, asOf: string, page: number) {
@@ -832,7 +833,7 @@ export function adminVerifyCleanup(password: string, asOf: string) {
 
 /** Step 2: the emailed code; removes exactly the records reviewed as of the challenge's time. */
 export function adminRunCleanup(confirmationId: string, code: string) {
-  return send<{ removed: Record<string, number> }>('/admin/data/cleanup', 'POST', { confirmation_id: confirmationId, code });
+  return refreshAfter(send<{ removed: Record<string, number> }>('/admin/data/cleanup', 'POST', { confirmation_id: confirmationId, code }), refreshStorageAlert);
 }
 
 export interface AdminAccount {

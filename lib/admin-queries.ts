@@ -1,16 +1,11 @@
 import { queryOptions } from '@tanstack/react-query';
 import { adminGetOrders, adminGetStorageAlert } from '@/lib/admin-api';
+import { adminKeys } from '@/lib/admin-query-keys';
 
 /**
- * TanStack Query keys and options for admin data (see lib/query-client.ts for the defaults).
- * Every key starts with ['admin', adminId], so one admin's cached data is never shown to
- * another, even if a session ends without signing out (sign-out also clears the cache).
+ * TanStack Query options for admin data (see lib/query-client.ts for the defaults, and
+ * lib/admin-query-keys.ts for the keys and the refreshes admin changes trigger).
  */
-export const adminKeys = {
-  all: (adminId: number) => ['admin', adminId] as const,
-  bell: (adminId: number) => ['admin', adminId, 'bell'] as const,
-  storageAlert: (adminId: number) => ['admin', adminId, 'storage-alert'] as const,
-};
 
 export interface BellCounts {
   /** WhatsApp transfers customers marked as paid, waiting for the admin to confirm. */
