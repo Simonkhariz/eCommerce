@@ -719,7 +719,8 @@ export interface SystemStatus {
   environment: 'production' | 'development';
   database: { connected: boolean; latency_ms: number | null };
   migrations: { applied: number; latest: string | null };
-  storage: { uploads_writable: boolean };
+  /** driver: where pictures are kept ('local' = the server's disk). */
+  storage: { uploads_writable: boolean; driver: string };
   payments: { kora: string; monnify: string };
   /** oldest_due_minutes: age of the oldest email waiting to be sent (null when none); large values mean the outbox worker is not running. */
   mail: { mode: 'smtp' | 'resend' | 'log_only'; outbox_pending: number; outbox_failed: number; oldest_due_minutes: number | null };

@@ -252,8 +252,12 @@ schtasks /Create /SC DAILY /ST 03:00 /TN "ShopCo Database Check" /TR "C:\xampp\p
 
 ### Pictures (uploads)
 - `POST /api/v1/admin/upload-image` (admins only) accepts JPEG, PNG and WebP up to 5 MB, checked by
-  content (not the file name); SVG is refused. Files get a new random name
-  (`prod_<date>_<time>_<random>`) in `public/uploads` (or `UPLOAD_DIR`) and are served at `/uploads/…`.
+  content (not the file name); SVG is refused. Files get a new server-made key
+  (`prod_<date>_<time>_<random>`) and the shop links to `/uploads/<key>`.
+- **Storage layer** (`App\Storage`): every save, read, list and delete goes through `ObjectStorage`,
+  chosen by `STORAGE_DRIVER`. `local` (default) keeps files in `public/uploads` (or `UPLOAD_DIR`).
+  Keys are validated (`StorageKey`: no `..`, hidden files or odd characters) and the database only
+  stores `/uploads/<key>`, so moving to an S3-compatible bucket later changes settings, not data.
 - The browser resizes photos to at most 2560 px and re-encodes them at quality 0.92 before upload
   (`lib/image-optimize.ts`); customers get copies sized for their screen from next/image (AVIF/WebP).
 - **Camera metadata is removed on upload** (`App\Support\ImageMetadata`: GPS location, device, owner,

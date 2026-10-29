@@ -19,8 +19,8 @@ use App\Support\RequestContext;
 use App\Support\Response;
 use App\Support\SessionCookie;
 use App\Support\StoreBrands;
+use App\Storage\Storage;
 use App\Support\StorefrontRefresh;
-use App\Support\UploadFiles;
 
 /**
  * Administrative operations: inventory, customers, payments, refunds, promotions, storefront
@@ -972,7 +972,7 @@ class AdminOperationsController
     public function getSystemStatus(): void
     {
         $dbPing = $this->db->ping();
-        $uploadDir = UploadFiles::directory();
+        $storage = Storage::uploads();
 
         $count = fn (string $sql): int => (int) ($this->db->fetchOne($sql)['c'] ?? 0);
         $outbox = $this->db->fetchOne(
@@ -982,7 +982,7 @@ class AdminOperationsController
 
         $checks = [
             'database' => $dbPing['connected'],
-            'uploads_writable' => is_dir($uploadDir) && is_writable($uploadDir),
+            'uploads_writable' => $storage->writable(),
             'kora' => self::koraMode() !== 'not_configured',
             'monnify' => self::monnifyMode() !== 'not_configured',
         ];
@@ -993,7 +993,7 @@ class AdminOperationsController
             'environment' => Env::isProduction() ? 'production' : 'development',
             'database' => ['connected' => $dbPing['connected'], 'latency_ms' => $dbPing['latency_ms'] ?? null],
             'migrations' => ['applied' => (int) ($migrations['c'] ?? 0), 'latest' => $migrations['latest'] ?? null],
-            'storage' => ['uploads_writable' => $checks['uploads_writable']],
+            'storage' => ['uploads_writable' => $checks['uploads_writable'], 'driver' => $storage->name()],
             'payments' => ['kora' => self::koraMode(), 'monnify' => self::monnifyMode()],
             'mail' => [
                 'mode' => self::mailMode(),

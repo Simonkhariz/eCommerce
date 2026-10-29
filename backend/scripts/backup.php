@@ -31,7 +31,8 @@ define('BASE_PATH', dirname(__DIR__));
 require_once BASE_PATH . '/src/autoload.php';
 
 use App\Config\Env;
-use App\Support\UploadFiles;
+use App\Storage\LocalStorage;
+use App\Storage\Storage;
 
 Env::load(BASE_PATH . '/.env');
 date_default_timezone_set(Env::get('APP_TIMEZONE', 'Africa/Lagos') ?: 'Africa/Lagos');
@@ -95,10 +96,13 @@ if ($code !== 0 || $dumped === 0) {
 }
 
 // 2. Uploaded pictures ----------------------------------------------------------------------
-$uploads = UploadFiles::directory();
+// On the server's disk they are archived here; in an S3-compatible bucket they are backed up
+// with the bucket's own tools (versioning, replication or a mirror to a second bucket).
+$storage = Storage::uploads();
+$uploads = $storage instanceof LocalStorage ? $storage->root() : null;
 $uploadsFile = "{$target}/uploads.tar.gz";
 $files = 0;
-if (is_dir($uploads)) {
+if ($uploads !== null && is_dir($uploads)) {
     $tarPath = "{$target}/uploads.tar";
     try {
         $tar = new PharData($tarPath);
@@ -130,6 +134,7 @@ $manifest = [
     'database_dump' => $entry($dbFile),
     'uploads_archive' => $entry($uploadsFile),
     'upload_files' => $files,
+    'uploads_storage' => $storage->name(),
 ];
 file_put_contents("{$target}/manifest.json", json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
 
@@ -141,3 +146,6 @@ printf(
     $files,
     is_file($uploadsFile) ? filesize($uploadsFile) / 1024 : 0
 );
+if ($uploads === null) {
+    printf("[backup] pictures are in %s storage: back them up with the bucket's own tools (not included here)\n", $storage->name());
+}

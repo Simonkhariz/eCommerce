@@ -8,9 +8,11 @@ use App\Middleware\JsonBodyMiddleware;
 use App\Repositories\CategoryRepository;
 use App\Repositories\ProductRepository;
 use App\Services\AuditService;
+use App\Storage\Storage;
+use App\Storage\StorageError;
+use App\Storage\StorageKey;
 use App\Support\ImageMetadata;
 use App\Support\RequestContext;
-use App\Support\UploadFiles;
 use App\Support\Response;
 use App\Validators\CategoryValidator;
 use App\Validators\ProductValidator;
@@ -411,32 +413,27 @@ class AdminCatalogController
             Response::error('Image exceeds maximum permitted file size of 5MB.', 422, 'FILE_TOO_LARGE');
         }
 
-        $extension = $allowedMimes[$mime];
-        $safeName = 'prod_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
+        // Product photos are public: never publish the camera's GPS location, device or owner.
+        ImageMetadata::strip($file['tmp_name'], $mime);
+        clearstatcache(true, $file['tmp_name']);
+        $size = (int) (@filesize($file['tmp_name']) ?: $file['size']);
 
-        // Uploads live only under the API's public root and are served at /uploads/* (proxied by
-        // Next.js), so new images work in production without rebuilding the frontend.
-        $uploadDir = UploadFiles::directory();
-        if (!is_dir($uploadDir)) {
-            @mkdir($uploadDir, 0755, true);
-        }
-
-        $savedPath = $uploadDir . '/' . $safeName;
-        if (!move_uploaded_file($file['tmp_name'], $savedPath)) {
+        // A server-made key in whichever storage holds pictures; the shop always links to
+        // /uploads/<key> (proxied by Next.js), so new images work without rebuilding the frontend.
+        $key = StorageKey::forUpload($allowedMimes[$mime]);
+        try {
+            $storage = Storage::uploads();
+            $storage->put($key, $file['tmp_name'], $mime, StorageKey::cacheControl($key));
+        } catch (StorageError $e) {
+            error_log('[Upload] ' . $e->getMessage());
             Response::error('Failed to save the uploaded image.', 500, 'FILE_SAVE_FAILED');
         }
-        @chmod($savedPath, 0644);
-        // Product photos are public: never publish the camera's GPS location, device or owner.
-        ImageMetadata::strip($savedPath, $mime);
-        clearstatcache(true, $savedPath);
-
-        $imageUrl = '/uploads/' . $safeName;
 
         Response::success([
-            'image_url' => $imageUrl,
-            'file_name' => $safeName,
+            'image_url' => $storage->url($key),
+            'file_name' => $key,
             'mime_type' => $mime,
-            'size_bytes' => (int) (@filesize($savedPath) ?: $file['size']),
+            'size_bytes' => $size,
         ], 'Image uploaded successfully.', 201);
     }
 }

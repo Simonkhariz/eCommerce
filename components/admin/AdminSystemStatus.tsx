@@ -146,9 +146,11 @@ function StatusBody({ data }: { data: SystemStatus }) {
               }
             />
             <Row
-              label="Image uploads folder"
+              label="Image storage"
               state={data.storage.uploads_writable ? 'ok' : 'fail'}
-              value={data.storage.uploads_writable ? 'Writable' : 'Not writable (product images cannot be uploaded)'}
+              value={`${data.storage.driver === 'local' ? 'Server disk' : data.storage.driver} · ${
+                data.storage.uploads_writable ? 'writable' : 'not writable (product images cannot be uploaded)'
+              }`}
             />
             <Row label="Shop page refresh after admin changes" state={refresh.state} value={refresh.text} />
           </ul>
