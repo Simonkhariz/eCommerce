@@ -23,7 +23,9 @@ Things left for the store owner after the speed, scale and bug-fix work (commits
 Also still open from earlier work:
 
 - [ ] Live Kora / Monnify keys and webhooks
-- [ ] SMTP settings for real email
+- [ ] Real email: Resend sending domain (DNS records + DMARC) and API key, then `MAIL_MAILER=resend`
+      in `backend/.env` on the server. Step by step, with a go-live checklist: `docs/EMAIL_SETUP.md`.
+      (SMTP also works if you prefer it.)
 - [ ] Schedule `expire_pending_orders`, `process_outbox` and `check_database` (see `backend/README.md`).
       Failed emails are already retried automatically by the API (a few a minute, never twice),
       so this is about punctuality on a quiet shop. On the live server use the three cron lines

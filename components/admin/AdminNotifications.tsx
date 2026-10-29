@@ -104,15 +104,17 @@ export function AdminNotifications() {
         <div className="mb-3">
           <Notice tone="warning">
             Email is in log-only mode: messages are written to <code>backend/storage/logs/mail.log</code> and do not reach customers. Set
-            MAIL_MAILER=smtp and the MAIL_* settings in backend/.env to deliver them.
+            MAIL_MAILER=resend (with RESEND_API_KEY) or MAIL_MAILER=smtp and the MAIL_* settings in backend/.env to deliver them
+            (see docs/EMAIL_SETUP.md).
           </Notice>
         </div>
       )}
       {status && status.mail.oldest_due_minutes !== null && status.mail.oldest_due_minutes > 15 && (
         <div className="mb-3">
           <Notice tone="warning">
-            The oldest queued email has been waiting {status.mail.oldest_due_minutes} minutes. Schedule
-            <code> php backend/scripts/process_outbox.php</code> every few minutes, or use “Send queued now”.
+            The oldest email due to be sent has waited {status.mail.oldest_due_minutes} minutes. Emails are retried automatically
+            while the shop has visitors; schedule <code>php backend/scripts/process_outbox.php</code> every minute (cron) so they
+            also go out when it is quiet, or use “Send queued now”.
           </Notice>
         </div>
       )}

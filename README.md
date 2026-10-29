@@ -72,6 +72,8 @@ real email, set in `backend/.env` either `MAIL_MAILER=resend` with `RESEND_API_K
 `MAIL_FROM_ADDRESS` on a domain verified in Resend, or `MAIL_MAILER=smtp` with the `MAIL_*`
 settings. Either way the outbox, retries and duplicate protection are the same; with Resend each
 email also carries an idempotency key, so a retry after a lost answer is never a second email.
+Domain and DNS setup (SPF, DKIM, DMARC), monitoring and what to do when emails fail:
+[`docs/EMAIL_SETUP.md`](docs/EMAIL_SETUP.md).
 
 ---
 

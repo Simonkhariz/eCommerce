@@ -121,9 +121,9 @@ function StatusBody({ data }: { data: SystemStatus }) {
 
       {data.mail.oldest_due_minutes !== null && data.mail.oldest_due_minutes > 15 && (
         <Notice tone="warning">
-          The oldest queued email has waited {data.mail.oldest_due_minutes} minutes, so the email worker is probably not scheduled. Run{' '}
-          <code className="font-mono text-xs">php backend/scripts/process_outbox.php</code> every few minutes (Task Scheduler or cron), or use
-          “Send queued now” on the Email outbox page.
+          The oldest email due to be sent has waited {data.mail.oldest_due_minutes} minutes. Emails are retried automatically while the shop
+          has visitors; schedule <code className="font-mono text-xs">php backend/scripts/process_outbox.php</code> every minute (cron or Task
+          Scheduler) so they also go out when it is quiet, or use “Send queued now” on the Email outbox page.
         </Notice>
       )}
 
