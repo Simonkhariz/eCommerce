@@ -1,15 +1,19 @@
 /**
- * Shrink admin photo uploads in the browser before they are sent: resize to at most
- * MAX_EDGE pixels on the longest side and re-encode as WebP. A 4–8 MB phone photo usually
- * becomes 150–400 KB, so product, category and banner images load fast for customers.
- * Re-encoding also drops camera metadata (location, device) from the file.
+ * Prepare admin photo uploads in the browser before they are sent: resize to at most MAX_EDGE
+ * pixels on the longest side and re-encode at high quality. The stored file is the master copy:
+ * customers get copies resized and re-encoded for their screen by next/image (AVIF/WebP), so the
+ * master is kept sharp (quality 0.92) rather than small. A 4–8 MB phone photo usually becomes
+ * 0.4–1.5 MB.
  *
- * Falls back to the original file whenever conversion is not possible or not smaller, so an
- * upload never fails because of this step (the server still checks type and size).
+ * Re-encoding drops camera metadata (location, device) from the file, so the re-encoded copy is
+ * used even when it is not smaller. WebP is preferred; browsers that cannot encode WebP (Safari)
+ * get a JPEG instead (PNG for PNG sources, which may be transparent). Only if both fail, or the
+ * copy would pass the server's 5 MB limit, the original goes up; the server strips its metadata.
  */
 
-const MAX_EDGE = 1800;
-const WEBP_QUALITY = 0.82;
+const MAX_EDGE = 2560;
+const QUALITY = 0.92;
+const SERVER_LIMIT_BYTES = 5 * 1024 * 1024;
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
@@ -55,13 +59,19 @@ export async function optimizeImageForUpload(file: File): Promise<File> {
     ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
     if ('close' in source) source.close();
 
-    const blob = await canvasToBlob(canvas, 'image/webp', WEBP_QUALITY);
-    // Some browsers cannot encode WebP and silently return PNG instead: keep the original then.
-    if (!blob || blob.type !== 'image/webp') return file;
-    if (blob.size >= file.size && scale === 1) return file;
+    // Some browsers cannot encode WebP and silently return PNG instead: then JPEG (or PNG for a
+    // PNG source, which may be transparent), which every browser can encode.
+    let blob = await canvasToBlob(canvas, 'image/webp', QUALITY);
+    if (!blob || blob.type !== 'image/webp') {
+      const fallback = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+      blob = await canvasToBlob(canvas, fallback, QUALITY);
+      if (!blob || blob.type !== fallback) return file;
+    }
+    if (blob.size > SERVER_LIMIT_BYTES) return file;
 
+    const extension = blob.type === 'image/webp' ? 'webp' : blob.type === 'image/png' ? 'png' : 'jpg';
     const base = file.name.replace(/\.[^.]+$/, '') || 'photo';
-    return new File([blob], `${base}.webp`, { type: 'image/webp', lastModified: Date.now() });
+    return new File([blob], `${base}.${extension}`, { type: blob.type, lastModified: Date.now() });
   } catch {
     return file;
   }

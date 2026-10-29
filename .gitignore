@@ -37,6 +37,8 @@ next-env.d.ts
 backend/storage/logs/*
 backend/storage/framework/*
 backend/storage/cache/*
+backend/storage/test-uploads/
+backend/storage/backups/
 !backend/storage/**/.gitkeep
 backend/public/uploads/*
 !backend/public/uploads/.gitkeep

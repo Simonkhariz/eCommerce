@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import Image from 'next/image';
+import Image from '@/components/ui/StoreImage';
 import Link from 'next/link';
 import { useCart } from '@/context/CartContext';
 import { HugeiconsIcon } from '@hugeicons/react';

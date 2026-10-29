@@ -250,6 +250,25 @@ Windows Task Scheduler (daily at 03:00):
 schtasks /Create /SC DAILY /ST 03:00 /TN "ShopCo Database Check" /TR "C:\xampp\php\php.exe C:\path\to\E-commerce\backend\scripts\check_database.php"
 ```
 
+### Pictures (uploads)
+- `POST /api/v1/admin/upload-image` (admins only) accepts JPEG, PNG and WebP up to 5 MB, checked by
+  content (not the file name); SVG is refused. Files get a new random name
+  (`prod_<date>_<time>_<random>`) in `public/uploads` (or `UPLOAD_DIR`) and are served at `/uploads/…`.
+- The browser resizes photos to at most 2560 px and re-encodes them at quality 0.92 before upload
+  (`lib/image-optimize.ts`); customers get copies sized for their screen from next/image (AVIF/WebP).
+- **Camera metadata is removed on upload** (`App\Support\ImageMetadata`: GPS location, device, owner,
+  comments, XMP/IPTC), without re-encoding and without GD. Only the rotation is kept.
+- **Pictures nothing uses any more** (replaced product photos, changed banners, uploads from forms that
+  were never saved) are listed in admin → Data & storage under technical items once they are a day
+  old, and removed only by a confirmed clean-up, like every other clean-up (`App\Support\UploadFiles`).
+- Apache (`public/.htaccess`, needs mod_headers) lets browsers keep admin uploads for a year (their
+  names never repeat) and other pictures for a day. nginx equivalent:
+  ```nginx
+  location ~* ^/uploads/prod_\d{8}_\d{6}_[0-9a-f]{8}\.(jpe?g|png|webp)$ { add_header Cache-Control "public, max-age=31536000, immutable"; }
+  location ~* ^/uploads/.+\.(jpe?g|png|webp)$ { add_header Cache-Control "public, max-age=86400"; }
+  ```
+- Back them up with `scripts/backup.php` (database + pictures; see `docs/BACKUPS.md`).
+
 ### Admin panel
 The admin lives at `/admin` on the storefront (one route per screen, e.g. `/admin/orders`, `/admin/shipping/zones`).
 On a brand-new database `/admin` sends you to `/admin/setup` to create the first administrator and the store

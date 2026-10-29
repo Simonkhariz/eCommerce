@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Database\Database;
+use App\Support\UploadFiles;
 use DomainException;
 
 /**
@@ -62,10 +63,11 @@ final class DatabaseCleanup
         'used_or_expired_sign_in_links' => 'Used or expired sign-in links',
         'old_rate_limit_counters' => 'Old rate-limit counters',
         'old_slow_request_records' => 'Slow-request records older than 30 days',
+        'unused_images' => 'Picture files no product, banner or category uses (older than a day)',
     ];
 
-    /** Technical rows with no customer or business data: they only raise an alert when many pile up. */
-    public const HOUSEKEEPING = ['expired_sessions', 'used_or_expired_sign_in_links', 'old_rate_limit_counters', 'old_slow_request_records'];
+    /** Technical rows and files with no customer or business data: they only raise an alert when many pile up. */
+    public const HOUSEKEEPING = ['expired_sessions', 'used_or_expired_sign_in_links', 'old_rate_limit_counters', 'old_slow_request_records', 'unused_images'];
 
     /** An order in one of these states still needs the customer's details. */
     private const OPEN_ORDER_STATES = "'pending_payment', 'paid', 'processing', 'shipped', 'refund_pending'";
@@ -125,6 +127,7 @@ final class DatabaseCleanup
         foreach ($this->rules($asOf, $s) as $name => $rule) {
             $ids[$name] = isset($rule['ids']) ? $this->column($rule['ids'], $rule['types'], $rule['params']) : [];
         }
+        $ids['unused_images'] = UploadFiles::unused($this->db, $asOf);
         if ($s['retention_customer_days'] > 0) {
             $ids['inactive_customers'] = $emails;
             $ids['inactive_customer_accounts'] = $this->columnForEmails(
@@ -189,6 +192,15 @@ final class DatabaseCleanup
                 ['key' => 'account', 'label' => 'Account', 'type' => 'text'],
             ];
             return ['columns' => $columns, 'items' => $items, 'total' => count($all)];
+        }
+
+        if ($rule === 'unused_images') {
+            $columns = [
+                ['key' => 'file', 'label' => 'File', 'type' => 'text'],
+                ['key' => 'size_kb', 'label' => 'Size (KB)', 'type' => 'number'],
+                ['key' => 'modified', 'label' => 'Last changed', 'type' => 'date'],
+            ];
+            return ['columns' => $columns, 'items' => UploadFiles::describe($slice), 'total' => count($all)];
         }
 
         $display = $this->display()[$rule];
@@ -276,6 +288,9 @@ final class DatabaseCleanup
                 $this->db->executeUpdate("UPDATE `reviews` SET `author_email` = NULL WHERE `author_email` IN ({$in})", str_repeat('s', count($chunk)), $chunk);
             }
             return count($ids);
+        }
+        if ($rule === 'unused_images') {
+            return UploadFiles::delete($ids);
         }
 
         $targets = [

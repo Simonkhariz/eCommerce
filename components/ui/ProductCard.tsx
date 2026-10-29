@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
+import Image from '@/components/ui/StoreImage';
 import { useRouter } from 'next/navigation';
 import { Product } from '@/types';
 import { formatPrice } from '@/lib/currency';

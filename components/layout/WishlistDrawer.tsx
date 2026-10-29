@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
+import Image from '@/components/ui/StoreImage';
 import { useWishlist } from '@/context/WishlistContext';
 import { formatPrice } from '@/lib/currency';
 import { PRODUCT_IMAGE_PLACEHOLDER } from '@/lib/api-client';

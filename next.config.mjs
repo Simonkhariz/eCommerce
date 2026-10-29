@@ -30,26 +30,12 @@ const nextConfig = {
       { source: '/uploads/:path*', destination: `${BACKEND_ORIGIN}/uploads/:path*` },
     ];
   },
+  // Only the shop's own pictures (/images, /uploads) are resized: no outside hosts are allowed,
+  // so /_next/image cannot be used to fetch and resize images from other sites. Pictures linked
+  // from elsewhere are shown as they are (components/ui/StoreImage.tsx).
   images: {
     formats: ['image/avif', 'image/webp'],
     minimumCacheTTL: 86400,
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'images.unsplash.com',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'images.pexels.com',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'cdn.dummyjson.com',
-        pathname: '/**',
-      }
-    ],
   },
 };
 

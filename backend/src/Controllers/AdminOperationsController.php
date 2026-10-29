@@ -20,6 +20,7 @@ use App\Support\Response;
 use App\Support\SessionCookie;
 use App\Support\StoreBrands;
 use App\Support\StorefrontRefresh;
+use App\Support\UploadFiles;
 
 /**
  * Administrative operations: inventory, customers, payments, refunds, promotions, storefront
@@ -971,7 +972,7 @@ class AdminOperationsController
     public function getSystemStatus(): void
     {
         $dbPing = $this->db->ping();
-        $uploadDir = dirname(__DIR__, 2) . '/public/uploads';
+        $uploadDir = UploadFiles::directory();
 
         $count = fn (string $sql): int => (int) ($this->db->fetchOne($sql)['c'] ?? 0);
         $outbox = $this->db->fetchOne(

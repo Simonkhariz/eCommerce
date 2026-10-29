@@ -8,7 +8,9 @@ use App\Middleware\JsonBodyMiddleware;
 use App\Repositories\CategoryRepository;
 use App\Repositories\ProductRepository;
 use App\Services\AuditService;
+use App\Support\ImageMetadata;
 use App\Support\RequestContext;
+use App\Support\UploadFiles;
 use App\Support\Response;
 use App\Validators\CategoryValidator;
 use App\Validators\ProductValidator;
@@ -414,15 +416,19 @@ class AdminCatalogController
 
         // Uploads live only under the API's public root and are served at /uploads/* (proxied by
         // Next.js), so new images work in production without rebuilding the frontend.
-        $uploadDir = BASE_PATH . '/public/uploads';
+        $uploadDir = UploadFiles::directory();
         if (!is_dir($uploadDir)) {
             @mkdir($uploadDir, 0755, true);
         }
 
-        if (!move_uploaded_file($file['tmp_name'], $uploadDir . '/' . $safeName)) {
+        $savedPath = $uploadDir . '/' . $safeName;
+        if (!move_uploaded_file($file['tmp_name'], $savedPath)) {
             Response::error('Failed to save the uploaded image.', 500, 'FILE_SAVE_FAILED');
         }
-        @chmod($uploadDir . '/' . $safeName, 0644);
+        @chmod($savedPath, 0644);
+        // Product photos are public: never publish the camera's GPS location, device or owner.
+        ImageMetadata::strip($savedPath, $mime);
+        clearstatcache(true, $savedPath);
 
         $imageUrl = '/uploads/' . $safeName;
 
@@ -430,7 +436,7 @@ class AdminCatalogController
             'image_url' => $imageUrl,
             'file_name' => $safeName,
             'mime_type' => $mime,
-            'size_bytes' => $file['size'],
+            'size_bytes' => (int) (@filesize($savedPath) ?: $file['size']),
         ], 'Image uploaded successfully.', 201);
     }
 }

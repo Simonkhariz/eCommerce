@@ -33,6 +33,9 @@ Also still open from earlier work:
       (optional): `schtasks /Create /SC MINUTE /MO 1 /TN "ShopCo Send Email" /TR "C:\xampp\php\php-win.exe C:\Users\smnkh\Desktop\E-templates\E-commerce\backend\scripts\process_outbox.php"`
       `check_database` deletes nothing: it emails you when the database is big or slow, or when old data waits for your review.
 - [ ] Site-content TODOs (about, contact, policies)
+- [ ] Backups: schedule `php backend/scripts/backup.php` daily on the server and copy each backup
+      off the server (another machine or a separate bucket). Pictures are not in git, so this is
+      their only copy. Steps and a restore guide: `docs/BACKUPS.md`.
 - [ ] Optional: make admin changes show on the shop at once. Put one random value (at least 32
       characters, e.g. from `php -r "echo bin2hex(random_bytes(24));"`) in `REVALIDATE_SECRET`
       in both `.env.local` and `backend/.env`, set `STOREFRONT_REVALIDATE_URL` in `backend/.env`

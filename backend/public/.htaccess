@@ -3,11 +3,11 @@
 # Directs all requests to index.php while preserving static files
 # -----------------------------------------------------------------------------
 
+# Prevent directory browsing (also when mod_rewrite is not loaded)
+Options -Indexes
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
-
-    # Prevent directory browsing
-    Options -Indexes
 
     # Pass Authorization header to PHP
     RewriteCond %{HTTP:Authorization} .
@@ -17,6 +17,20 @@
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# Uploaded pictures (/uploads). Browsers and the storefront's image optimiser reuse what these
+# headers allow. Admin uploads get a new, unique name every time (prod_<date>_<time>_<random>),
+# so they never change and may be kept for a year; other pictures (catalogue photos with fixed
+# names) are kept for a day. Later rules win, so the specific one comes last.
+<IfModule mod_headers.c>
+    <FilesMatch "\.(jpe?g|png|webp)$">
+        Header set Cache-Control "public, max-age=86400"
+        Header set X-Content-Type-Options "nosniff"
+    </FilesMatch>
+    <FilesMatch "^prod_[0-9]{8}_[0-9]{6}_[0-9a-f]{8}\.(jpe?g|png|webp)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
 </IfModule>
 
 # Block hidden files (.env, .git)
