@@ -30,21 +30,53 @@ waits for the Cloudflare account.
 3. **Create an API token** (R2 → Manage API tokens): permission **Object Read & Write**, applied to
    **this bucket only**. Copy the **Access Key ID** and **Secret Access Key** (shown once) and note your
    **Account ID**.
-4. **Configure the API** in `backend/.env` on the server (never in the storefront's `.env.local`):
+4. **Add the bucket settings** to `backend/.env` on the server (never in the storefront's
+   `.env.local`), and **leave `STORAGE_DRIVER=local` for now**:
    ```ini
-   STORAGE_DRIVER=s3
    S3_ENDPOINT=https://<account id>.r2.cloudflarestorage.com
    S3_REGION=auto
    S3_BUCKET=shopco-media
    S3_ACCESS_KEY_ID=...
    S3_SECRET_ACCESS_KEY=...
    ```
-5. **Check** admin → System status: "Image storage" should say **s3 · writable**.
-6. **Move the existing pictures** with the migration step (roadmap Prompt 24): a small test batch
-   first, checked, with the originals kept on the server until everything is confirmed.
+5. **Copy the pictures** (next section): a test batch first, then everything.
+6. **Switch**: set `STORAGE_DRIVER=s3`, then check admin → System status ("Image storage" should
+   say **s3 · writable**) and a few product pages.
 
-Do step 4 only when step 6 is ready: once `STORAGE_DRIVER=s3` is set, the shop looks for pictures in
-the bucket, and pictures still only on disk would not show.
+Switch only after every picture has been copied: once `STORAGE_DRIVER=s3` is set, the shop looks
+for pictures in the bucket, and pictures that are still only on the disk would not show.
+
+## Copying the pictures (`backend/scripts/migrate_uploads.php`)
+
+The script only copies. It never deletes or moves anything; a file that already exists in the
+bucket with different content is left alone and reported. Each copy is checked: same bytes
+(SHA-256), same size, picture content type and caching in the bucket. Every run that copies
+writes a report to `backend/storage/migrations/`. Running it again is safe.
+
+```sh
+# 1. See what would be copied (nothing is written)
+php backend/scripts/migrate_uploads.php
+
+# 2. Test batch: 5 pictures, the ones the shop uses first
+php backend/scripts/migrate_uploads.php --apply
+
+# 3. Check the copies through the shop's own links: start a second API on port 8001 with
+#    STORAGE_DRIVER=s3 (an env file copy), then
+php backend/scripts/migrate_uploads.php --apply --keys=<a key from step 2> --verify-url=http://127.0.0.1:8001
+
+# 4. Everything, once the batch looks right; needs a fresh backup that still checks out
+php backend/scripts/backup.php
+php backend/scripts/migrate_uploads.php --apply --all --backup=backend/storage/backups/<folder>
+```
+
+Then switch (step 6 above). Run step 4 once more straight after switching, to copy any picture
+uploaded in the meantime (already-copied files are only checked again).
+
+**Rollback.** Before the switch, nothing has changed for the shop: leave `STORAGE_DRIVER=local`.
+After the switch, set `STORAGE_DRIVER=local` again; the originals are still on the disk. To bring
+back pictures uploaded while the bucket was in use, first run
+`php backend/scripts/migrate_uploads.php --apply --all --backup=<folder> --to=local`.
+Delete the bucket copies (in the Cloudflare dashboard) only when you are sure you will not go back.
 
 ## Other S3-compatible providers
 
@@ -56,7 +88,7 @@ The same settings work for Backblaze B2, AWS S3, MinIO AIStor or Garage: set `S3
 - With `STORAGE_DRIVER=s3`, start PHP's built-in server with the router so `/uploads/…` reaches
   the API: `php -S 127.0.0.1:8000 -t backend/public backend/dev-router.php`. Apache (`.htaccess`) and
   nginx (`try_files … /index.php`) already do this.
-- Tests use a local stand-in S3 API (`backend/tests/support/fake_s3.php`) that verifies every
+- Tests (`S3StorageTest`, `MediaMigrationTest`) use a local stand-in S3 API (`backend/tests/support/fake_s3.php`) that verifies every
   signature; nothing is sent to Cloudflare.
 
 ## Backups

@@ -13,6 +13,7 @@ declare(strict_types=1);
  */
 
 require __DIR__ . '/support/TestKit.php';
+require __DIR__ . '/support/FakeS3.php';
 
 use App\Storage\S3Signer;
 use App\Storage\S3Storage;
@@ -34,36 +35,12 @@ $t->check('get-vanilla-query-order-key-case', 'b97d918cfa904a5beff61c982a1b6f458
 $t->check('post-x-www-form-urlencoded', 'ff11897932ad3f4e8b18135d722051e5ac45fc38421b1da7b9d196a0fe09473a', $sig($aws->authorization('POST', '/', [], $base + ['Content-Type' => 'application/x-www-form-urlencoded'], hash('sha256', 'Param1=value1'), $date)));
 
 // -----------------------------------------------------------------------------
-$dir = sys_get_temp_dir() . '/shopco-fake-s3-' . getmypid();
-@mkdir($dir, 0700, true);
 $s3Port = (int) (getenv('TEST_S3_PORT') ?: 8111);
-$bucket = 'shopco-media-test';
-$access = 'TESTKEY' . strtoupper(bin2hex(random_bytes(4)));
-$secret = bin2hex(random_bytes(20));
-$fakeEnv = ['FAKE_S3_DIR' => $dir, 'FAKE_S3_BUCKET' => $bucket, 'FAKE_S3_ACCESS_KEY' => $access, 'FAKE_S3_SECRET' => $secret, 'FAKE_S3_PAGE' => '2'];
-$fake = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$s3Port}", __DIR__ . '/support/fake_s3.php'], [1 => ['file', "{$dir}/server.log", 'w'], 2 => ['file', "{$dir}/server.log", 'a']], $pipes, BASE_PATH, array_merge(getenv(), $fakeEnv));
-$up = false;
-for ($i = 0; $i < 40 && !$up; $i++) {
-    usleep(150000);
-    $up = @fsockopen('127.0.0.1', $s3Port) !== false;
-}
-$t->check('stand-in S3 API started', true, $up);
-$apiProc = null;
+$fake = new FakeS3($t, $s3Port, 2);
+[$dir, $bucket, $access, $secret] = [$fake->dir, $fake->bucket, $fake->access, $fake->secret];
 $tmp = "{$dir}/work";
-@mkdir($tmp, 0700, true);
-$t->cleanup(function () use ($fake, &$apiProc, $dir): void {
-    if (is_resource($apiProc)) {
-        proc_terminate($apiProc);
-    }
-    proc_terminate($fake);
-    $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
-    foreach ($items as $item) {
-        $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
-    }
-    @rmdir($dir);
-});
-$requests = static fn (): int => count(file("{$dir}/requests.log", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []);
-$mode = static fn (string $m) => file_put_contents("{$dir}/mode", $m);
+$requests = static fn (): int => $fake->requests();
+$mode = static fn (string $m) => $fake->mode($m);
 $storage = new S3Storage("http://127.0.0.1:{$s3Port}", 'auto', $bucket, $access, $secret, 'uploads/', true, 2);
 $throws = static function (callable $fn): ?string {
     try {
@@ -131,19 +108,7 @@ $t->ok('missing settings are a clear error', str_contains((string) $throws(fn ()
 $t->section('The shop on STORAGE_DRIVER=s3: uploads and /uploads serving');
 $apiPort = (int) (getenv('TEST_S3_API_PORT') ?: 8112);
 $api = "http://127.0.0.1:{$apiPort}/api/v1";
-$lines = array_values(array_filter(
-    file((string) getenv('SHOPCO_ENV_FILE'), FILE_IGNORE_NEW_LINES) ?: [],
-    static fn (string $l): bool => !preg_match('/^(STORAGE_DRIVER|S3_[A-Z_]+|STOREFRONT_REVALIDATE_URL)=/', $l)
-));
-$lines = array_merge($lines, ['STORAGE_DRIVER=s3', "S3_ENDPOINT=http://127.0.0.1:{$s3Port}", 'S3_REGION=auto', "S3_BUCKET={$bucket}", "S3_ACCESS_KEY_ID={$access}", "S3_SECRET_ACCESS_KEY={$secret}", 'STOREFRONT_REVALIDATE_URL=']);
-file_put_contents("{$dir}/env", implode("\n", $lines) . "\n");
-$apiProc = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$apiPort}", '-t', BASE_PATH . '/public', BASE_PATH . '/dev-router.php'], [1 => ['file', "{$dir}/api.log", 'w'], 2 => ['file', "{$dir}/api.log", 'a']], $apiPipes, BASE_PATH, array_merge(getenv(), ['SHOPCO_ENV_FILE' => "{$dir}/env"]));
-$apiUp = false;
-for ($i = 0; $i < 50 && !$apiUp; $i++) {
-    usleep(200000);
-    $apiUp = @file_get_contents("{$api}/health") !== false;
-}
-$t->check('test API on S3 storage started', true, $apiUp);
+$fake->startApi($apiPort, $fake->envFile('env', array_merge($fake->envLines(), ['STOREFRONT_REVALIDATE_URL='])));
 
 $admin = $t->adminSession('s3');
 $login = $t->http('POST', "{$api}/auth/login", ['json' => ['email' => $admin['email'], 'password' => $admin['password']], 'jar' => 's3-admin']);

@@ -114,6 +114,30 @@ final class S3Storage implements ObjectStorage
         throw $this->failure('check', $response);
     }
 
+    /**
+     * The stored object's details, or null when it does not exist (used to verify a migration).
+     *
+     * @return array{size: int, content_type: string, cache_control: string, etag: string}|null
+     */
+    public function head(string $key): ?array
+    {
+        StorageKey::assertValid($key);
+        $response = $this->request('HEAD', $this->prefix . $key);
+        if ($response['status'] === 404) {
+            return null;
+        }
+        if ($response['status'] !== 200) {
+            throw $this->failure('check', $response);
+        }
+        $h = $response['headers'];
+        return [
+            'size' => (int) ($h['content-length'] ?? -1),
+            'content_type' => (string) ($h['content-type'] ?? ''),
+            'cache_control' => (string) ($h['cache-control'] ?? ''),
+            'etag' => trim((string) ($h['etag'] ?? ''), '"'),
+        ];
+    }
+
     public function delete(string $key): bool
     {
         // S3 answers a delete the same way whether or not the object existed, so check first.
@@ -173,7 +197,7 @@ final class S3Storage implements ObjectStorage
      *
      * @param array<string, string> $query
      * @param array<string, string> $headers
-     * @return array{status: int, body: string}
+     * @return array{status: int, body: string, headers: array<string, string>}
      */
     private function request(string $method, string $objectPath, array $query = [], string $body = '', array $headers = []): array
     {
@@ -200,6 +224,7 @@ final class S3Storage implements ObjectStorage
             }
         }
 
+        $received = [];
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_CUSTOMREQUEST => $method,
@@ -209,6 +234,13 @@ final class S3Storage implements ObjectStorage
             CURLOPT_TIMEOUT => self::TIMEOUT,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_NOBODY => $method === 'HEAD',
+            CURLOPT_HEADERFUNCTION => static function ($ch, string $line) use (&$received): int {
+                if (str_contains($line, ':')) {
+                    [$name, $value] = explode(':', $line, 2);
+                    $received[strtolower(trim($name))] = trim($value);
+                }
+                return strlen($line);
+            },
         ]);
         if ($method === 'PUT') {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
@@ -222,10 +254,10 @@ final class S3Storage implements ObjectStorage
         if ($raw === false) {
             throw new StorageError('The picture storage could not be reached: ' . mb_substr($error, 0, 200));
         }
-        return ['status' => $status, 'body' => (string) $raw];
+        return ['status' => $status, 'body' => (string) $raw, 'headers' => $received];
     }
 
-    /** @param array{status: int, body: string} $response */
+    /** @param array{status: int, body: string, headers: array<string, string>} $response */
     private function failure(string $action, array $response): StorageError
     {
         $code = preg_match('#<Code>([^<]{1,80})</Code>#', $response['body'], $m) ? " ({$m[1]})" : '';

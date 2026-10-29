@@ -131,6 +131,11 @@ switch ($method) {
         }
         $meta = json_decode((string) @file_get_contents($file($key) . '.meta'), true) ?: [];
         header('Content-Type: ' . ($meta['content_type'] ?? 'application/octet-stream'));
+        if (($meta['cache_control'] ?? '') !== '') {
+            header('Cache-Control: ' . $meta['cache_control']);
+        }
+        header('ETag: "' . md5_file($file($key)) . '"');
+        header('Content-Length: ' . filesize($file($key)));
         http_response_code(200);
         if ($method === 'GET') {
             readfile($file($key));

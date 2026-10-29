@@ -124,19 +124,32 @@ final class UploadFiles
     /** @return array<string, true> every storage key the database refers to */
     private static function referenced(Database $db): array
     {
-        $values = array_merge(
-            array_column($db->fetchAll("SELECT `image_url` AS v FROM `product_images` WHERE `image_url` LIKE '%/uploads/%'"), 'v'),
-            array_column($db->fetchAll("SELECT `image_url` AS v FROM `banners` WHERE `image_url` LIKE '%/uploads/%'"), 'v'),
-            array_column($db->fetchAll("SELECT `image_url` AS v FROM `categories` WHERE `image_url` LIKE '%/uploads/%'"), 'v'),
-            array_column($db->fetchAll("SELECT `value` AS v FROM `store_settings` WHERE `value` LIKE '%/uploads/%'"), 'v'),
-        );
+        return array_map(static fn (): bool => true, self::usage($db));
+    }
+
+    /**
+     * Every storage key the database refers to, with where it is used ("product_images",
+     * "banners", "categories", "store_settings"), for the media migration report.
+     *
+     * @return array<string, list<string>>
+     */
+    public static function usage(Database $db): array
+    {
+        $sources = [
+            'product_images' => "SELECT `image_url` AS v FROM `product_images` WHERE `image_url` LIKE '%/uploads/%'",
+            'banners' => "SELECT `image_url` AS v FROM `banners` WHERE `image_url` LIKE '%/uploads/%'",
+            'categories' => "SELECT `image_url` AS v FROM `categories` WHERE `image_url` LIKE '%/uploads/%'",
+            'store_settings' => "SELECT `value` AS v FROM `store_settings` WHERE `value` LIKE '%/uploads/%'",
+        ];
         $used = [];
-        foreach ($values as $value) {
-            if (preg_match_all('#/uploads/[A-Za-z0-9_./-]+#', (string) $value, $m)) {
-                foreach ($m[0] as $path) {
-                    $key = StorageKey::fromPublicPath($path);
-                    if ($key !== null) {
-                        $used[$key] = true;
+        foreach ($sources as $source => $query) {
+            foreach (array_column($db->fetchAll($query), 'v') as $value) {
+                if (preg_match_all('#/uploads/[A-Za-z0-9_./-]+#', (string) $value, $m)) {
+                    foreach ($m[0] as $path) {
+                        $key = StorageKey::fromPublicPath($path);
+                        if ($key !== null && !in_array($source, $used[$key] ?? [], true)) {
+                            $used[$key][] = $source;
+                        }
                     }
                 }
             }
