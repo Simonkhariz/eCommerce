@@ -275,6 +275,11 @@ async function fetchFullFromApi<T>(
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  // A caller's signal (e.g. TanStack Query cancelling a request nobody needs any more) also
+  // stops the request; that is reported as a cancellation, not as a timeout.
+  const callerSignal = options?.signal ?? null;
+  if (callerSignal?.aborted) controller.abort();
+  else callerSignal?.addEventListener('abort', () => controller.abort(), { once: true });
 
   const headers: Record<string, string> = {
     'Accept': 'application/json',
@@ -325,6 +330,9 @@ async function fetchFullFromApi<T>(
     return json;
   } catch (err) {
     clearTimeout(timeoutId);
+    if (callerSignal?.aborted) {
+      throw err;
+    }
     if (err instanceof Error && err.name === 'AbortError') {
       throw new ApiError('The request timed out. Please check your connection and try again.', 0, 'TIMEOUT');
     }

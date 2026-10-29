@@ -4,11 +4,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { ExternalLink, LogOut } from 'lucide-react';
 import { AdminIcon } from '@/components/admin/AdminIcon';
 import { useAdminSession } from '@/components/admin/AdminAuthGate';
 import { ADMIN_NAV, AdminNavItem, findAdminNav, isActiveAdminLink } from '@/lib/admin-nav';
-import { adminGetOrders, adminGetStorageAlert } from '@/lib/admin-api';
+import { bellCountsQuery, storageAlertQuery } from '@/lib/admin-queries';
 
 /**
  * Admin chrome: sidebar navigation (real links), header breadcrumb, attention bell and sign-out.
@@ -16,11 +17,9 @@ import { adminGetOrders, adminGetStorageAlert } from '@/lib/admin-api';
  */
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '/admin';
+  const { admin } = useAdminSession();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [alerts, setAlerts] = useState<{ claimed: number; attention: number } | null>(null);
-  // The first database problem found (null when size, speed and clean-ups are fine).
-  const [storage, setStorage] = useState<string | null>(null);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const alertsRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -33,32 +32,15 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     setAlertsOpen(false);
   }
 
-  // Bell: WhatsApp transfers customers marked as paid (to check and confirm) and orders flagged
-  // for attention (late / duplicate / mismatched payments). Refreshed on navigation and every
-  // minute while the admin is open, so a new "Mark as paid" shows up without reloading.
-  // Database size / speed problems are checked on navigation only (they change slowly).
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      if (document.visibilityState === 'hidden') return;
-      Promise.all([adminGetOrders({ status: 'payment_claimed', per_page: 1 }), adminGetOrders({ status: 'attention', per_page: 1 })])
-        .then(([claimed, attention]) => {
-          if (!cancelled) setAlerts({ claimed: claimed.pagination.total, attention: attention.pagination.total });
-        })
-        .catch(() => !cancelled && setAlerts(null));
-    };
-    load();
-    adminGetStorageAlert()
-      .then((r) => !cancelled && setStorage(r.level === 'ok' ? null : (r.issues[0]?.title ?? 'Database needs attention')))
-      .catch(() => !cancelled && setStorage(null));
-    const timer = setInterval(load, 60_000);
-    document.addEventListener('visibilitychange', load);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', load);
-    };
-  }, [pathname]);
+  // Bell: WhatsApp transfers customers marked as paid (to check and confirm), orders flagged for
+  // attention (late / duplicate / mismatched payments) and the first database problem. Shared
+  // queries (lib/admin-queries.ts): polled while the tab is visible, not re-asked on every
+  // screen change. A count that is still loading or could not be read shows "–", never an old
+  // or invented number.
+  const bell = useQuery(bellCountsQuery(admin.id));
+  const storageCheck = useQuery(storageAlertQuery(admin.id));
+  const alerts = bell.status === 'success' ? bell.data : null;
+  const storage = storageCheck.status === 'success' ? storageCheck.data : null;
 
   useEffect(() => {
     if (!alertsOpen) return;
@@ -189,8 +171,13 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                     {
                       href: '/admin/data',
                       title: 'Database & storage',
-                      hint: storage ?? 'Size, speed and clean-ups are fine',
-                      count: storage ? 1 : 0,
+                      hint:
+                        storageCheck.status === 'success'
+                          ? (storage ?? 'Size, speed and clean-ups are fine')
+                          : storageCheck.status === 'error'
+                            ? 'Could not be checked just now'
+                            : 'Checking…',
+                      count: storageCheck.status === 'success' ? (storage ? 1 : 0) : undefined,
                     },
                   ].map((a) => (
                     <Link key={a.href} href={a.href} className="flex items-start justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-[#f3f4f6]">

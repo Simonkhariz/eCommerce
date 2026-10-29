@@ -155,8 +155,8 @@ export interface AdminOrderDetail extends Omit<AdminOrderListItem, 'payment_prov
   audit_logs: Array<{ id: number; action: string; admin_name: string | null; created_at: string }>;
 }
 
-export function adminGetOrders(params: { status?: string; search?: string; page?: number; per_page?: number }) {
-  return apiRequest<Paginated<AdminOrderListItem>>(`/admin/orders${qs(params)}`);
+export function adminGetOrders(params: { status?: string; search?: string; page?: number; per_page?: number }, signal?: AbortSignal) {
+  return apiRequest<Paginated<AdminOrderListItem>>(`/admin/orders${qs(params)}`, { signal });
 }
 
 export function adminGetOrder(orderNumber: string) {
@@ -813,8 +813,8 @@ export function adminGetDataOverview() {
   return apiRequest<DataOverview>('/admin/data');
 }
 
-export function adminGetStorageAlert() {
-  return apiRequest<{ level: HealthLevel; issues: HealthIssue[] }>('/admin/data/alert');
+export function adminGetStorageAlert(signal?: AbortSignal) {
+  return apiRequest<{ level: HealthLevel; issues: HealthIssue[] }>('/admin/data/alert', { signal });
 }
 
 export function adminUpdateDataSettings(data: Partial<DataSettings>) {
