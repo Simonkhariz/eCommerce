@@ -19,13 +19,29 @@ use App\Config\Env;
 final class Cache
 {
     private static ?string $version = null;
+    private static ?string $testDir = null;
+    private static ?int $testTtl = null;
 
     public static function ttl(): int
     {
+        if (self::$testTtl !== null) {
+            return self::$testTtl;
+        }
         if (Env::get('APP_ENV', 'production') === 'testing') {
             return 0;
         }
         return max(0, Env::int('CATALOG_CACHE_SECONDS', 60));
+    }
+
+    /**
+     * Tests only (CacheTest): a private folder and a fixed lifetime, so the cache itself can be
+     * tested without touching storage/cache. Passing nulls restores the normal behaviour.
+     */
+    public static function configureForTests(?string $dir, ?int $ttl): void
+    {
+        self::$testDir = $dir;
+        self::$testTtl = $ttl;
+        self::$version = null;
     }
 
     /**
@@ -81,7 +97,7 @@ final class Cache
 
     private static function dir(): string
     {
-        $dir = BASE_PATH . '/storage/cache';
+        $dir = self::$testDir ?? BASE_PATH . '/storage/cache';
         if (!is_dir($dir)) {
             @mkdir($dir, 0755, true);
         }

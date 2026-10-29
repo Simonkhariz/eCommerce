@@ -43,6 +43,36 @@ function gatewayState(mode: string): { state: CheckState; text: string } {
   return { state: 'fail', text: 'Not configured' };
 }
 
+/** Only what the backend recorded: set up or not, then the last attempt's real outcome. */
+function refreshState(refresh: SystemStatus['storefront_refresh']): { state: CheckState; text: React.ReactNode } {
+  if (!refresh.configured) {
+    return {
+      state: 'warn',
+      text: (
+        <span>
+          Not set up
+          <span className="block text-xs text-[#6b7280]">Shop pages show admin changes within about a minute</span>
+        </span>
+      ),
+    };
+  }
+  if (!refresh.last) {
+    return { state: 'ok', text: 'Set up · not used yet' };
+  }
+  if (refresh.last.ok) {
+    return { state: 'ok', text: `Working · last ${formatDateTime(refresh.last.at)}` };
+  }
+  return {
+    state: 'fail',
+    text: (
+      <span>
+        Last attempt failed {formatDateTime(refresh.last.at)}
+        <span className="block text-xs text-[#6b7280]">{refresh.last.error ?? 'Unknown error'} · shop pages still update within about a minute</span>
+      </span>
+    ),
+  };
+}
+
 /** Health of the pieces the store depends on, read live from the backend. */
 export function AdminSystemStatus() {
   const { data, loading, error, reload } = useAdminData<SystemStatus>(() => adminGetSystemStatus(), []);
@@ -51,7 +81,7 @@ export function AdminSystemStatus() {
     <div className="flex w-full flex-col gap-4">
       <PageHeader
         title="System status"
-        description="Live checks of the database, storage, payment gateways, email and order queues."
+        description="Live checks of the database, storage, shop page refresh, payment gateways, email and order queues."
         actions={
           <Button onClick={reload} loading={loading && !!data}>
             <RefreshCw className="size-3.5" aria-hidden="true" />
@@ -70,6 +100,7 @@ export function AdminSystemStatus() {
 function StatusBody({ data }: { data: SystemStatus }) {
   const kora = gatewayState(data.payments.kora);
   const monnify = gatewayState(data.payments.monnify);
+  const refresh = refreshState(data.storefront_refresh);
   const healthy = data.system_health === 'healthy';
 
   return (
@@ -119,6 +150,7 @@ function StatusBody({ data }: { data: SystemStatus }) {
               state={data.storage.uploads_writable ? 'ok' : 'fail'}
               value={data.storage.uploads_writable ? 'Writable' : 'Not writable (product images cannot be uploaded)'}
             />
+            <Row label="Shop page refresh after admin changes" state={refresh.state} value={refresh.text} />
           </ul>
         </Panel>
 

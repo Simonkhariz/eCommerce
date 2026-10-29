@@ -722,6 +722,8 @@ export interface SystemStatus {
   payments: { kora: string; monnify: string };
   /** oldest_due_minutes: age of the oldest email waiting to be sent (null when none); large values mean the outbox worker is not running. */
   mail: { mode: 'smtp' | 'log_only'; outbox_pending: number; outbox_failed: number; oldest_due_minutes: number | null };
+  /** Whether admin changes refresh the storefront's cached pages at once, and the last attempt's outcome. */
+  storefront_refresh: { configured: boolean; last: { at: string; ok: boolean; error: string | null; ms: number } | null };
   orders: { needs_attention: number; unpaid_overdue: number; awaiting_fulfilment: number };
 }
 

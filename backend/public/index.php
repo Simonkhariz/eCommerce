@@ -41,6 +41,7 @@ use App\Support\Cache;
 use App\Support\Response;
 use App\Support\Router;
 use App\Support\SlowRequestLog;
+use App\Support\StorefrontRefresh;
 
 // 1. Load Environment Configuration
 Env::load(BASE_PATH . '/.env');
@@ -251,11 +252,13 @@ $router->get('/api/v1/admin/account', [AdminOperationsController::class, 'getAdm
 $router->put('/api/v1/admin/account', [AdminOperationsController::class, 'updateAdminAccount'], $adminGuard);
 
 // Admin changes (products, categories, banners, reviews, settings...) clear the public
-// catalogue cache once the request has finished, so the store shows them straight away.
+// catalogue cache once the request has finished, then ask the storefront to rebuild its
+// cached pages (when STOREFRONT_REVALIDATE_URL is set), so the store shows them straight away.
 $requestMethod = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if (!in_array($requestMethod, ['GET', 'HEAD', 'OPTIONS'], true) && str_starts_with($requestPath, '/api/v1/admin/')) {
     register_shutdown_function([Cache::class, 'bumpCatalog']);
+    register_shutdown_function([StorefrontRefresh::class, 'afterAdminChange']);
 }
 
 // Slow page loads and checkout calls are counted for the storage health alert. CSV exports

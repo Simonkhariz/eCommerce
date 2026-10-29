@@ -141,6 +141,14 @@ Configure an Alias pointing `/shop-api` to the `backend/public` folder. The buil
   change. Responses are gzip-compressed and public ones carry `Cache-Control` + `ETag`
   (browsers get `304 Not Modified` when nothing changed); account, order and admin
   responses are `no-store`.
+- **Shop page refresh:** the Next.js storefront also keeps pages for up to 60 s. Set
+  `STOREFRONT_REVALIDATE_URL` and `REVALIDATE_SECRET` here and the same `REVALIDATE_SECRET`
+  in the storefront's `.env.local`; after each successful admin change the API then calls
+  the storefront's `POST /api/revalidate` (`App\Support\StorefrontRefresh`) and every page
+  is rebuilt on its next visit. A failed call never undoes the admin change: it is logged,
+  shown in admin → System status, and pages still refresh within about a minute. Under
+  PHP-FPM the admin's response is sent first; elsewhere an unreachable storefront adds up
+  to about a second to the admin request.
 - **Best selling** sorts on `products.units_sold`, kept up to date when an order is paid,
   cancelled or refunded (`App\Services\ProductSales`). Search uses a full-text index.
 - Measured on a test store with 20,000 products, 80,000 variants and 150,000 order lines:

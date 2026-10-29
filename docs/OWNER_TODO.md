@@ -27,6 +27,11 @@ Also still open from earlier work:
 - [ ] Schedule `expire_pending_orders`, `process_outbox` and `check_database` (see `backend/README.md`).
       `check_database` deletes nothing: it emails you when the database is big or slow, or when old data waits for your review.
 - [ ] Site-content TODOs (about, contact, policies)
+- [ ] Optional: make admin changes show on the shop at once. Put one random value (at least 32
+      characters, e.g. from `php -r "echo bin2hex(random_bytes(24));"`) in `REVALIDATE_SECRET`
+      in both `.env.local` and `backend/.env`, set `STOREFRONT_REVALIDATE_URL` in `backend/.env`
+      to the shop's `/api/revalidate` address, and restart the shop. Admin → System status then
+      shows "Shop page refresh: Working". Without it, changes appear within about a minute.
 
 ---
 
