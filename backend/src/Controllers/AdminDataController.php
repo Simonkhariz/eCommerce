@@ -57,7 +57,7 @@ final class AdminDataController
             'labels' => DatabaseCleanup::LABELS,
             'housekeeping' => DatabaseCleanup::HOUSEKEEPING,
             'health' => $health->report(date('Y-m-d H:i:s'), true),
-            'mail_mode' => MailService::mode() === 'smtp' ? 'smtp' : 'log_only',
+            'mail_mode' => MailService::mode(),
         ], 'Data and storage retrieved.');
     }
 
@@ -206,7 +206,7 @@ final class AdminDataController
             'sent_to' => self::maskEmail((string) $user['email']),
             'expires_at' => $expiresAt,
             'counts' => $snapshot['counts'],
-            'mail_mode' => MailService::mode() === 'smtp' ? 'smtp' : 'log_only',
+            'mail_mode' => MailService::mode(),
         ], 'A code was sent to your email.');
     }
 

@@ -67,8 +67,11 @@ Windows: see the `schtasks` lines in `backend/README.md` (use `php-win.exe` for 
 ### Email
 
 With `MAIL_MAILER=log` (the default) nothing is delivered: every email is written to
-`backend/storage/logs/mail.log`, and the admin Email outbox shows it as "Logged only". Set
-`MAIL_MAILER=smtp` and the `MAIL_*` settings in `backend/.env` to send real email.
+`backend/storage/logs/mail.log`, and the admin Email outbox shows it as "Logged only". To send
+real email, set in `backend/.env` either `MAIL_MAILER=resend` with `RESEND_API_KEY` and a
+`MAIL_FROM_ADDRESS` on a domain verified in Resend, or `MAIL_MAILER=smtp` with the `MAIL_*`
+settings. Either way the outbox, retries and duplicate protection are the same; with Resend each
+email also carries an idempotency key, so a retry after a lost answer is never a second email.
 
 ---
 

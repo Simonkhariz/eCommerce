@@ -69,7 +69,7 @@ class MailService
 
     public static function mode(): string
     {
-        return SmtpTransport::isConfigured() ? 'smtp' : 'log_only';
+        return ResendTransport::isConfigured() ? 'resend' : (SmtpTransport::isConfigured() ? 'smtp' : 'log_only');
     }
 
     // =========================================================================
@@ -515,14 +515,17 @@ class MailService
             return $this->finish($id, 'failed', null, 'The email could not be rendered.', false);
         }
 
-        [$ok, $transport, $error] = $this->transmit((string) $row['recipient_email'], $rendered, $templates->storeName(), $template, $payload);
+        // One idempotency key per outbox row: a provider that supports it (Resend) treats a retry
+        // after a lost answer as the same email, not a second one.
+        [$ok, $transport, $error, $permanent] = $this->transmit((string) $row['recipient_email'], $rendered, $templates->storeName(), $template, $payload, "shopco-outbox-{$id}");
 
         if ($ok) {
             return $this->finish($id, 'sent', $transport, null, true);
         }
 
         $attempts = (int) $row['attempt_count'] + 1;
-        if ($attempts >= self::MAX_ATTEMPTS) {
+        // The provider refused the email itself (not a passing problem): retrying cannot help.
+        if ($attempts >= self::MAX_ATTEMPTS || $permanent) {
             return $this->finish($id, 'failed', $transport, $error, true);
         }
 
@@ -602,7 +605,7 @@ class MailService
         $result = $this->deliver($outboxId);
 
         return match ($result['status'] ?? null) {
-            'sent' => ['ok' => true, 'message' => self::mode() === 'smtp' ? 'Email sent.' : 'Email written to the mail log (SMTP is not configured).'],
+            'sent' => ['ok' => true, 'message' => self::mode() !== 'log_only' ? 'Email sent.' : 'Email written to the mail log (no email service is configured).'],
             'pending' => ['ok' => false, 'message' => 'Sending failed again; it will be retried automatically. ' . ($result['error'] ?? '')],
             default => ['ok' => false, 'message' => $result['error'] ?? 'The email could not be sent.'],
         };
@@ -613,31 +616,47 @@ class MailService
     // =========================================================================
 
     /**
+     * Send through the configured transport: Resend, SMTP, or the mail log.
+     *
      * @param array{subject: string, html: string, text: string} $rendered
-     * @return array{0: bool, 1: string, 2: string|null} ok, transport, error
+     * @param string|null $idempotencyKey stable for one outbox row, so a retry is never a second email
+     * @return array{0: bool, 1: string, 2: string|null, 3: bool} ok, transport, error, permanent failure
      */
-    private function transmit(string $to, array $rendered, string $storeName, string $template, array $payload = []): array
+    private function transmit(string $to, array $rendered, string $storeName, string $template, array $payload = [], ?string $idempotencyKey = null): array
     {
         $headers = [];
         if ($template === 'marketing_broadcast' && !empty($payload['unsubscribe_url'])) {
             $headers['List-Unsubscribe'] = '<' . $payload['unsubscribe_url'] . '>';
         }
 
+        if (ResendTransport::isConfigured()) {
+            try {
+                (new ResendTransport())->send($to, $rendered['subject'], $rendered['html'], $rendered['text'], $storeName, $headers, $idempotencyKey);
+                return [true, 'resend', null, false];
+            } catch (ResendError $e) {
+                error_log("[MailService Resend] {$template} to {$to}: " . $e->getMessage());
+                return [false, 'resend', mb_substr($e->getMessage(), 0, 500), $e->permanent];
+            } catch (Throwable $e) {
+                error_log("[MailService Resend] {$template} to {$to}: " . $e->getMessage());
+                return [false, 'resend', mb_substr($e->getMessage(), 0, 500), false];
+            }
+        }
+
         if (SmtpTransport::isConfigured()) {
             try {
                 (new SmtpTransport())->send($to, $rendered['subject'], $rendered['html'], $rendered['text'], $storeName, $headers);
-                return [true, 'smtp', null];
+                return [true, 'smtp', null, false];
             } catch (Throwable $e) {
                 error_log("[MailService SMTP] {$template} to {$to}: " . $e->getMessage());
-                return [false, 'smtp', mb_substr($e->getMessage(), 0, 500)];
+                return [false, 'smtp', mb_substr($e->getMessage(), 0, 500), false];
             }
         }
 
         try {
             $this->writeToMailLog($to, $rendered, $template);
-            return [true, 'log', null];
+            return [true, 'log', null, false];
         } catch (Throwable $e) {
-            return [false, 'log', 'Could not write to storage/logs/mail.log: ' . $e->getMessage()];
+            return [false, 'log', 'Could not write to storage/logs/mail.log: ' . $e->getMessage(), false];
         }
     }
 

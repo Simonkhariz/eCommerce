@@ -115,7 +115,7 @@ function StatusBody({ data }: { data: SystemStatus }) {
       {data.mail.mode === 'log_only' && (
         <Notice tone="warning">
           Email is in log-only mode: messages are written to <code className="font-mono text-xs">backend/storage/logs/mail.log</code> and are not
-          delivered to customers. Set MAIL_MAILER=smtp and the MAIL_* settings in backend/.env to send real email.
+          delivered to customers. Set MAIL_MAILER=resend (with RESEND_API_KEY) or MAIL_MAILER=smtp and the MAIL_* settings in backend/.env to send real email.
         </Notice>
       )}
 
@@ -158,7 +158,11 @@ function StatusBody({ data }: { data: SystemStatus }) {
           <ul className="divide-y divide-[#f3f4f6]">
             <Row label="Kora" state={kora.state} value={kora.text} />
             <Row label="Monnify" state={monnify.state} value={monnify.text} />
-            <Row label="Email delivery" state={data.mail.mode === 'smtp' ? 'ok' : 'warn'} value={data.mail.mode === 'smtp' ? 'SMTP' : 'Log only'} />
+            <Row
+              label="Email delivery"
+              state={data.mail.mode === 'log_only' ? 'warn' : 'ok'}
+              value={data.mail.mode === 'resend' ? 'Resend' : data.mail.mode === 'smtp' ? 'SMTP' : 'Log only'}
+            />
             <Row
               label="Emails waiting to send"
               state={data.mail.outbox_pending > 0 ? 'warn' : 'ok'}

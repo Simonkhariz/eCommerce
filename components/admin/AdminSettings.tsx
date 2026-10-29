@@ -264,7 +264,14 @@ export function AdminSettings() {
                     { label: 'Monnify', value: gatewayMode(ro.monnify_mode) },
                     {
                       label: 'Email delivery',
-                      value: ro.mail_mode === 'smtp' ? <StatusPill label="SMTP" tone="green" /> : <StatusPill label="Log only (not sent)" tone="amber" />,
+                      value:
+                        ro.mail_mode === 'resend' ? (
+                          <StatusPill label="Resend" tone="green" />
+                        ) : ro.mail_mode === 'smtp' ? (
+                          <StatusPill label="SMTP" tone="green" />
+                        ) : (
+                          <StatusPill label="Log only (not sent)" tone="amber" />
+                        ),
                     },
                     { label: 'Card / transfer payment window', value: `${ro.order_payment_window_minutes} minutes` },
                     { label: 'WhatsApp / manual payment window', value: `${ro.manual_payment_window_hours} hours` },

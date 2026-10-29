@@ -627,8 +627,8 @@ export interface OutboxRow {
   subject: string;
   template: string;
   status: 'pending' | 'sent' | 'failed';
-  /** How it went out: 'smtp' = delivered to the mail server, 'log' = written to the mail log only. */
-  transport: 'smtp' | 'log' | null;
+  /** How it went out: 'smtp' / 'resend' = handed to the mail service, 'log' = written to the mail log only. */
+  transport: 'smtp' | 'resend' | 'log' | null;
   attempt_count: number;
   last_error: string | null;
   /** For pending emails: when the next delivery attempt is due. */
@@ -693,7 +693,7 @@ export interface StoreSettings {
     timezone: string;
     kora_mode: 'live' | 'sandbox' | 'not_configured';
     monnify_mode: 'live' | 'sandbox' | 'not_configured';
-    mail_mode: 'smtp' | 'log_only';
+    mail_mode: 'smtp' | 'resend' | 'log_only';
     payment_methods: Record<PaymentMethodId, PaymentMethodStatus>;
     order_payment_window_minutes: number;
     manual_payment_window_hours: number;
@@ -722,7 +722,7 @@ export interface SystemStatus {
   storage: { uploads_writable: boolean };
   payments: { kora: string; monnify: string };
   /** oldest_due_minutes: age of the oldest email waiting to be sent (null when none); large values mean the outbox worker is not running. */
-  mail: { mode: 'smtp' | 'log_only'; outbox_pending: number; outbox_failed: number; oldest_due_minutes: number | null };
+  mail: { mode: 'smtp' | 'resend' | 'log_only'; outbox_pending: number; outbox_failed: number; oldest_due_minutes: number | null };
   /** Whether admin changes refresh the storefront's cached pages at once, and the last attempt's outcome. */
   storefront_refresh: { configured: boolean; last: { at: string; ok: boolean; error: string | null; ms: number } | null };
   orders: { needs_attention: number; unpaid_overdue: number; awaiting_fulfilment: number };
@@ -785,7 +785,7 @@ export interface DataOverview {
   /** Rules for technical rows with no customer or business data. */
   housekeeping: string[];
   health: StorageHealthReport;
-  mail_mode: 'smtp' | 'log_only';
+  mail_mode: 'smtp' | 'resend' | 'log_only';
 }
 
 export interface DataRecordColumn {
@@ -807,7 +807,7 @@ export interface CleanupChallenge {
   sent_to: string;
   expires_at: string;
   counts: Record<string, number>;
-  mail_mode: 'smtp' | 'log_only';
+  mail_mode: 'smtp' | 'resend' | 'log_only';
 }
 
 export function adminGetDataOverview() {
