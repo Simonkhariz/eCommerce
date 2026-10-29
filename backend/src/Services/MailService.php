@@ -32,6 +32,11 @@ class MailService
     private const BACKOFF_MINUTES = [1 => 1, 2 => 5, 3 => 15, 4 => 60];
     /** How long a worker owns a row while delivering it. */
     private const LEASE_MINUTES = 10;
+    /** Automatic retries after requests: at most one run per interval, this many emails, this long. */
+    private const SWEEP_INTERVAL_SECONDS = 60;
+    private const SWEEP_BATCH = 5;
+    private const SWEEP_MAX_SECONDS = 20;
+    private const SWEEP_KEY = 'outbox_last_sweep';
 
     private static ?MailService $instance = null;
     /** @var list<int> Outbox rows to deliver once this web request's response has gone out. */
@@ -400,6 +405,55 @@ class MailService
      * server never delays a checkout, a payment confirmation or an admin action. Whatever is still
      * undelivered (also after a crash) is picked up by process_outbox.php.
      */
+    /**
+     * Retry due emails without a scheduler: after an API request has answered, the first request
+     * each minute (across every PHP process and server, decided by one atomic row in
+     * store_settings) sends up to SWEEP_BATCH due emails, for at most SWEEP_MAX_SECONDS. Each email
+     * is still claimed before it is sent, so this, process_outbox.php and other servers never send
+     * the same email twice. MAIL_AUTO_RETRY=false turns it off (process_outbox.php still works).
+     * Called from index.php at shutdown; a busy shop gets at most one small batch a minute.
+     */
+    public static function retryDueAfterResponse(): void
+    {
+        if (!filter_var(Env::get('MAIL_AUTO_RETRY', 'true'), FILTER_VALIDATE_BOOLEAN)) {
+            return;
+        }
+        try {
+            $db = Database::getInstance();
+            // A plain read first (it takes no lock), so busy traffic doesn't queue on the row below.
+            $recent = $db->fetchOne(
+                "SELECT CAST(`value` AS DATETIME) > NOW() - INTERVAL " . self::SWEEP_INTERVAL_SECONDS . " SECOND AS recent
+                 FROM `store_settings` WHERE `key_name` = ?",
+                's',
+                [self::SWEEP_KEY]
+            );
+            if ((int) ($recent['recent'] ?? 0) === 1) {
+                return;
+            }
+            // 1 = first run ever, 2 = the last run was over a minute ago; 0 = someone else ran it.
+            $won = $db->executeUpdate(
+                "INSERT INTO `store_settings` (`key_name`, `value`) VALUES (?, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
+                 ON DUPLICATE KEY UPDATE `value` = IF(COALESCE(CAST(`value` AS DATETIME) <= NOW() - INTERVAL " . self::SWEEP_INTERVAL_SECONDS . " SECOND, 1),
+                                                      VALUES(`value`), `value`)",
+                's',
+                [self::SWEEP_KEY]
+            );
+            if ($won !== 1 && $won !== 2) {
+                return;
+            }
+            $due = $db->fetchOne(
+                "SELECT 1 AS d FROM `email_outbox` WHERE `status` = 'pending' AND (`next_attempt_at` IS NULL OR `next_attempt_at` <= NOW()) LIMIT 1"
+            );
+            if ($due === null) {
+                return;
+            }
+            Response::finishForClient();
+            self::getInstance()->processQueue(self::SWEEP_BATCH, self::SWEEP_MAX_SECONDS);
+        } catch (Throwable $e) {
+            error_log('[MailService] Automatic retry run failed: ' . $e->getMessage());
+        }
+    }
+
     private function deliverAfterResponse(int $id): void
     {
         if (self::$afterResponse === []) {
@@ -484,12 +538,15 @@ class MailService
     }
 
     /**
-     * Deliver due rows (oldest first). Used by scripts/process_outbox.php and the admin "Send now".
+     * Deliver due rows (oldest first). Used by scripts/process_outbox.php, the admin "Send now"
+     * and the automatic retries after requests. $maxSeconds stops starting new sends once the
+     * batch has run that long (0 = no limit).
      *
      * @return array{processed: int, sent: int, failed: int, retrying: int}
      */
-    public function processQueue(int $limit = 50): array
+    public function processQueue(int $limit = 50, int $maxSeconds = 0): array
     {
+        $startedAt = microtime(true);
         $ids = array_column($this->db->fetchAll(
             "SELECT `id` FROM `email_outbox`
              WHERE `status` = 'pending' AND (`next_attempt_at` IS NULL OR `next_attempt_at` <= NOW())
@@ -500,6 +557,9 @@ class MailService
 
         $summary = ['processed' => 0, 'sent' => 0, 'failed' => 0, 'retrying' => 0];
         foreach ($ids as $id) {
+            if ($maxSeconds > 0 && microtime(true) - $startedAt >= $maxSeconds) {
+                break;
+            }
             $result = $this->deliver((int) $id);
             if ($result === null) {
                 continue;

@@ -200,6 +200,13 @@ bounds each step of a send.
 php backend/scripts/process_outbox.php              # one batch of up to 100
 php backend/scripts/process_outbox.php --limit=500
 ```
+**Retries happen automatically, with no scheduler:** after an API request has answered, the first
+request each minute (across all PHP processes and servers, decided by one atomic row in
+`store_settings`) sends up to 5 due emails, for at most 20 seconds (`MailService::retryDueAfterResponse`,
+`MAIL_AUTO_RETRY=false` turns it off). Each email is claimed before it is sent, so this, the worker
+below and other servers never send the same email twice. The worker is still recommended: it keeps
+retries punctual when the shop is quiet and sends newsletters in bigger batches.
+
 Schedule it **every minute** (php-win.exe runs without a console window; runs never overlap and
 two at once are safe, because each email is claimed before it is sent):
 ```powershell

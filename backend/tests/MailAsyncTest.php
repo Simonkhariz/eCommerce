@@ -37,12 +37,14 @@ while ($server && ($conn = @stream_socket_accept($server, -1))) {
     $say = static fn (string $l) => @fwrite($conn, $l . "\r\n");
     $say('220 fake ESMTP');
     $data = false;
+    $rcpt = '';
     while (($line = fgets($conn)) !== false) {
         if ($data) {
-            if (rtrim($line, "\r\n") === '.') { $data = false; file_put_contents($countFile, "m\n", FILE_APPEND); $say('250 OK'); }
+            if (rtrim($line, "\r\n") === '.') { $data = false; file_put_contents($countFile, $rcpt . "\n", FILE_APPEND); $say('250 OK'); }
             continue;
         }
         $cmd = strtoupper(substr(trim($line), 0, 4));
+        if ($cmd === 'RCPT' && preg_match('/<([^>]+)>/', $line, $m)) { $rcpt = strtolower($m[1]); }
         if ($cmd === 'EHLO' || $cmd === 'HELO') { $say('250-fake'); $say('250 8BITMIME'); }
         elseif ($cmd === 'DATA') { $data = true; $say('354 go'); }
         elseif ($cmd === 'QUIT') { $say('221 bye'); break; }
@@ -192,6 +194,60 @@ if ($variant === null) {
     $t->ok('all three emails are delivered after the response', $waitFor(fn () => $messages() >= $before + 3, 10), (string) ($messages() - $before));
     file_put_contents($delayFile, '0');
 }
+
+// -----------------------------------------------------------------------------
+$t->section('Due emails are retried by ordinary requests, without a scheduler');
+$received = static fn (string $to): int => count(array_filter(
+    file($countFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [],
+    static fn (string $l): bool => $l === strtolower($to)
+));
+$retryMailer = new MailService($t->db);
+$dueEmail = static function (string $to) use ($t, $retryMailer): int {
+    $retryMailer->queue($to, 'payment_claimed', ['order_number' => 'ORD-RETRY', 'amount' => 1000], null, false);
+    $t->cleanup(fn () => $t->sql("DELETE FROM `email_outbox` WHERE `recipient_email` = ?", 's', [strtolower($to)]));
+    return (int) $t->scalar("SELECT `id` FROM `email_outbox` WHERE `recipient_email` = ? ORDER BY `id` DESC LIMIT 1", 's', [strtolower($to)]);
+};
+$statusOf = static fn (int $id): ?string => $t->scalar("SELECT `status` FROM `email_outbox` WHERE `id` = ?", 'i', [$id]);
+$freeSlot = static fn () => $t->sql("UPDATE `store_settings` SET `value` = '2000-01-01 00:00:00' WHERE `key_name` = 'outbox_last_sweep'");
+$t->cleanup(fn () => $t->sql("DELETE FROM `store_settings` WHERE `key_name` = 'outbox_last_sweep'"));
+
+file_put_contents($delayFile, '1.5');
+$first = $t->uniq('retry1') . '@example.test';
+$firstId = $dueEmail($first);
+$freeSlot();
+$start = microtime(true);
+$res = $t->http('GET', "{$api}/categories");
+$took = microtime(true) - $start;
+$t->check('an ordinary request answers', 200, $res['status']);
+$t->ok('without waiting for the 1.5 s mail server', $took < 1.0, sprintf('%.2f s', $took));
+$t->ok('the due email is sent after the response', $waitFor(fn () => $statusOf($firstId) === 'sent', 6), (string) $statusOf($firstId));
+$t->check('received once', 1, $received($first));
+
+$second = $t->uniq('retry2') . '@example.test';
+$secondId = $dueEmail($second);
+$t->http('GET', "{$api}/categories");
+sleep(3);
+$t->check('at most one retry run a minute: the next request leaves it for later', 'pending', $statusOf($secondId));
+$t->sql("UPDATE `store_settings` SET `value` = DATE_FORMAT(NOW() - INTERVAL 2 MINUTE, '%Y-%m-%d %H:%i:%s') WHERE `key_name` = 'outbox_last_sweep'");
+$t->http('GET', "{$api}/categories");
+$t->ok('a minute later a request sends it', $waitFor(fn () => $statusOf($secondId) === 'sent', 6), (string) $statusOf($secondId));
+
+// The request retry run and the scheduled worker at the same moment never send one email twice.
+file_put_contents($delayFile, '0.3');
+$batch = [];
+for ($i = 1; $i <= 8; $i++) {
+    $to = $t->uniq("race{$i}") . '@example.test';
+    $batch[$to] = $dueEmail($to);
+}
+$freeSlot();
+$worker = proc_open([PHP_BINARY, BASE_PATH . '/scripts/process_outbox.php'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $workerPipes, BASE_PATH, array_merge(getenv(), ['SHOPCO_ENV_FILE' => $envFile]));
+$t->http('GET', "{$api}/categories");
+$workerOut = stream_get_contents($workerPipes[1]) . stream_get_contents($workerPipes[2]);
+proc_close($worker);
+$t->ok('with the worker running at the same time, every email is sent', $waitFor(fn () => count(array_filter($batch, fn (int $id) => $statusOf($id) === 'sent')) === count($batch), 15), trim($workerOut));
+$twice = array_filter(array_keys($batch), fn (string $to) => $received($to) !== 1);
+$t->check('and each recipient received it exactly once', [], array_values($twice));
+file_put_contents($delayFile, '0');
 
 // -----------------------------------------------------------------------------
 $t->section('The same email is never queued twice');

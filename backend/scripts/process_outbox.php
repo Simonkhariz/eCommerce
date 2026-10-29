@@ -5,7 +5,8 @@ declare(strict_types=1);
 /**
  * Deliver queued emails from email_outbox (newsletters, and any order email whose first
  * attempt failed). Failed attempts are retried with backoff (1, 5, 15, 60 minutes) and
- * marked failed after 5 attempts. Safe to run concurrently: each email is claimed first.
+ * marked failed after 5 attempts. Safe to run concurrently, and alongside the API's own
+ * automatic retries (MailService::retryDueAfterResponse): each email is claimed first.
  *
  * With MAIL_MAILER=log (the default) emails are written to backend/storage/logs/mail.log
  * instead of being delivered.

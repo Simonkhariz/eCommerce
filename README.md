@@ -44,14 +44,25 @@ create the first administrator and the store details; after that, `/admin/login`
 
 ### Background jobs
 
-Schedule these (Windows Task Scheduler or cron). The API also does a small amount of this work
-on its own, but nothing replaces the schedule on a quiet store.
+Schedule these on the server: cron on Linux (most hosting), "Cron Jobs" in cPanel, or Task
+Scheduler on Windows. The scripts are plain PHP and run the same everywhere. The API also does
+some of this work on its own: failed or queued emails are retried automatically after requests
+(at most a few a minute), and overdue unpaid orders are released when checkout or the admin
+orders list runs. On a quiet store only the schedule keeps that punctual.
 
 | Job | Every | What it does |
 | :--- | :--- | :--- |
 | `php backend/scripts/expire_pending_orders.php` | 10 min | Asks Kora/Monnify for the final status of overdue unpaid orders, then cancels the rest and releases their stock and promo use. |
-| `php backend/scripts/process_outbox.php` | 1 min | Sends queued email (newsletters, retries of failed order emails, anything not sent after the response). |
+| `php backend/scripts/process_outbox.php` | 1 min | Sends queued email (newsletters, retries of failed order emails, anything not sent after the response). Safe alongside the API's own retries: each email is claimed before it is sent. |
 | `php backend/scripts/check_database.php` | daily | Checks the database size, slow requests and data past the keep periods, and emails the admins when something needs attention. It removes nothing: admins review and confirm clean-ups in admin → Data & storage. |
+
+Linux crontab (`crontab -e`, as the user that runs PHP; adjust the path):
+```cron
+*/10 * * * *  php /var/www/shopco/backend/scripts/expire_pending_orders.php >> /var/log/shopco-jobs.log 2>&1
+* * * * *     php /var/www/shopco/backend/scripts/process_outbox.php       >> /var/log/shopco-jobs.log 2>&1
+0 3 * * *     php /var/www/shopco/backend/scripts/check_database.php       >> /var/log/shopco-jobs.log 2>&1
+```
+Windows: see the `schtasks` lines in `backend/README.md` (use `php-win.exe` for no console window).
 
 ### Email
 

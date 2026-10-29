@@ -37,6 +37,7 @@ use App\Middleware\AdminAuthMiddleware;
 use App\Middleware\CorsMiddleware;
 use App\Middleware\CustomerAuthMiddleware;
 use App\Middleware\JsonBodyMiddleware;
+use App\Services\MailService;
 use App\Support\Cache;
 use App\Support\Response;
 use App\Support\Router;
@@ -268,6 +269,12 @@ if (($requestMethod === 'GET' && !$isExport) || ($requestMethod === 'POST' && st
     register_shutdown_function(static function () use ($requestMethod, $requestStartedAt): void {
         SlowRequestLog::record($requestMethod, Router::$matchedRoute, $requestStartedAt);
     });
+}
+
+// Emails due a retry go out after a request has answered (at most one small batch a minute
+// across all servers), so retries need no scheduler; process_outbox.php can still run too.
+if ($requestMethod !== 'OPTIONS') {
+    register_shutdown_function([MailService::class, 'retryDueAfterResponse']);
 }
 
 // 6. Dispatch Request
