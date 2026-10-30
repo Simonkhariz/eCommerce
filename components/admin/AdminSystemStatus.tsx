@@ -168,6 +168,22 @@ function StatusBody({ data }: { data: SystemStatus }) {
             />
             <Row label="Shop page refresh after admin changes" state={refresh.state} value={refresh.text} />
             <Row
+              label="Redis (optional cache)"
+              state={!data.redis.configured || data.redis.ok ? 'ok' : 'warn'}
+              value={
+                <span>
+                  {!data.redis.configured
+                    ? 'Not used · the file cache is in use'
+                    : data.redis.ok
+                      ? `Answering${data.redis.ms !== null ? ` · ${data.redis.ms} ms` : ''}`
+                      : 'Not answering · the file cache is standing in'}
+                  {data.redis.configured && !data.redis.ok && data.redis.error && (
+                    <span className="block text-xs text-[#6b7280]">{data.redis.error}</span>
+                  )}
+                </span>
+              }
+            />
+            <Row
               label="PHP"
               state={data.runtime.missing_extensions.length > 0 ? 'fail' : !data.runtime.opcache || data.runtime.missing_backup_extensions.length > 0 ? 'warn' : 'ok'}
               value={

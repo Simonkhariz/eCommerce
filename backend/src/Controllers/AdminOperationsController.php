@@ -20,6 +20,7 @@ use App\Support\Response;
 use App\Support\SessionCookie;
 use App\Support\StoreBrands;
 use App\Storage\Storage;
+use App\Support\Redis;
 use App\Support\StorefrontRefresh;
 use App\Support\UploadFiles;
 
@@ -1058,6 +1059,8 @@ class AdminOperationsController
                 'oldest_due_minutes' => ($oldest = $this->db->fetchOne("SELECT TIMESTAMPDIFF(MINUTE, MIN(`created_at`), NOW()) AS m FROM `email_outbox` WHERE `status` = 'pending' AND (`next_attempt_at` IS NULL OR `next_attempt_at` <= NOW())")) && $oldest['m'] !== null ? (int) $oldest['m'] : null,
             ],
             'storefront_refresh' => StorefrontRefresh::status($this->db),
+            // Optional (REDIS_URL): shared catalogue cache; the file cache takes over when it is down.
+            'redis' => Redis::status(),
             'orders' => [
                 'needs_attention' => $count("SELECT COUNT(*) AS c FROM `orders` WHERE `requires_attention` = 1"),
                 'unpaid_overdue' => $count("SELECT COUNT(*) AS c FROM `orders` WHERE `order_status` = 'pending_payment' AND `expires_at` <= NOW()"),

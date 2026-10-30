@@ -79,23 +79,66 @@ final class Cache
         return $value;
     }
 
-    /** Invalidate every catalogue entry (called after admin changes). */
+    /**
+     * Invalidate every catalogue entry (called after admin changes). The new version goes to the
+     * file and, when REDIS_URL is set, to Redis, where every server sees it (a file is seen only by
+     * the server it is on).
+     */
     public static function bumpCatalog(): void
     {
         if (self::ttl() === 0) {
             return;
         }
-        self::$version = bin2hex(random_bytes(8));
-        self::write(self::dir() . '/catalog.version', self::$version);
+        $new = bin2hex(random_bytes(8));
+        self::write(self::dir() . '/catalog.version', $new);
+        self::$version = $new;
+        $redis = Redis::shared();
+        if ($redis !== null) {
+            try {
+                $redis->command('SET', $redis->prefix . self::VERSION_KEY, $new);
+                self::$version = 'r' . $new;
+            } catch (\Throwable $e) {
+                // Recorded as an outage: when Redis is back, its version is replaced (shared()).
+                Redis::markDown($e->getMessage());
+            }
+        }
     }
 
+    /** The catalogue version in Redis (shared by all servers). */
+    private const VERSION_KEY = 'catalog:version';
+
+    /**
+     * The current catalogue version: from Redis when it answers (prefixed "r", so entries made
+     * while it was away are never mistaken for current ones), else from the file.
+     */
     private static function version(): string
     {
-        if (self::$version === null) {
-            $v = @file_get_contents(self::dir() . '/catalog.version');
-            self::$version = is_string($v) && $v !== '' ? trim($v) : '0';
+        if (self::$version !== null) {
+            return self::$version;
         }
-        return self::$version;
+        $redis = Redis::shared();
+        if ($redis !== null) {
+            try {
+                $key = $redis->prefix . self::VERSION_KEY;
+                if (Redis::takeRecovered()) {
+                    // Back after an outage: admin changes made meanwhile only reached the file.
+                    $redis->command('SET', $key, bin2hex(random_bytes(8)));
+                }
+                $v = $redis->command('GET', $key);
+                if ($v === null) {
+                    // First use, or Redis restarted empty or evicted it: any new value will do.
+                    $redis->command('SET', $key, bin2hex(random_bytes(8)), 'NX');
+                    $v = $redis->command('GET', $key);
+                }
+                if (is_string($v) && $v !== '') {
+                    return self::$version = 'r' . $v;
+                }
+            } catch (\Throwable $e) {
+                Redis::markDown($e->getMessage());
+            }
+        }
+        $v = @file_get_contents(self::dir() . '/catalog.version');
+        return self::$version = is_string($v) && $v !== '' ? trim($v) : '0';
     }
 
     private static function dir(): string

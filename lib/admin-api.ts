@@ -722,6 +722,8 @@ export interface SystemStatus {
   runtime: { php: string; missing_extensions: string[]; missing_backup_extensions: string[]; opcache: boolean; upload_limit_bytes: number };
   /** The admin's address as the API sees it; a private or local address on a live server means the proxy is not set up. */
   network: { client_ip: string; public_address: boolean };
+  /** Optional Redis for the catalogue cache: set up or not, answering now, and the last outage marker. */
+  redis: { configured: boolean; ok: boolean | null; ms: number | null; error: string | null; down_marker: boolean };
   /** Live-server settings that would break the shop (empty outside production). */
   config_warnings: string[];
   database: { connected: boolean; latency_ms: number | null };
