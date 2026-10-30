@@ -214,8 +214,10 @@ class CheckoutService
                     );
 
                     if ($affectedRows === 0) {
-                        // Fetch latest actual stock for error message
-                        $latestStock = $db->fetchOne("SELECT `stock_quantity`, `sku` FROM `product_variants` WHERE `id` = ?", 'i', [$variantId]);
+                        // Fetch latest actual stock for error message. A locking read: a plain SELECT
+                        // here returns this transaction's snapshot, which can still show stock that
+                        // other orders took while this one waited (the failed UPDATE already holds the row).
+                        $latestStock = $db->fetchOne("SELECT `stock_quantity`, `sku` FROM `product_variants` WHERE `id` = ? FOR UPDATE", 'i', [$variantId]);
                         $sku = $latestStock['sku'] ?? $item['sku'];
                         $available = $latestStock['stock_quantity'] ?? 0;
                         throw new RuntimeException("Insufficient stock for item '{$item['name']}' ({$sku}). Requested: {$qty}, Available: {$available}.");
