@@ -62,7 +62,17 @@ final class Cache
             return $compute();
         }
 
-        $file = self::dir() . '/' . sha1(self::version() . '|' . $key) . '.cache';
+        $id = sha1(self::version() . '|' . $key);
+        $redis = self::inRedis($key) ? Redis::shared() : null;
+        if ($redis !== null) {
+            $stored = self::fromRedis($redis, $id, $compute, $ttl);
+            if ($stored !== null) {
+                return $stored[0];
+            }
+            // Redis failed (now marked down): the file cache answers as usual.
+        }
+
+        $file = self::dir() . '/' . $id . '.cache';
         $raw = @file_get_contents($file);
         if ($raw !== false) {
             $entry = @unserialize($raw, ['allowed_classes' => false]);
@@ -77,6 +87,54 @@ final class Cache
             self::prune();
         }
         return $value;
+    }
+
+    /**
+     * Cache namespaces kept in Redis when it is set up (roadmap Prompt 28: one namespace). Only
+     * public catalogue data may ever be listed here. Product listing pages are the most varied
+     * reads and the ones worth sharing between servers; everything else stays in files.
+     */
+    private const REDIS_NAMESPACES = ['products:'];
+
+    private static function inRedis(string $key): bool
+    {
+        foreach (self::REDIS_NAMESPACES as $namespace) {
+            if (str_starts_with($key, $namespace)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Read the entry from Redis, or compute it and store it there with the cache's lifetime.
+     * Returns [value], or null when Redis failed (it is then marked down). The computation itself
+     * runs outside the Redis calls, so its own errors are never mistaken for a Redis outage.
+     *
+     * @return array{0: mixed}|null
+     */
+    private static function fromRedis(Redis $redis, string $id, callable $compute, int $ttl): ?array
+    {
+        $key = $redis->prefix . 'cache:' . $id;
+        try {
+            $raw = $redis->command('GET', $key);
+        } catch (\Throwable $e) {
+            Redis::markDown($e->getMessage());
+            return null;
+        }
+        if (is_string($raw)) {
+            $entry = @unserialize($raw, ['allowed_classes' => false]);
+            if (is_array($entry) && array_key_exists('value', $entry)) {
+                return [$entry['value']];
+            }
+        }
+        $value = $compute();
+        try {
+            $redis->command('SET', $key, serialize(['value' => $value]), 'EX', (string) $ttl);
+        } catch (\Throwable $e) {
+            Redis::markDown($e->getMessage());
+        }
+        return [$value];
     }
 
     /**

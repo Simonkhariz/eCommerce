@@ -127,8 +127,63 @@ $t->ok('after an admin change on server A, server B sees the new version', $vers
 $request($serverA);
 $t->check('and the listing is built again', ['n' => 2], Cache::remember('products:x', $compute));
 $r = $direct();
-$t->check('the version is the only key Redis holds so far (no shop data)', [$prefix . 'catalog:version'], array_values(array_filter((array) $r->command('KEYS', $prefix . '*'), fn ($k) => $k !== $prefix . 'probe')));
+$keys = array_values(array_filter((array) $r->command('KEYS', $prefix . '*'), fn ($k) => $k !== $prefix . 'probe'));
+$t->ok('Redis holds only the version and cached listing pages', $keys !== [] && array_filter($keys, fn ($k) => $k !== $prefix . 'catalog:version' && !str_starts_with((string) $k, $prefix . 'cache:')) === [], implode(', ', $keys));
 $r->close();
+
+// -----------------------------------------------------------------------------
+$t->section('Listing pages are shared through Redis (one namespace)');
+$r = $direct();
+$r->command('FLUSHDB');
+$r->close();
+$request($serverA);
+$n = $calls;
+$listing = Cache::remember('products:shared', $compute);
+$t->check('cold start: the first request builds the page', $n + 1, $calls);
+$request($serverB);
+$t->check('another server reuses it instead of building it again', $listing, Cache::remember('products:shared', $compute));
+$t->check('built once for both servers', $n + 1, $calls);
+$r = $direct();
+$ttl = (int) $r->command('TTL', $prefix . 'cache:' . sha1($version() . '|products:shared'));
+$t->ok('stored with the cache lifetime (60 s here), so old versions expire by themselves', $ttl > 50 && $ttl <= 60, (string) $ttl);
+$r->close();
+
+$n = $calls;
+$request($serverA);
+Cache::remember('facets:t-shirts', $compute);
+Cache::remember('admin-storage-alert', $compute);
+$request($serverB);
+Cache::remember('facets:t-shirts', $compute);
+Cache::remember('admin-storage-alert', $compute);
+$t->check('every other cache (filters, admin data) stays in each server\'s files', $n + 4, $calls);
+$r = $direct();
+$t->check('and never reaches Redis', 1, count((array) $r->command('KEYS', $prefix . 'cache:*')));
+$r->close();
+
+$request($serverA);
+$rich = ['name' => "Tee \u{1F455} \"crew\"", 'price' => 12500.5, 'tags' => ['a', null, true], 'empty' => []];
+Cache::remember('products:rich', static fn () => $rich);
+$request($serverB);
+$t->check('values come back exactly as stored (text, numbers, nulls, nesting)', $rich, Cache::remember('products:rich', static fn () => 'not used'));
+
+$request($serverA);
+Cache::bumpCatalog();
+$request($serverB);
+$n = $calls;
+Cache::remember('products:shared', $compute);
+$t->check('after an admin change the shared page is built again (no stale entry)', $n + 1, $calls);
+
+$request($serverA);
+$failing = static function (): never {
+    throw new RuntimeException('database error while building the page');
+};
+try {
+    Cache::remember('products:boom', $failing);
+    $t->ok('an error while building a page reaches the caller', false);
+} catch (RuntimeException $e) {
+    $t->ok('an error while building a page reaches the caller', $e->getMessage() === 'database error while building the page');
+}
+$t->check('and is not mistaken for a Redis outage', false, is_file("{$serverA}/redis.down"));
 
 if ($realUrl === '') {
     // -------------------------------------------------------------------------

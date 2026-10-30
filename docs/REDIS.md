@@ -60,3 +60,39 @@ breaks a request and is reported in System status.
 **Monitoring and recovery:** System status (row above); the PHP error log gets one line per
 outage (`[Redis] unavailable, using the file cache: …`). Nothing has to be done when Redis comes
 back. To stop using Redis, empty `REDIS_URL`.
+
+## Prompt 28: one cache namespace, product listing pages
+
+Only the `products:` namespace (product listing pages: category, filters, sorting, page) moved
+to Redis. They are the most varied public reads and the ones worth sharing: with several
+servers, a page built once serves all of them. Everything else stays in each server's files:
+filters (`facets:`), categories, the homepage, and the admin's storage alert, which is admin
+data and must never be shared. The list is a fixed allow-list in `Cache::REDIS_NAMESPACES`;
+only public catalogue data may ever be added to it.
+
+| | |
+|---|---|
+| Key | `<prefix>cache:<sha1(version and request)>` holding the serialised page |
+| Expiry | The cache lifetime (`CATALOG_CACHE_SECONDS`, 60 s), set on every entry (`SET … EX`) |
+| Invalidation | An admin change gives a new catalogue version (Prompt 27), so new keys are used at once; the old ones expire by themselves within the lifetime |
+| Eviction | Set the Redis memory limit with `maxmemory-policy allkeys-lru` (or `volatile-lru`): pages are rebuilt when evicted. The version key has no expiry; if evicted, a new one is chosen and pages are rebuilt once |
+| Private data | None: listing pages are the same for every visitor. Searches are never cached (`CatalogController`), and made-up filter values are not cached (Prompt 39 fix) |
+
+**Fallback:** a failed read or write marks Redis down (Prompt 27) and the page is served from the
+file cache or built from MySQL. A page that fails to build (a database error) reaches the caller
+as before and does not count as a Redis outage.
+
+**Tested** (`RedisCacheTest`, 10 more checks): cold start builds once; a second server reuses the
+page instead of building it; entries carry the 60 s lifetime; filters and admin data stay in
+files and never reach Redis; values come back exactly (text with emoji and quotes, decimals,
+nulls, nesting); an admin change rebuilds the shared page (no stale entry); a build error is not
+mistaken for an outage. The outage, recovery and restart checks of Prompt 27 now run with
+listings in Redis and still pass.
+
+**Not measured:** speed against a real Redis. Running the downloaded Redis server on the
+development PC was refused by the assistant's safety check, so the checks above ran against
+the stand-in. On one server no speed gain is expected (a file cache hit takes 0.3 ms; a local
+Redis round trip is of the same order); the gain is sharing between servers. To run the same
+checks against a real Redis: `REDIS_TEST_URL=redis://:PASSWORD@127.0.0.1:6379/15 php
+backend/tests/run.php RedisCache` (its keys are removed afterwards; the outage checks need the
+stand-in and are skipped).
