@@ -336,13 +336,18 @@ try {
     $receiptRows = static fn (): int => (int) $db->fetchOne(
         "SELECT COUNT(*) c FROM `email_outbox` WHERE `dedup_key` = ?", 's', ['payment_verified:' . $o3b['order_number']]
     )['c'];
+    $receiptBeforeCommit = -1;
     try {
-        $db->transaction(function () use ($finalizer, $init3b, $o3b): void {
+        $db->transaction(function (Database $tx) use ($finalizer, $init3b, $o3b, $receiptRows, &$receiptBeforeCommit): void {
             $finalizer->finalizeSuccess($init3b['provider_reference'], ['amount' => $o3b['grand_total'], 'currency' => 'NGN', 'label' => 'Kora']);
-            throw new RuntimeException('crash before commit');
+            $tx->beforeCommit(function () use ($receiptRows, &$receiptBeforeCommit): void {
+                $receiptBeforeCommit = $receiptRows();
+                throw new RuntimeException('crash just before commit');
+            });
         });
     } catch (RuntimeException) {
     }
+    check('receipt is queued inside the payment transaction', $receiptBeforeCommit === 1, (string) $receiptBeforeCommit);
     check('rolled-back payment leaves no receipt in the outbox', $receiptRows() === 0 && orderRow($o3b['order_number'])['order_status'] === 'pending_payment');
     $paid3b = $finalizer->finalizeSuccess($init3b['provider_reference'], ['amount' => $o3b['grand_total'], 'currency' => 'NGN', 'label' => 'Kora']);
     check('confirmed payment commits with exactly one receipt in the outbox', ($paid3b['outcome'] ?? '') === PaymentFinalizer::OUTCOME_PAID && $receiptRows() === 1, (string) $receiptRows());
@@ -434,6 +439,54 @@ try {
     $fulfillment->resolveRefund((int) $pending['id'], 'completed', null);
     $finalRow = orderRow($o5['order_number']);
     check('full refund -> order and payment refunded', $finalRow['order_status'] === 'refunded' && $finalRow['payment_status'] === 'refunded');
+
+    // Shipment, cancellation and refund emails are queued in the change's own transaction:
+    // a change that rolls back leaves no email, a committed one leaves exactly one.
+    $outboxRows = static fn (string $keyPrefix): int => (int) $db->fetchOne(
+        "SELECT COUNT(*) c FROM `email_outbox` WHERE `dedup_key` LIKE ?", 's', [$keyPrefix . '%']
+    )['c'];
+    // Runs $change, then fails at the last moment before COMMIT; returns how many matching emails
+    // were already in the outbox at that moment (1 = queued inside the transaction).
+    $rolledBack = static function (callable $change, string $keyPrefix) use ($db, $outboxRows): int {
+        $seenBeforeCommit = -1;
+        try {
+            $db->transaction(function (Database $tx) use ($change, $keyPrefix, $outboxRows, &$seenBeforeCommit): void {
+                $change();
+                $tx->beforeCommit(function () use ($keyPrefix, $outboxRows, &$seenBeforeCommit): void {
+                    $seenBeforeCommit = $outboxRows($keyPrefix);
+                    throw new RuntimeException('crash just before commit');
+                });
+            });
+        } catch (RuntimeException) {
+        }
+        return $seenBeforeCommit;
+    };
+
+    $o8 = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);
+    $o8Id = (int) orderRow($o8['order_number'])['id'];
+    $finalizer->recordManualPayment($o8Id, "ZEN-{$stamp}", null, 'Transfer seen');
+    $ship8 = fn () => $fulfillment->assignShipment($o8Id, ['carrier' => 'GIG Logistics', 'tracking_number' => "GIG8-{$stamp}", 'status' => 'in_transit']);
+    check('shipping email is queued inside the shipment transaction', $rolledBack($ship8, 'shipment_tracking:' . $o8['order_number']) === 1);
+    check('rolled-back shipment leaves no shipping email', $outboxRows('shipment_tracking:' . $o8['order_number']) === 0 && orderRow($o8['order_number'])['order_status'] === 'paid');
+    $ship8();
+    check('committed shipment leaves exactly one shipping email', $outboxRows('shipment_tracking:' . $o8['order_number']) === 1 && orderRow($o8['order_number'])['order_status'] === 'shipped');
+
+    $refund8 = fn () => $fulfillment->recordRefund($o8Id, 100, 'Delivery fee goodwill', 'completed', false, null);
+    check('refund email is queued inside the refund transaction', $rolledBack($refund8, 'refund_processed:' . $o8['order_number']) === 1);
+    check('rolled-back refund leaves no refund email', $outboxRows('refund_processed:' . $o8['order_number']) === 0 && orderRow($o8['order_number'])['payment_status'] === 'successful');
+    $refund8();
+    check('committed refund leaves exactly one refund email', $outboxRows('refund_processed:' . $o8['order_number']) === 1 && orderRow($o8['order_number'])['payment_status'] === 'partially_refunded');
+
+    $o9 = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);
+    $o9Id = (int) orderRow($o9['order_number'])['id'];
+    $stockHeld = stockOf($variantA);
+    $cancel9 = fn () => $fulfillment->updateOrderStatus($o9Id, 'cancelled', 'Customer changed their mind', null);
+    check('cancellation email is queued inside the cancellation transaction', $rolledBack($cancel9, 'order_cancelled:' . $o9['order_number']) === 1);
+    check('rolled-back cancellation leaves no email and keeps the stock reserved', $outboxRows('order_cancelled:' . $o9['order_number']) === 0
+        && orderRow($o9['order_number'])['order_status'] === 'pending_payment' && stockOf($variantA) === $stockHeld);
+    $cancel9();
+    check('committed cancellation leaves exactly one email and releases the stock', $outboxRows('order_cancelled:' . $o9['order_number']) === 1
+        && orderRow($o9['order_number'])['order_status'] === 'cancelled' && stockOf($variantA) === $stockHeld + 1);
 
     // -----------------------------------------------------------------------
     echo "== Admin HTTP: routes, creates, inventory, variant upsert\n";

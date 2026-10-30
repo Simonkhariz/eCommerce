@@ -224,8 +224,9 @@ class FulfillmentService
             ]);
 
             if ($dispatched) {
+                // Queued in this transaction (just before it commits), like every email below.
                 $mailOrder = $order;
-                $db->afterCommit(static function () use ($mailOrder, $carrier, $trackingNumber, $trackingUrl, $shipmentStatus): void {
+                $db->beforeCommit(static function () use ($mailOrder, $carrier, $trackingNumber, $trackingUrl, $shipmentStatus): void {
                     MailService::getInstance()->sendShipmentTracking($mailOrder, [
                         'carrier' => $carrier,
                         'tracking_number' => $trackingNumber,
@@ -551,7 +552,7 @@ class FulfillmentService
 
         if ($newStatus === 'cancelled') {
             $mailOrder = $order;
-            $db->afterCommit(static function () use ($mailOrder, $histComment): void {
+            $db->beforeCommit(static function () use ($mailOrder, $histComment): void {
                 MailService::getInstance()->sendCancellationOrRefund($mailOrder, 'cancellation', ['reason' => $histComment]);
             });
         }
@@ -658,7 +659,7 @@ class FulfillmentService
             'refund_id' => $refundId,
             'reference' => $refund['provider_refund_reference'] ?? null,
         ];
-        $db->afterCommit(static function () use ($mailOrder, $mailExtra): void {
+        $db->beforeCommit(static function () use ($mailOrder, $mailExtra): void {
             MailService::getInstance()->sendCancellationOrRefund($mailOrder, 'refund', $mailExtra);
         });
     }

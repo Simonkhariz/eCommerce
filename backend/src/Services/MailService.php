@@ -73,7 +73,9 @@ class MailService
     }
 
     // =========================================================================
-    // Order emails (called from afterCommit callbacks; the payment receipt from beforeCommit)
+    // Order emails. Payment, shipment, cancellation and refund emails are queued from beforeCommit
+    // callbacks (in the same transaction as the change); order-received from afterCommit, so a
+    // checkout does not hold its stock-row locks while the email is rendered.
     // =========================================================================
 
     public function sendOrderReceived(array $order): bool
