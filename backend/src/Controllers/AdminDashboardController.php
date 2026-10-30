@@ -630,8 +630,14 @@ class AdminDashboardController
         $types = 'ss';
         $params = [$startDate, $endDate];
 
+        // The same special filters as the order list (AdminOrderController::index).
         if ($status === 'attention') {
             $sql .= " AND o.requires_attention = 1";
+        } elseif ($status === 'awaiting_whatsapp') {
+            $sql .= " AND o.order_status = 'pending_payment' AND EXISTS (
+                SELECT 1 FROM `payments` pw WHERE pw.order_id = o.id AND pw.provider = 'whatsapp' AND pw.status = 'pending')";
+        } elseif ($status === 'payment_claimed') {
+            $sql .= " AND o.order_status = 'pending_payment' AND o.customer_marked_paid_at IS NOT NULL";
         } elseif ($status !== 'all' && $status !== '') {
             $sql .= " AND o.order_status = ?";
             $types .= 's';
@@ -645,9 +651,10 @@ class AdminDashboardController
         }
 
         if ($search !== '') {
-            $sql .= " AND (o.order_number LIKE ? OR o.guest_email LIKE ? OR u.email LIKE ? OR o.shipping_address_snapshot LIKE ?)";
-            $types .= 'ssss';
-            array_push($params, "%{$search}%", "%{$search}%", "%{$search}%", "%{$search}%");
+            $sql .= " AND (o.order_number LIKE ? OR o.guest_email LIKE ? OR u.email LIKE ? OR o.shipping_address_snapshot LIKE ?
+                      OR EXISTS (SELECT 1 FROM `shipments` sh WHERE sh.order_id = o.id AND sh.tracking_number LIKE ?))";
+            $types .= 'sssss';
+            array_push($params, "%{$search}%", "%{$search}%", "%{$search}%", "%{$search}%", "%{$search}%");
         }
 
         $sql .= " ORDER BY o.created_at DESC";

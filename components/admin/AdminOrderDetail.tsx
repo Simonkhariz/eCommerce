@@ -48,6 +48,7 @@ const STATUS_CHANGE_HELP: Partial<Record<OrderStatus, string>> = {
   completed: 'Close the order once delivery is settled. No further changes are expected.',
   returned: 'Use this when the parcel comes back to the store. You can then record a refund if one is due.',
   refund_pending: 'Marks the order as awaiting a refund. Record the refund on the Refunds page once the money is returned.',
+  delivered: 'The refund request is declined: the order goes back to "Delivered". No money moves.',
 };
 
 export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
@@ -144,7 +145,9 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
 
   const runTransition = (status: OrderStatus) => {
     if (status === 'shipped') setShipOpen(true);
-    else if (status === 'delivered') markDelivered();
+    // Delivery confirmation is for parcels on their way; from "Refund pending", "Delivered" means
+    // the refund was declined, which is a plain status change.
+    else if (status === 'delivered' && order.order_status !== 'refund_pending') markDelivered();
     else if (status === 'cancelled') cancelOrder();
     else setStatusTarget(status);
   };

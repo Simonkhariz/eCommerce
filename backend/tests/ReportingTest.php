@@ -20,7 +20,7 @@ $adminId = $admin['id'];
 $A = static fn (string $method, string $path, array $opts = []): array
     => $t->http($method, $path, $opts + ['jar' => $admin['jar'], 'csrf' => $admin['csrf']]);
 
-/** Place a guest order for one unit and return [order_number, grand_total, order_id, email]. */
+/** Place a guest order for one unit and return [order_number, grand_total, order_id, email, guest_token]. */
 $placeOrder = static function () use ($t): ?array {
     $variant = $t->variant(2);
     if ($variant === null) {
@@ -47,7 +47,7 @@ $placeOrder = static function () use ($t): ?array {
         $t->sql("DELETE FROM `orders` WHERE `id` = ?", 'i', [$oid]);
         $t->sql("DELETE FROM `email_outbox` WHERE `recipient_email` = ?", 's', [$email]);
     });
-    return [$onum, (float) TestKit::get($res, 'data.grand_total'), $oid, $email];
+    return [$onum, (float) TestKit::get($res, 'data.grand_total'), $oid, $email, (string) TestKit::get($res, 'data.guest_access_token')];
 };
 
 // -----------------------------------------------------------------------------
@@ -118,6 +118,30 @@ $t->check('orders CSV defaults to all dates', (int) $t->scalar("SELECT COUNT(*) 
 $t->check('orders CSV honours status=attention', (int) $t->scalar("SELECT COUNT(*) FROM `orders` WHERE `requires_attention` = 1"), $countRows($A('GET', '/admin/orders/export?status=attention')['body']));
 if ($paid !== null) {
     $t->check('orders CSV honours search', 1, $countRows($A('GET', '/admin/orders/export?search=' . urlencode($paid[0]))['body']));
+}
+// The order list's special filters ("Customer says paid", "Awaiting WhatsApp payment") and its
+// tracking-number search export the same orders the list shows.
+$waOrder = $placeOrder();
+if ($waOrder !== null) {
+    [$waNum, , , , $waToken] = $waOrder;
+    $waAccess = ['headers' => ["X-Guest-Access-Token: {$waToken}"]];
+    $t->check('WhatsApp payment opened for the export test', 'whatsapp', TestKit::get(
+        $t->http('POST', "/checkout/orders/{$waNum}/initialize-payment", $waAccess + ['json' => ['gateway' => 'whatsapp']]), 'data.provider'
+    ));
+    $waRows = static fn (string $status): string => $A('GET', '/admin/orders/export?status=' . $status)['body'];
+    $t->ok('awaiting-WhatsApp export lists the order', str_contains($waRows('awaiting_whatsapp'), $waNum));
+    $t->ok('customer-says-paid export does not list it before the customer marks it paid', !str_contains($waRows('payment_claimed'), $waNum));
+    $t->check('customer marks the transfer as paid', 200, $t->http('POST', "/checkout/orders/{$waNum}/payment-sent", $waAccess + ['json' => []])['status']);
+    $t->ok('customer-says-paid export lists it', str_contains($waRows('payment_claimed'), $waNum));
+    $t->check('customer-says-paid export matches the database', (int) $t->scalar(
+        "SELECT COUNT(*) FROM `orders` WHERE `order_status` = 'pending_payment' AND `customer_marked_paid_at` IS NOT NULL"
+    ), $countRows($waRows('payment_claimed')));
+}
+if ($paid !== null) {
+    $tracking = 'TRK' . strtoupper(bin2hex(random_bytes(5)));
+    $t->check('paid order shipped with a tracking number', 200, $A('POST', "/admin/orders/{$paid[0]}/shipment", ['json' => ['carrier' => 'GIG Logistics', 'tracking_number' => $tracking, 'status' => 'in_transit']])['status']);
+    $byTracking = $A('GET', '/admin/orders/export?search=' . $tracking)['body'];
+    $t->ok('orders CSV search finds the order by its tracking number', $countRows($byTracking) === 1 && str_contains($byTracking, $paid[0]));
 }
 $t->check('exports need an admin session', 401, $t->http('GET', '/admin/orders/export')['status']);
 
