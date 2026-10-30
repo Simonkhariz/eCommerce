@@ -136,7 +136,21 @@ Apache runs PHP inside itself (mod_php), which does the same job as PHP-FPM.
    ```
 3. Run the site with `npm ci && npm run build && npm start` under pm2 or systemd. The domain's
    nginx block forwards to `http://127.0.0.1:3000`, with HTTPS from certbot. Set
-   `BACKEND_ORIGIN=http://127.0.0.1:8080`.
+   `BACKEND_ORIGIN=http://127.0.0.1:8080`. The block must pass the visitor's real address
+   (rate limits and sign-in protection depend on it; Next.js passes on whatever a visitor
+   sends if nothing in front of it sets this):
+   ```nginx
+   location / {
+       proxy_pass http://127.0.0.1:3000;
+       proxy_set_header Host $host;
+       proxy_set_header X-Forwarded-For $remote_addr;
+       proxy_set_header X-Forwarded-Proto $scheme;
+       client_max_body_size 10m;
+   }
+   ```
+   In `backend/.env`, set `APP_URL` and `FRONTEND_URL` to the shop's `https://` address (Kora
+   sends payment notifications to `APP_URL/api/v1/webhooks/kora`). Afterwards, admin → System
+   status → "Visitor addresses" must show your real public address.
 4. Production settings:
    - `backend/.env`: `APP_ENV=production`, `APP_DEBUG=false` and an `https://` `FRONTEND_URL`.
      Secure login cookies need HTTPS.
