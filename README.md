@@ -5,6 +5,10 @@ bank-transfer payments through **Kora** and **Monnify**, plus manual bank transf
 WhatsApp. Customers can check out as guests or sign in with an email link; the store team runs
 everything from an admin panel at `/admin`.
 
+**The full guide to how the shop works** (shopper and admin journeys, safeguards, measured
+scalability, video storyboard, proposal material): [docs/HOW_THE_SHOP_WORKS.md](docs/HOW_THE_SHOP_WORKS.md).
+Keep it updated with every change to features or safeguards.
+
 | Part | Stack | Where |
 | :--- | :--- | :--- |
 | Storefront + admin UI | Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind | repository root (`app/`, `components/`, `lib/`) |
