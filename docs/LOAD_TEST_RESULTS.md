@@ -24,7 +24,7 @@ deadlocks were recorded.
 | Errors (excluding designed 429s) < 0.5% | 0% in every scenario except the cold image burst (below) | Pass |
 | Webhooks: 0 double payments, 0 duplicate emails | 200 orders paid once, 200 emails; under/overpaid handled | Pass |
 | 20,000-email backlog drained < 10 min with 4 workers | 141 s with 4 workers (265 s with 1) | Pass |
-| Browsing p95 rises < 20% during the backlog | 91 ms → 142 ms (1 worker), 168 ms (4 workers): +56% / +85% | Fail (still far below 300 ms) |
+| Browsing p95 rises < 20% during the backlog | 91 ms → 142 ms (1 worker), 168 ms (4 workers): +56% / +85% | Fail (still far below 300 ms); **passes after the fixes: +19%** (see "Fixes and re-test") |
 
 ## S1 Browsing (requests mixed 60/40 storefront pages / API)
 
@@ -96,3 +96,63 @@ most 500 emails a minute (20,000 takes 40 minutes with one, 10 with four).
    API stays under 0.1 s). Within target; worth re-measuring on real hosting.
 4. **Email backlog slows browsing by 50-85%** in relative terms (still under 170 ms p95).
 5. **Scheduled email throughput is 500 per minute per worker** by design (`--limit` is capped at 500).
+
+## Why the backlog target failed
+
+Measured per phase (CPU per process, per request type):
+
+- Only the slow tail moved. The median request stayed at 24-29 ms in every phase; p95 rose mostly on
+  database-heavy calls (category API 90 → 313 ms, search API 103 → 412 ms).
+- The workers ran flat out with no pacing: 75 emails/s for one worker, 142/s for four. Each run
+  sends up to 500 and the test started the next run at once. Total CPU went from 45% to 78% (one
+  worker) and 92% (four workers, peaks at 98%) on the 4 cores shared with the shop.
+- Four workers fought over the same emails: each took the same oldest 500 and claimed them in
+  the same order, giving 3,282 row-lock waits and 1,018 queries/s in 141 s.
+- The biggest cost was outside the shop: the test used the "write emails to a log file" mode,
+  and Windows Defender rescanned the growing log (178 MB) after every write. At only 10 emails a
+  second Defender used 97% of a core, against 8-13% for MySQL and about 2% for the worker itself
+  (1.2 CPU seconds per 500 emails). A live shop sends through Resend over HTTPS and writes no file.
+- The queueing phase was also unrealistic: the test queued 20,000 emails one at a time (97 s);
+  the admin newsletter queues them in one transaction (11 s for 20,000).
+
+## Fixes and re-test (30 October 2026)
+
+Same PC and settings (OPcache on, 1-minute steps). Raw files: `results/b-*` and `results/c-*`
+next to the option A files. Run B tested the fixes with the log-file mail mode; run C repeated
+S1 after one change was withdrawn and ran S4 through a local stand-in for Resend (100 ms per
+email, nothing written to disk).
+
+| Finding | Fix | Before | After |
+|---|---|---|---|
+| 1. Stale stock number in the out-of-stock message | `CheckoutService` reads the stock for the message with a locking read (the latest committed value) | 80 of 80 refusals showed "Available: N" | 0 of 80; all say "Available: 0"; still exactly 20 sold |
+| 2. Burst of first-time pictures stalls | `next.config.mjs`: WebP only, no AVIF (AVIF files are ~20% smaller but far slower to make) | 200 first-time sizes: all over 30 s; repeat burst 4.5-5.1 s | All 200 in 7.5 s; repeat burst 0.1-0.4 s; 0 errors |
+| 4. Email backlog slows browsing | `process_outbox.php --max-seconds --rate`, batch taken in random order so workers do not queue on the same row | +56% (1 worker), +85% (4 workers) | Recommended schedule (1 worker, 8/s): 73 → 87 ms, **+19%**. 4 workers at 8/s each: +45% |
+| 5. 500 emails per scheduled run | `--max-seconds=50`: one run keeps taking batches for up to 50 s | 500 a minute, flat out | ~390 a minute at 8/s: Resend's limit, not the worker, now sets the pace |
+
+**Found while fixing 5:** Resend allows **10 requests a second per account** by default
+(resend.com/docs/api-reference/rate-limit). Before this change a "too many requests" answer
+counted as a failed attempt, and an email is marked failed after 5 attempts, so a newsletter sent
+faster than the limit could have lost emails. Now that answer leaves the email's attempts
+untouched, retries it a minute later and stops the run (`stopped=rate-limited`). Tested in
+`ResendTransportTest` (a used-up daily quota is still counted, so it cannot retry forever).
+
+**What this means for newsletters:** at the recommended 8 a second, 1,000 subscribers take about
+2 minutes and 20,000 about 42. The plan's "20,000 in under 10 minutes" needs a higher limit from
+Resend (raise `--rate` and add workers after Resend raises it), or Resend's batch endpoint
+(100 emails per request). That would be a new feature, not part of these fixes.
+
+**Withdrawn after measuring (finding 3):** caching each product page for 60 s (ISR) made things
+worse. With 4,000 products almost every visit was a first visit that built the page and wrote it
+to disk: product page p50 41 → 61 ms at 5 shoppers, and at 100-150 shoppers the whole storefront
+slowed to p95 2.8-4.3 s. Reverted. Re-run without it (run C): 50 shoppers p95 96 ms, 100 shoppers
+181 ms (option A: 104 / 216 ms), 0 errors. The 150-shopper step was slower than in option A (767 ms
+against 434 ms) because the owner's development servers were running this time; the PC sat at
+about 29% CPU before the test started. Storefront rendering remains the first part to slow: a
+rendering limit, to re-measure on real hosting.
+
+**Checks:** integrity clean after every scenario; no deadlocks; 0 server errors. During run C the
+Resend stand-in counted 10 addresses that received two emails. Cause: 240 test newsletters left
+over from the Defender measurement were picked up by the API's once-a-minute retry before the
+new 20,000 were queued, and the queue step then replaced them. These were two different
+newsletters to the same 10 test addresses. Two clean repeats (1,500 and 2,000 emails, four
+workers alongside the API's retry run) delivered every email exactly once.
