@@ -476,7 +476,7 @@ class MailService
     /**
      * Deliver one outbox row if it is due and nobody else is delivering it.
      *
-     * @return array{id: int, status: string, error: string|null}|null null when the row was not due / claimed
+     * @return array{id: int, status: string, error: string|null, rate_limited?: bool}|null null when the row was not due / claimed
      */
     public function deliver(int $id): ?array
     {
@@ -517,10 +517,23 @@ class MailService
 
         // One idempotency key per outbox row: a provider that supports it (Resend) treats a retry
         // after a lost answer as the same email, not a second one.
-        [$ok, $transport, $error, $permanent] = $this->transmit((string) $row['recipient_email'], $rendered, $templates->storeName(), $template, $payload, "shopco-outbox-{$id}");
+        [$ok, $transport, $error, $permanent, $rateLimited] = $this->transmit((string) $row['recipient_email'], $rendered, $templates->storeName(), $template, $payload, "shopco-outbox-{$id}");
 
         if ($ok) {
             return $this->finish($id, 'sent', $transport, null, true);
+        }
+
+        // Sending too fast is not the email's fault: try again in a minute without using up one of
+        // its attempts (otherwise a large newsletter sent too quickly would end up marked failed).
+        if ($rateLimited) {
+            $this->db->executeUpdate(
+                "UPDATE `email_outbox`
+                 SET `last_error` = ?, `transport` = ?, `next_attempt_at` = DATE_ADD(NOW(), INTERVAL 1 MINUTE)
+                 WHERE `id` = ?",
+                'ssi',
+                [$error, $transport, $id]
+            );
+            return ['id' => $id, 'status' => 'pending', 'error' => $error, 'rate_limited' => true];
         }
 
         $attempts = (int) $row['attempt_count'] + 1;
@@ -541,13 +554,17 @@ class MailService
     }
 
     /**
-     * Deliver due rows (oldest first). Used by scripts/process_outbox.php, the admin "Send now"
+     * Deliver due rows (the oldest batch). Used by scripts/process_outbox.php, the admin "Send now"
      * and the automatic retries after requests. $maxSeconds stops starting new sends once the
-     * batch has run that long (0 = no limit).
+     * batch has run that long (0 = no limit). $perSecond caps the sending pace (0 = as fast as the
+     * transport allows), so a large backlog does not take the database and CPU away from shoppers.
      *
-     * @return array{processed: int, sent: int, failed: int, retrying: int}
+     * The batch is worked through in random order: workers running side by side then rarely
+     * reach for the same email at the same moment (in id order they all queue on the same row).
+     *
+     * @return array{processed: int, sent: int, failed: int, retrying: int, rate_limited: int} rate_limited is 1 when the provider asked to slow down
      */
-    public function processQueue(int $limit = 50, int $maxSeconds = 0): array
+    public function processQueue(int $limit = 50, int $maxSeconds = 0, float $perSecond = 0): array
     {
         $startedAt = microtime(true);
         $ids = array_column($this->db->fetchAll(
@@ -557,15 +574,30 @@ class MailService
             'i',
             [max(1, min(500, $limit))]
         ), 'id');
+        shuffle($ids);
 
-        $summary = ['processed' => 0, 'sent' => 0, 'failed' => 0, 'retrying' => 0];
+        $summary = ['processed' => 0, 'sent' => 0, 'failed' => 0, 'retrying' => 0, 'rate_limited' => 0];
         foreach ($ids as $id) {
             if ($maxSeconds > 0 && microtime(true) - $startedAt >= $maxSeconds) {
                 break;
             }
+            if ($perSecond > 0 && $summary['processed'] > 0) {
+                $wait = $startedAt + $summary['processed'] / $perSecond - microtime(true);
+                if ($wait > 0) {
+                    usleep((int) ($wait * 1e6));
+                }
+                if ($maxSeconds > 0 && microtime(true) - $startedAt >= $maxSeconds) {
+                    break;
+                }
+            }
             $result = $this->deliver((int) $id);
             if ($result === null) {
                 continue;
+            }
+            if (!empty($result['rate_limited'])) {
+                // The provider asked us to slow down: stop this batch; the rest waits for the next run.
+                $summary['rate_limited'] = 1;
+                break;
             }
             $summary['processed']++;
             $key = $result['status'] === 'sent' ? 'sent' : ($result['status'] === 'failed' ? 'failed' : 'retrying');
@@ -620,7 +652,7 @@ class MailService
      *
      * @param array{subject: string, html: string, text: string} $rendered
      * @param string|null $idempotencyKey stable for one outbox row, so a retry is never a second email
-     * @return array{0: bool, 1: string, 2: string|null, 3: bool} ok, transport, error, permanent failure
+     * @return array{0: bool, 1: string, 2: string|null, 3: bool, 4: bool} ok, transport, error, permanent failure, rate limited
      */
     private function transmit(string $to, array $rendered, string $storeName, string $template, array $payload = [], ?string $idempotencyKey = null): array
     {
@@ -632,31 +664,31 @@ class MailService
         if (ResendTransport::isConfigured()) {
             try {
                 (new ResendTransport())->send($to, $rendered['subject'], $rendered['html'], $rendered['text'], $storeName, $headers, $idempotencyKey);
-                return [true, 'resend', null, false];
+                return [true, 'resend', null, false, false];
             } catch (ResendError $e) {
                 error_log("[MailService Resend] {$template} to {$to}: " . $e->getMessage());
-                return [false, 'resend', mb_substr($e->getMessage(), 0, 500), $e->permanent];
+                return [false, 'resend', mb_substr($e->getMessage(), 0, 500), $e->permanent, $e->rateLimited];
             } catch (Throwable $e) {
                 error_log("[MailService Resend] {$template} to {$to}: " . $e->getMessage());
-                return [false, 'resend', mb_substr($e->getMessage(), 0, 500), false];
+                return [false, 'resend', mb_substr($e->getMessage(), 0, 500), false, false];
             }
         }
 
         if (SmtpTransport::isConfigured()) {
             try {
                 (new SmtpTransport())->send($to, $rendered['subject'], $rendered['html'], $rendered['text'], $storeName, $headers);
-                return [true, 'smtp', null, false];
+                return [true, 'smtp', null, false, false];
             } catch (Throwable $e) {
                 error_log("[MailService SMTP] {$template} to {$to}: " . $e->getMessage());
-                return [false, 'smtp', mb_substr($e->getMessage(), 0, 500), false];
+                return [false, 'smtp', mb_substr($e->getMessage(), 0, 500), false, false];
             }
         }
 
         try {
             $this->writeToMailLog($to, $rendered, $template);
-            return [true, 'log', null, false];
+            return [true, 'log', null, false, false];
         } catch (Throwable $e) {
-            return [false, 'log', 'Could not write to storage/logs/mail.log: ' . $e->getMessage(), false];
+            return [false, 'log', 'Could not write to storage/logs/mail.log: ' . $e->getMessage(), false, false];
         }
     }
 

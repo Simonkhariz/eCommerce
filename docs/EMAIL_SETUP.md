@@ -108,7 +108,7 @@ SPF and DKIM. Add it after SPF and DKIM pass (they do once the domain is verifie
    sends up to 5 due emails (across all servers). On a quiet shop, schedule the worker so retries
    stay punctual:
    ```cron
-   * * * * *  php /var/www/shopco/backend/scripts/process_outbox.php >> /var/log/shopco-jobs.log 2>&1
+   * * * * *  php /var/www/shopco/backend/scripts/process_outbox.php --limit=500 --max-seconds=50 --rate=8 >> /var/log/shopco-jobs.log 2>&1
    ```
    (cPanel: "Cron Jobs"; Windows: see `backend/README.md`.)
 5. **No duplicates:** each email has a unique dedup key, so it is queued once; it is claimed

@@ -250,6 +250,43 @@ $t->check('and each recipient received it exactly once', [], array_values($twice
 file_put_contents($delayFile, '0');
 
 // -----------------------------------------------------------------------------
+$t->section('The scheduled worker: several batches per run, and a sending pace');
+$runWorker = static function (array $args) use ($envFile): array {
+    $start = microtime(true);
+    $proc = proc_open(array_merge([PHP_BINARY, BASE_PATH . '/scripts/process_outbox.php'], $args), [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, BASE_PATH, array_merge(getenv(), ['SHOPCO_ENV_FILE' => $envFile]));
+    $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+    proc_close($proc);
+    return [trim($out), microtime(true) - $start];
+};
+$queueSome = static function (string $name, int $n) use ($t, $dueEmail): array {
+    $ids = [];
+    for ($i = 1; $i <= $n; $i++) {
+        $ids[$t->uniq("{$name}{$i}") . '@example.test'] = 0;
+    }
+    foreach (array_keys($ids) as $to) {
+        $ids[$to] = $dueEmail($to);
+    }
+    return $ids;
+};
+$allSentOnce = static fn (array $ids): bool => count(array_filter($ids, fn (int $id) => $statusOf($id) === 'sent')) === count($ids)
+    && array_filter(array_keys($ids), fn (string $to) => $received($to) !== 1) === [];
+
+$batches = $queueSome('batches', 5);
+[$out] = $runWorker(['--limit=2']);
+$t->ok('without --max-seconds one run sends one batch', str_contains($out, 'processed=2 ') && count(array_filter($batches, fn (int $id) => $statusOf($id) === 'pending')) >= 3, $out);
+[$out] = $runWorker(['--limit=2', '--max-seconds=20']);
+$t->ok('with --max-seconds the run keeps taking batches until the queue is empty', $allSentOnce($batches), $out);
+
+$paced = $queueSome('paced', 5);
+[$out, $took] = $runWorker(['--limit=5', '--rate=4']);
+$t->ok('--rate=4 sends 5 emails in no less than 1 second', $allSentOnce($paced) && $took >= 1.0, sprintf('%.2f s; %s', $took, $out));
+
+$capped = $queueSome('capped', 6);
+[$out, $took] = $runWorker(['--limit=6', '--rate=2', '--max-seconds=1']);
+$left = count(array_filter($capped, fn (int $id) => $statusOf($id) === 'pending'));
+$t->ok('--max-seconds also stops a paced run in time, leaving the rest queued', $took < 4 && $left >= 3 && $left < 6, sprintf('%.2f s, %d left; %s', $took, $left, $out));
+
+// -----------------------------------------------------------------------------
 $t->section('The same email is never queued twice');
 $key = 'mailasync-dedup:' . bin2hex(random_bytes(4));
 $to = $t->uniq('dedup') . '@example.test';

@@ -140,6 +140,30 @@ foreach ($cases as [$m, $label, $expected, $code]) {
     $t->check('nothing was sent', 0, $sentTo($to));
 }
 
+// -----------------------------------------------------------------------------
+$t->section('Too many requests: slow down without using up attempts');
+$mode('429');
+$ids = [];
+foreach (['a', 'b', 'c'] as $n) {
+    $ids[] = $queue("busy-{$n}@{$domain}");
+}
+$before = count($requests());
+$summary = $mail->processQueue(10);
+$t->check('the batch stops at the first "too many requests"', 1, count($requests()) - $before);
+$t->check('and reports it', [0, 1], [$summary['processed'], $summary['rate_limited']]);
+$in = implode(',', $ids);
+$t->check('no email lost an attempt', 0, (int) $t->scalar("SELECT SUM(`attempt_count`) FROM `email_outbox` WHERE `id` IN ({$in})"));
+$t->check('the refused one waits a minute, the rest stay due', [1, 2], [
+    (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `id` IN ({$in}) AND `status` = 'pending' AND `next_attempt_at` > NOW()"),
+    (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `id` IN ({$in}) AND `status` = 'pending' AND `next_attempt_at` IS NULL"),
+]);
+$t->sql("DELETE FROM `email_outbox` WHERE `id` IN ({$in})");
+$mode('429quota');
+$id = $queue("quota@{$domain}");
+$mail->deliver($id);
+$t->check('a used-up daily quota (also 429) counts as an attempt, so it cannot retry forever', ['pending', 1], [$row($id)['status'] ?? null, (int) ($row($id)['attempt_count'] ?? -1)]);
+$mode('ok');
+
 $mode('slow');
 $to = "slow@{$domain}";
 $id = $queue($to);

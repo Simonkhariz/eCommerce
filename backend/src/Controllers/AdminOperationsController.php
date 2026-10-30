@@ -762,9 +762,10 @@ class AdminOperationsController
         $summary = MailService::getInstance()->processQueue(50);
         AuditService::record($this->adminId(), 'email.process_queue', 'email_outbox', null, null, $summary);
         $remaining = (int) ($this->db->fetchOne("SELECT COUNT(*) AS c FROM `email_outbox` WHERE `status` = 'pending'")['c'] ?? 0);
-        Response::success($summary + ['still_pending' => $remaining], $summary['processed'] === 0
+        $slowDown = $summary['rate_limited'] > 0 ? ' The email service asked to slow down; the rest will be sent shortly.' : '';
+        Response::success($summary + ['still_pending' => $remaining], ($summary['processed'] === 0 && $slowDown === ''
             ? 'Nothing was due to send.'
-            : "Processed {$summary['processed']}: {$summary['sent']} sent, {$summary['retrying']} will retry, {$summary['failed']} failed.");
+            : "Processed {$summary['processed']}: {$summary['sent']} sent, {$summary['retrying']} will retry, {$summary['failed']} failed.") . $slowDown);
     }
 
     // =========================================================================

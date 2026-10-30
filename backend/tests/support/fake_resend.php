@@ -8,7 +8,7 @@ declare(strict_types=1);
  * statusCode/name/message, and idempotency keys (a repeat with the same body returns the first
  * answer without sending again; a reused key with another body is refused with 409).
  *
- * FAKE_RESEND_DIR holds: mode (ok | drop | 401 | 422 | 429 | 500 | slow), requests.log (one JSON
+ * FAKE_RESEND_DIR holds: mode (ok | drop | 401 | 422 | 429 | 429quota | 500 | slow), requests.log (one JSON
  * line per request), sent.log (one line per email actually "sent") and keys.json.
  */
 
@@ -64,6 +64,7 @@ return match ($mode) {
     })(),
     '401' => $error(401, 'validation_error', 'API key is invalid'),
     '422' => $error(422, 'missing_required_field', 'Missing `to` field.'),
-    '429' => $error(429, 'rate_limit_exceeded', 'Too many requests. You can only make 2 requests per second.'),
+    '429' => $error(429, 'rate_limit_exceeded', 'Too many requests. You can only make 10 requests per second.'),
+    '429quota' => $error(429, 'daily_quota_exceeded', 'You have reached your daily email sending quota.'),
     default => $error(500, 'application_error', 'An unexpected error occurred.'),
 };

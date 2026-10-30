@@ -199,7 +199,14 @@ bounds each step of a send.
 ```bash
 php backend/scripts/process_outbox.php              # one batch of up to 100
 php backend/scripts/process_outbox.php --limit=500
+php backend/scripts/process_outbox.php --limit=500 --max-seconds=50 --rate=8   # the scheduled command
 ```
+`--max-seconds` keeps taking batches until the queue is empty or the time is up, so one run a
+minute is not limited to one batch. `--rate` caps emails per second: Resend allows 10 requests a
+second for the whole account by default, shared with the order emails the API sends itself, so 8
+leaves room for those (with several workers, divide it between them). If Resend still answers
+"too many requests", the email keeps all its attempts, is tried again a minute later, and the run
+stops. The pace also keeps a large newsletter from slowing the shop.
 **Retries happen automatically, with no scheduler:** after an API request has answered, the first
 request each minute (across all PHP processes and servers, decided by one atomic row in
 `store_settings`) sends up to 5 due emails, for at most 20 seconds (`MailService::retryDueAfterResponse`,
@@ -210,10 +217,10 @@ retries punctual when the shop is quiet and sends newsletters in bigger batches.
 Schedule it **every minute** (php-win.exe runs without a console window; runs never overlap and
 two at once are safe, because each email is claimed before it is sent):
 ```powershell
-schtasks /Create /SC MINUTE /MO 1 /TN "ShopCo Send Email" /TR "C:\xampp\php\php-win.exe C:\path\to\E-commerce\backend\scripts\process_outbox.php"
+schtasks /Create /SC MINUTE /MO 1 /TN "ShopCo Send Email" /TR "C:\xampp\php\php-win.exe C:\path\to\E-commerce\backend\scripts\process_outbox.php --limit=500 --max-seconds=50 --rate=8"
 ```
 ```cron
-* * * * *  php /var/www/shopco/backend/scripts/process_outbox.php
+* * * * *  php /var/www/shopco/backend/scripts/process_outbox.php --limit=500 --max-seconds=50 --rate=8
 ```
 With `MAIL_MAILER=log` (the default) emails go to `backend/storage/logs/mail.log` and the admin outbox
 shows them as "Logged only". The admin Email outbox page also has "Send queued now".

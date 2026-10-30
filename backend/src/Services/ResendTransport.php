@@ -81,7 +81,9 @@ final class ResendTransport
         throw new ResendError(
             sprintf('Resend answered HTTP %d%s%s', $status, $name !== '' ? " ({$name})" : '', $detail !== '' ? ": {$detail}" : ''),
             $status,
-            self::isPermanent($status)
+            self::isPermanent($status),
+            // Quota errors are 429s too (daily_quota_exceeded, monthly_quota_exceeded).
+            $status === 429 && !str_ends_with($name, '_quota_exceeded')
         );
     }
 

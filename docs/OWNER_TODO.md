@@ -30,7 +30,10 @@ Also still open from earlier work:
       Failed emails are already retried automatically by the API (a few a minute, never twice),
       so this is about punctuality on a quiet shop. On the live server use the three cron lines
       in the root README ("Background jobs"); on cPanel, add them under "Cron Jobs". On this PC
-      (optional): `schtasks /Create /SC MINUTE /MO 1 /TN "ShopCo Send Email" /TR "C:\xampp\php\php-win.exe C:\Users\smnkh\Desktop\E-templates\E-commerce\backend\scripts\process_outbox.php"`
+      (optional): `schtasks /Create /SC MINUTE /MO 1 /TN "ShopCo Send Email" /TR "C:\xampp\php\php-win.exe C:\Users\smnkh\Desktop\E-templates\E-commerce\backend\scripts\process_outbox.php --limit=500 --max-seconds=50 --rate=8"`
+      Newsletters: `--rate=8` keeps within Resend's default 10 emails a second, so 1,000 subscribers
+      take about 2 minutes and 20,000 about 42. Faster needs a higher limit from Resend (ask them),
+      then raise `--rate`.
       `check_database` deletes nothing: it emails you when the database is big or slow, or when old data waits for your review.
 - [ ] Site-content TODOs (about, contact, policies)
 - [ ] Backups: schedule `php backend/scripts/backup.php` daily on the server and copy each backup
