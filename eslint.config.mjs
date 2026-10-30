@@ -14,5 +14,7 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': 'error',
     },
   },
-  globalIgnores(['.next/**', 'out/**', 'build/**', 'next-env.d.ts', 'backend/**', 'public/**', 'design/**', 'docs/**']),
+  // kravio-dashboard.vercel.app: a downloaded copy of another site's built bundle, kept locally
+  // for reference and git-ignored; it is not this project's code.
+  globalIgnores(['.next/**', 'out/**', 'build/**', 'next-env.d.ts', 'backend/**', 'public/**', 'design/**', 'docs/**', 'kravio-dashboard.vercel.app/**']),
 ]);
