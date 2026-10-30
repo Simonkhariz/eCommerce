@@ -163,7 +163,9 @@ final class TestKit
         foreach (preg_split('/\r?\n/', $rawHeaders) ?: [] as $line) {
             if (str_contains($line, ':')) {
                 [$k, $v] = explode(':', $line, 2);
-                $parsed[strtolower(trim($k))] = trim($v);
+                $k = strtolower(trim($k));
+                // A header sent twice reads as one comma-separated value, as HTTP defines it.
+                $parsed[$k] = isset($parsed[$k]) ? $parsed[$k] . ', ' . trim($v) : trim($v);
             }
         }
         $json = json_decode($body, true);

@@ -124,7 +124,9 @@ class Response
             // Only public catalogue data may be kept by browsers; everything else (accounts,
             // orders, admin) is never stored.
             header('Cache-Control: ' . ($public ? self::$publicCache : 'no-store'));
-            header('Vary: Accept-Encoding');
+            // Added to (not replacing) the Vary: Origin that CORS may have set, so a shared cache
+            // never hands one site's CORS answer to another.
+            header('Vary: Accept-Encoding', false);
             if ($etag !== null) {
                 header('ETag: ' . $etag);
             }
@@ -173,6 +175,10 @@ class Response
      */
     public static function finishForClient(): void
     {
+        // The work that follows (emails, storefront refresh) must finish even if the visitor has
+        // already gone: otherwise an email accepted by the mail server but not yet marked sent
+        // would be sent again after its lease.
+        ignore_user_abort(true);
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
             return;

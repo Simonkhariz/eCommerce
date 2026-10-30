@@ -207,6 +207,9 @@ $allowed = trim(explode(',', (string) Env::get('CORS_ALLOWED_ORIGINS', 'http://l
 if ($allowed !== '') {
     $ok = $t->http('GET', '/health', ['headers' => ["Origin: {$allowed}"]]);
     $t->check('configured storefront origin is allowed', $allowed, $ok['headers']['access-control-allow-origin'] ?? null);
+    $listing = $t->http('GET', '/categories', ['headers' => ["Origin: {$allowed}"]]);
+    $vary = array_map('trim', explode(',', strtolower((string) ($listing['headers']['vary'] ?? ''))));
+    $t->check('a cacheable answer varies by Origin as well as encoding (a shared cache keeps one per site)', [true, true], [in_array('origin', $vary, true), in_array('accept-encoding', $vary, true)]);
 }
 
 // -----------------------------------------------------------------------------

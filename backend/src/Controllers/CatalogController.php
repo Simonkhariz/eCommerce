@@ -55,9 +55,8 @@ class CatalogController
 
         // Browsing pages are the same for every visitor; searches vary too much to be worth keeping.
         $load = fn (): array => $this->productRepo->listPublished($filters, $page, $perPage);
-        $result = empty($filters['search'])
-            ? Cache::remember('products:' . json_encode([$filters, $page, $perPage]), $load)
-            : $load();
+        $cacheKey = empty($filters['search']) ? self::listCacheKey($filters, $page, $perPage) : null;
+        $result = $cacheKey !== null ? Cache::remember($cacheKey, $load) : $load();
         Response::cachePublic(30, 120);
 
         Response::success(
@@ -99,6 +98,55 @@ class CatalogController
         Response::cachePublic(0);
 
         Response::success($product, 'Product details retrieved successfully.');
+    }
+
+    /** Listing pages deeper than this are rare enough to be read from the database every time. */
+    private const CACHE_MAX_PAGE = 20;
+
+    /**
+     * Cache key for a listing request, built from normalised values only (the same filters in a
+     * different order or spelling share one entry), or null when the request should not be
+     * cached: a deep page or an unusual filter value. Anyone can send any query string, so
+     * keying on the raw values would let made-up filters fill the cache folder.
+     */
+    private static function listCacheKey(array $filters, int $page, int $perPage): ?string
+    {
+        $page = max(1, $page);
+        if ($page > self::CACHE_MAX_PAGE) {
+            return null;
+        }
+        $token = static fn ($v): bool => is_string($v) && preg_match('/^[\p{L}\p{N} #._-]{0,64}$/u', $v) === 1;
+        $key = ['p' => $page, 'n' => min(max(1, $perPage), 100)];
+        foreach ($filters as $name => $value) {
+            if (is_bool($value)) {
+                $key[$name] = $value;
+            } elseif ($value === null || $value === '') {
+                continue;
+            } elseif ($name === 'min_price' || $name === 'max_price') {
+                if (!is_numeric($value)) {
+                    return null;
+                }
+                $key[$name] = (float) $value;
+            } elseif ($name === 'colors' || $name === 'sizes') {
+                $items = is_array($value) ? $value : explode(',', (string) $value);
+                if (count($items) > 20) {
+                    return null;
+                }
+                foreach ($items as $item) {
+                    if (!$token($item)) {
+                        return null;
+                    }
+                }
+                $items = array_values(array_unique(array_filter(array_map(static fn (string $i): string => strtolower(trim($i)), $items), 'strlen')));
+                sort($items);
+                $key[$name] = $items;
+            } elseif ($token($value)) {
+                $key[$name] = $value;
+            } else {
+                return null;
+            }
+        }
+        return 'products:' . json_encode($key);
     }
 
     /**

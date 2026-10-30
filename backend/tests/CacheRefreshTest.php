@@ -62,7 +62,32 @@ $before = $calls;
 Cache::remember('products:off', $compute);
 Cache::remember('products:off', $compute);
 $t->check('a lifetime of 0 turns caching off', $before + 2, $calls);
+
+// However many different requests arrive, the folder stays bounded (oldest entries go first).
+array_map('unlink', glob($dir . '/*.cache') ?: []);
+Cache::configureForTests($dir, 60, 5);
+for ($i = 1; $i <= 12; $i++) {
+    Cache::remember("products:flood{$i}", $compute);
+    touch($dir . '/' . sha1(trim((string) file_get_contents($dir . '/catalog.version')) . "|products:flood{$i}") . '.cache', time() - 100 + $i);
+}
+$t->check('the cache folder never holds more than the limit', 5, count(glob($dir . '/*.cache') ?: []));
+$before = $calls;
+Cache::remember('products:flood12', $compute);
+$t->check('the newest entries are the ones kept', $before, $calls);
 Cache::configureForTests(null, null);
+
+$t->section('Catalogue cache keys');
+$listKey = new ReflectionMethod(App\Controllers\CatalogController::class, 'listCacheKey');
+$keyFor = static fn (array $filters, int $page = 1, int $perPage = 12): ?string => $listKey->invoke(null, $filters + ['product_type' => 'physical', 'sort' => 'newest', 'on_sale' => false], $page, $perPage);
+$t->check('the same colours in another order or case share one entry', $keyFor(['colors' => 'Blue,black']), $keyFor(['colors' => 'black,BLUE']));
+$t->check('page sizes over 100 share the entry of 100 (the most the API returns)', $keyFor([], 1, 100), $keyFor([], 1, 5000));
+$t->check('prices are compared as numbers', $keyFor(['min_price' => '10']), $keyFor(['min_price' => '10.0']));
+$t->check('a different filter is a different entry', false, $keyFor(['category' => 'shirts']) === $keyFor(['category' => 'jeans']));
+$t->check('deep pages are not cached', null, $keyFor([], 21));
+$t->check('a price that is not a number is not cached', null, $keyFor(['min_price' => 'abc']));
+$t->check('an unusual filter value is not cached', null, $keyFor(['category' => str_repeat('x', 65)]));
+$t->check('more than 20 colours is not cached', null, $keyFor(['colors' => implode(',', range(1, 21))]));
+$t->check('a colour list given as an array of arrays is not cached', null, $keyFor(['colors' => [['x']]]));
 
 // -----------------------------------------------------------------------------
 $t->section('Storefront refresh after admin changes');

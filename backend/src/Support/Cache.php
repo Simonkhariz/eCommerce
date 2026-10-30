@@ -21,6 +21,7 @@ final class Cache
     private static ?string $version = null;
     private static ?string $testDir = null;
     private static ?int $testTtl = null;
+    private static ?int $testMaxEntries = null;
 
     public static function ttl(): int
     {
@@ -35,12 +36,14 @@ final class Cache
 
     /**
      * Tests only (CacheTest): a private folder and a fixed lifetime, so the cache itself can be
-     * tested without touching storage/cache. Passing nulls restores the normal behaviour.
+     * tested without touching storage/cache. $maxEntries also prunes after every write.
+     * Passing nulls restores the normal behaviour.
      */
-    public static function configureForTests(?string $dir, ?int $ttl): void
+    public static function configureForTests(?string $dir, ?int $ttl, ?int $maxEntries = null): void
     {
         self::$testDir = $dir;
         self::$testTtl = $ttl;
+        self::$testMaxEntries = $maxEntries;
         self::$version = null;
     }
 
@@ -70,7 +73,7 @@ final class Cache
 
         $value = $compute();
         self::write($file, serialize(['expires' => time() + $ttl, 'value' => $value]));
-        if (random_int(1, 200) === 1) {
+        if (self::$testMaxEntries !== null || random_int(1, self::PRUNE_EVERY) === 1) {
             self::prune();
         }
         return $value;
@@ -116,15 +119,41 @@ final class Cache
         }
     }
 
-    /** Remove entries from old catalogue versions and stale temporary files. */
+    /**
+     * Remove entries from old catalogue versions and stale temporary files, then the oldest
+     * entries beyond MAX_ENTRIES, so the folder stays bounded however many different requests
+     * arrive (cache files only; they are rebuilt from the database when needed).
+     */
     private static function prune(): void
     {
         $cutoff = time() - max(3600, self::ttl() * 10);
         $files = array_merge(glob(self::dir() . '/*.cache') ?: [], glob(self::dir() . '/*.tmp') ?: []);
+        $kept = [];
         foreach ($files as $file) {
-            if (@filemtime($file) < $cutoff) {
+            $mtime = @filemtime($file);
+            if ($mtime === false) {
+                continue;
+            }
+            if ($mtime < $cutoff) {
+                @unlink($file);
+            } else {
+                $kept[$file] = $mtime;
+            }
+        }
+        $max = self::$testMaxEntries ?? self::MAX_ENTRIES;
+        if (count($kept) > $max) {
+            asort($kept);
+            foreach (array_slice(array_keys($kept), 0, count($kept) - $max) as $file) {
                 @unlink($file);
             }
         }
     }
+
+    /**
+     * Most entries kept. Entries are 8-30 KB (about 65 MB for 5,000); the 4,000-product load
+     * test used 822.
+     */
+    public const MAX_ENTRIES = 5000;
+    /** One prune every this many writes. */
+    private const PRUNE_EVERY = 200;
 }
