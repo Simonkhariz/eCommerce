@@ -33,8 +33,10 @@ const nextConfig = {
   // Only the shop's own pictures (/images, /uploads) are resized: no outside hosts are allowed,
   // so /_next/image cannot be used to fetch and resize images from other sites. Pictures linked
   // from elsewhere are shown as they are (components/ui/StoreImage.tsx).
+  // WebP only: AVIF files are about 20% smaller, but encoding them is so slow that in the load
+  // test 200 first-time picture sizes at once all took over 30 s (docs/LOAD_TEST_RESULTS.md).
   images: {
-    formats: ['image/avif', 'image/webp'],
+    formats: ['image/webp'],
     minimumCacheTTL: 86400,
   },
 };
