@@ -66,6 +66,27 @@ place of the address list: a small change, not built yet. Also:
 - `BACKEND_ORIGIN` must be the API's public `https://` address.
 - Picture resizing (`/_next/image`) counts against Vercel's image limits.
 
+## Free hosting: what was checked (30 October 2026)
+
+The owner's choice: cPanel for the API, the storefront host still open, and free if possible.
+Official terms, read on 30 October 2026:
+
+| Option | Fits the shop? | Why (quoted from the provider) |
+|---|---|---|
+| Vercel Hobby (free) for the storefront | **No** | "Hobby teams are restricted to non-commercial personal use only." Commercial use includes "Any method of requesting or processing payment from visitors of the site" (vercel.com/docs/limits/fair-use-guidelines). The shop takes payments, so it needs Vercel Pro, and option C's address limit (above) still applies |
+| Free cPanel hosting such as InfinityFree for the API | **No** | Every free account has a browser check that blocks "Webhooks from external services" and "REST APIs" and "can't be turned off for one path" (forum.infinityfree.com, Browser security system). Kora's payment notifications and the storefront's own calls to the API would both be refused |
+| Cloudflare Workers free plan for the storefront | Not realistic | "CPU time per HTTP request: 10 ms" and 100,000 requests a day on the free plan (developers.cloudflare.com/workers/platform/limits); Next.js there runs through vinext, which "is in beta" |
+| Oracle Cloud Always Free (one server for everything, option A) | **Possible, with a catch** | Arm server "equivalent to 2 OCPUs and 12 GB of memory", 200 GB of storage, "10 TB per month of outbound data". But "Idle Always Free compute instances may be reclaimed by Oracle" when CPU, network and memory stay under 20% for 7 days, which describes a quiet small shop. The free-tier FAQ (commercial use, card needed) could not be read; check it before relying on it |
+
+**Recommendation:** for a shop that takes real payments, the dependable choice is a low-cost
+paid plan that runs both parts in one place: a cPanel plan that includes "Setup Node.js App"
+(storefront) next to PHP and MySQL (API), or a small VPS (option A). Everything then stays on one
+server: no address limit, no browser check, real cron. Oracle's free server can work for testing
+and a soft launch if you accept the reclaim risk and keep off-server backups (`docs/BACKUPS.md`).
+Whatever you choose, check before paying: PHP 8.2+, Node.js 20.9+ ("Setup Node.js App"),
+cron every minute, SSH (handy, not required: backups and restores work without it), and no
+browser check on API calls.
+
 ## Fixed during this audit
 
 | Problem | Effect on a live shop | Fix |

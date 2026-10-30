@@ -14,13 +14,15 @@ Each run writes one dated folder (default `backend/storage/backups`, or `BACKUP_
 
 | File | What it is |
 | :--- | :--- |
-| `database.sql.gz` | A consistent `mysqldump` snapshot taken without locking the shop (`--single-transaction`) |
+| `database.sql.gz` | A consistent snapshot taken without locking the shop (one transaction) |
 | `uploads.tar.gz` | Every file in the uploads folder |
-| `manifest.json` | Time, database name, sizes and SHA-256 checksums of both files |
+| `manifest.json` | Time, database name, how the dump was written, sizes and SHA-256 checksums, and (PHP dumps) the rows in every table |
 
-`mysqldump` is found on `PATH`, in XAMPP's folder on Windows, or at `MYSQLDUMP_PATH`. The database
-password is passed in the environment, never on the command line. The script never deletes old
-backups.
+The dump is made by `mysqldump` (found on `PATH`, in XAMPP's folder on Windows, or at
+`MYSQLDUMP_PATH`; its password goes in the environment, never on the command line). **Shared and
+cPanel hosts often do not let PHP run programs**, or have no `mysqldump`: then PHP writes the same
+consistent dump itself (`App\Support\SqlDump`), and the script says "written by PHP". Force it
+with `--php-dump`. The script never deletes old backups.
 
 ### Schedule it (daily)
 
@@ -28,7 +30,8 @@ backups.
 30 2 * * *  php /var/www/shopco/backend/scripts/backup.php >> /var/log/shopco-jobs.log 2>&1
 ```
 
-(cPanel: "Cron Jobs". Windows: `schtasks /Create /SC DAILY /ST 02:30 /TN "ShopCo Backup" /TR "C:\xampp\php\php-win.exe C:\path\to\E-commerce\backend\scripts\backup.php"`.)
+(cPanel: "Cron Jobs", e.g. `30 2 * * * /usr/local/bin/php /home/<user>/shopco/backend/scripts/backup.php`;
+use the PHP path cPanel shows. Windows: `schtasks /Create /SC DAILY /ST 02:30 /TN "ShopCo Backup" /TR "C:\xampp\php\php-win.exe C:\path\to\E-commerce\backend\scripts\backup.php"`.)
 
 ### Keep a copy off the server
 
@@ -45,12 +48,18 @@ values. The safest check is a test restore into a spare database (below), then c
 
 ## Restoring
 
-1. **Database** (into an empty database; restoring over a live one replaces its data):
+1. **Database**, into a new, empty database. No shell tools are needed:
    ```bash
-   mysql -u root -p -e "CREATE DATABASE shopco_restore CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-   gunzip < database.sql.gz | mysql -u root -p shopco_restore
+   php backend/scripts/restore_database.php --backup=<backup folder> --database=shopco_restore
    ```
-   Then point `DB_DATABASE` at it, or rename databases during a maintenance window.
+   It checks the checksum in `manifest.json` before loading, refuses a database that already
+   has tables (it never replaces data), and for dumps written by PHP compares every table's row
+   count afterwards. If loading stops halfway (a damaged file), it empties the new database again.
+   Create the database first (cPanel → MySQL Databases, give the shop's user all privileges), or
+   add `--create` where your MySQL user may create databases. Without SSH, run the command once
+   as a cron job and read the output cPanel emails you. With shell access, the mysql client also
+   works: `gunzip < database.sql.gz | mysql -u <user> -p shopco_restore`.
+   Then point `DB_DATABASE` at it. The step-by-step recovery is in `docs/RUNBOOKS.md`.
 2. **Pictures**:
    ```bash
    tar -xzf uploads.tar.gz -C /var/www/shopco/backend/public/uploads
@@ -59,4 +68,7 @@ values. The safest check is a test restore into a spare database (below), then c
    pages show their pictures, and the latest orders are there.
 
 This was tested on the development data: a restore into a spare database had the same number of
-orders, products, users and emails, and the restored pictures were byte-for-byte identical.
+orders, products, users and emails, and the restored pictures were byte-for-byte identical. The
+test suite repeats it on every run (`UploadsTest`): mysqldump and PHP backups both restore with
+identical rows (text, money, dates and JSON compared field by field), and damaged, cut-off or
+non-matching backups are refused without leaving anything behind.
