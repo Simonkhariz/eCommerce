@@ -304,7 +304,8 @@ class CheckoutController
             $methods[] = [
                 'id' => 'monnify',
                 'name' => 'Monnify',
-                'description' => 'Pay via Card, Bank Transfer, USSD, or Phone',
+                // Only what MonnifyService opens the payment page with (CARD, ACCOUNT_TRANSFER).
+                'description' => 'Pay by card or bank transfer',
                 'badge' => 'Instant & Secure',
                 'is_default' => true,
             ];
@@ -315,7 +316,8 @@ class CheckoutController
             $methods[] = [
                 'id' => 'kora',
                 'name' => 'Kora',
-                'description' => 'Pay securely with Card, Bank Transfer, or Mobile Money',
+                // Only what KoraService opens the payment page with (card, bank_transfer).
+                'description' => 'Pay securely by card or bank transfer',
                 'badge' => 'Secure Checkout',
                 'is_default' => empty($methods),
             ];

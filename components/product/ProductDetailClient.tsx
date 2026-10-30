@@ -317,9 +317,10 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
                     <span className="sr-only">Was </span>
                     {formatPrice(product.originalPrice)}
                   </span>
-                  {product.discountPercent && (
+                  {/* Worked out from the price shown, so it follows the chosen option's own price. */}
+                  {Math.round((1 - displayPrice / product.originalPrice) * 100) > 0 && (
                     <span className="bg-[#FF3333]/10 text-[#FF3333] text-sm font-bold px-3 py-1 rounded-full">
-                      -{product.discountPercent}%
+                      -{Math.round((1 - displayPrice / product.originalPrice) * 100)}%
                     </span>
                   )}
                 </>

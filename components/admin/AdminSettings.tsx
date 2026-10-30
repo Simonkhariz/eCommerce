@@ -54,7 +54,7 @@ function gatewayMode(mode: string) {
 }
 
 const METHODS: Array<{ id: PaymentMethodId; name: string; description: string }> = [
-  { id: 'monnify', name: 'Monnify', description: 'Card, bank transfer, USSD. Confirmed automatically.' },
+  { id: 'monnify', name: 'Monnify', description: 'Card and bank transfer. Confirmed automatically.' },
   { id: 'kora', name: 'Kora', description: 'Card and bank transfer. Confirmed automatically.' },
   { id: 'whatsapp', name: 'Pay via WhatsApp', description: 'Customer sends the invoice on WhatsApp and pays by transfer; you confirm it in Orders.' },
 ];
