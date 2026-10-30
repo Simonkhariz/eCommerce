@@ -55,7 +55,7 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **No data deleted without the owner's password and an emailed code.**
   - **Daily backups** that can be restored without technical tools.
 
-The full system has passed 890+ automated checks and a full load test.
+The full system has passed 900+ automated checks and a full load test.
 
 ---
 
@@ -256,6 +256,10 @@ second order, never stock held twice.
 **The cart is not emptied yet.** It is cleared only when the payment is confirmed, so a failed or
 abandoned payment can be retried on the same order. Coming back to checkout with the same cart
 resumes the unpaid order instead of creating a new one.
+
+**Going back to change the delivery details** before paying releases that order's items at once,
+so they don't sit reserved while the shopper places the corrected order. Once a payment has been
+started the first order keeps its reservation, because money may be on its way.
 
 ### 4.6 Checkout: paying
 
@@ -713,8 +717,12 @@ That gate:
 - It is held for the payment window: 60 minutes for card or transfer, 24 hours for WhatsApp.
 - If unpaid by the deadline, the order is cancelled and **the stock and promo use are returned
   exactly once**, however many processes try at the same time.
-- Expired orders are released by the scheduled job every 10 minutes. They are also released
-  whenever an order is placed, or the admin opens the orders list or overview.
+- Expired orders are released by the scheduled job every 10 minutes, which **asks Kora and
+  Monnify first**, so a payment made at the last minute is applied instead of cancelled.
+- They are also released by a quick clean-up whenever an order is placed, or the admin opens the
+  orders list or overview. That clean-up doesn't call the payment providers, so an order with a
+  card or transfer payment still open gets **30 extra minutes** for the payment to be confirmed
+  before it is released. This avoids refunds for payments that were simply slow to clear.
 
 ### 6.3 Emails: the outbox
 
@@ -826,7 +834,7 @@ proposal.
 
 **Proof in numbers:**
 
-- **890+ automated backend checks** in 17 test suites. They run against a throw-away database
+- **900+ automated backend checks** in 17 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data is never touched.
 - Plus storefront unit tests, type checks, lint and a production build.
 - **The release gate passed every check:**
@@ -942,7 +950,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive exactly once." |
 | 5 | A delete button behind a password field and an emailed code | "Nothing is deleted without your password and an emailed code." |
 | 6 | A calendar with a backup box every night | "Daily backups, with a checked, step-by-step restore." |
-| 7 | A counter climbing: 890+ ✓ | "890+ automated checks before every release." |
+| 7 | A counter climbing: 900+ ✓ | "900+ automated checks before every release." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
@@ -973,7 +981,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 > delivery fees, guest checkout, order tracking, and a full admin panel for products, stock,
 > orders, refunds, promotions, newsletters and reports. It is engineered like a much larger
 > system: no overselling, no double charges, no lost emails, daily verified backups, full audit
-> trail. It has been load-tested at thousands of orders with zero errors, and checked by 890+
+> trail. It has been load-tested at thousands of orders with zero errors, and checked by 900+
 > automated tests.
 
 ### 10.2 Selling points
@@ -1046,11 +1054,8 @@ Honest list, so proposals never overclaim:
 
 **Small things to know:**
 
-- The "reserved for 60 minutes" note in the checkout and the 60-minute / 24-hour figures on the
-  FAQ and Terms pages are written into the pages. If the payment window setting changes, update
-  them too.
-- "Change delivery details" after placing an order starts a new order. The first one stays
-  reserved until its deadline, at most 60 minutes.
+- The catalogue price filter and the price sort use each product's main price, the same price
+  its card shows. A size or colour with its own price shows that price on the product page.
 
 ---
 
@@ -1095,3 +1100,4 @@ When something changes, update the matching section in the same commit:
 | Date | Change |
 |---|---|
 | 30 Oct 2026 | First version: full shopper and admin guide, behind the scenes, safeguards, scalability, video storyboard, proposal material, roadmap. Fixed while writing it: order CSV export with the "Customer says paid" and "Awaiting WhatsApp payment" filters, and tracking-number search; declining a refund request ("Mark delivered" from Refund pending); payment option wording (card and bank transfer only); the product page "-N%" badge; shipping, cancellation, refund and payment emails now saved in the same database step as their change |
+| 30 Oct 2026 | The checkout note, FAQ and Terms now show the payment windows actually set on the server. The WhatsApp icon on Track order now holds the order for the WhatsApp window. "Change delivery details" releases the first order's items when no payment was started. The quick expiry clean-up gives an open card or transfer payment 30 extra minutes. 908 backend checks |
