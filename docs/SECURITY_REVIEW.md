@@ -47,6 +47,13 @@ count as a failed attempt (5 attempts and the email is marked failed).
   own retries and other servers never send the same email twice (re-tested in the load test:
   1,500 and 2,000 emails, four workers alongside the API's retries, every email exactly once).
 
+- **Redis (added after this review, `docs/REDIS.md`):** optional; password in `REDIS_URL`, TLS
+  (`rediss://`, certificate checked) or a Unix socket; keys under `REDIS_PREFIX`; only public
+  catalogue listings and the catalogue version are stored (fixed allow-list; admin data stays in
+  files); entries are read back with `unserialize(…, allowed_classes: false)`, so a tampered
+  Redis cannot create PHP objects; every failure falls back to the file cache within
+  `REDIS_TIMEOUT_MS`. Tested in `RedisCacheTest`.
+
 ## Accepted risks (no change; reasons)
 
 - **At-least-once email with SMTP:** a crash between the mail server accepting an email and it

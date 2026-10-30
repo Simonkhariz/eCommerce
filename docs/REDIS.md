@@ -96,3 +96,44 @@ Redis round trip is of the same order); the gain is sharing between servers. To 
 checks against a real Redis: `REDIS_TEST_URL=redis://:PASSWORD@127.0.0.1:6379/15 php
 backend/tests/run.php RedisCache` (its keys are removed afterwards; the outage checks need the
 stand-in and are skipped).
+
+## Prompt 29: event distribution — not built (it has nothing to deliver to)
+
+The roadmap allows Redis events only "if approved for SSE", to fan live updates out to the
+servers holding the browsers' connections. Live updates (SSE, Prompts 32-35) were deferred by the
+owner: the shop polls (payment status after checkout, the admin bell every minute), and polling
+already reads committed state from MySQL. Publishing events with no listener would be a second
+Redis use case with no purpose, which the roadmap rules out ("Do not introduce another Redis use
+case"). When SSE is built, its design is set out here already: publish only after the database
+transaction commits; treat Redis Pub/Sub as a wake-up signal, not the record (a browser that
+reconnects reads the current state over REST, so a missed message costs nothing); use a Redis
+Stream only if a message must survive a restart.
+
+## Prompt 30: queue scaling decision — keep the MySQL email outbox
+
+Measured against what the shop needs:
+
+| | Measured |
+|---|---|
+| MySQL outbox, 4 workers (Prompt 26) | 193 emails a second, each sent exactly once |
+| Load test, 20,000-email backlog (Prompt 37) | Drained in 141 s by 4 workers; no email sent twice |
+| What can actually leave | Resend allows 10 requests a second per account by default; the worker is paced at 8 |
+
+The queue is about **19 times faster than the email service allows**, so it is not the limit, and
+a Redis queue would not send a single email sooner. It would also lose two things that matter:
+
+- **One transaction with the payment.** The payment-confirmed email is queued inside the same
+  MySQL transaction that marks the order paid (`PaymentFinalizer`), so there is never a paid order
+  without its email or an email for a payment that was rolled back. A Redis queue cannot join
+  that transaction.
+- **Durability without extra setup.** Outbox rows are in the database and its backups. Redis keeps
+  data in memory unless persistence (AOF) is configured, which many hosts do not offer.
+
+**Decision:** keep the MySQL outbox; no Redis queue. Revisit only if all three become true: the
+email service allows far more than the outbox delivers, MySQL shows contention on the outbox
+under that load, and several servers send at once. A Redis-backed queue would then need, before
+any code: persistence (AOF, fsync every second), the outbox kept as the record with Redis only
+signalling new work (so the payment transaction stays whole), a stream with consumer groups for
+claims and `XAUTOCLAIM` for crashed workers, the same idempotency keys (`shopco-outbox-<id>`),
+retries and the 5-attempt limit as today, a dead-letter list shown in admin, and a period running
+both side by side before the switch.

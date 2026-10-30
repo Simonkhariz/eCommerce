@@ -2,7 +2,7 @@
 
 Short, step-by-step answers for the shop's owner or whoever runs it. Each one starts with how
 you notice, then what to do. Admin → **System status** is the first place to look for all of
-them. Redis and live updates (SSE) are not used, so they have no runbook.
+them. Live updates (SSE) are not used, so they have no runbook; Redis is optional (runbook 8).
 
 Golden rules: never restore over the live database (restore into a new one, check it, then
 switch); never delete data outside admin → Data & storage (which asks for your password and an
@@ -131,3 +131,18 @@ table and all data**; it is for a throw-away development database only, never th
 4. A wave of failed sign-ins or orders from one place is handled by rate limits. If every
    visitor seems to share them, System status → "Visitor addresses" shows a private address:
    the proxy is not passing real addresses (`docs/DEPLOYMENT.md`).
+
+## 8. Redis is down (only when `REDIS_URL` is set)
+
+**You notice:** System status → "Redis (optional cache)" says "Not answering"; the PHP error log
+has `[Redis] unavailable, using the file cache`.
+
+Nothing breaks: the shop serves the catalogue from the file cache and MySQL, and checks Redis again
+every `REDIS_RETRY_SECONDS` (30 s). Orders, payments, stock, sign-ins and emails never depend on it.
+
+1. Read the error in System status: "WRONGPASS" (password changed: update `REDIS_URL`), "Cannot
+   connect" (Redis stopped: restart it in the host's panel, or ask the host), "did not answer in
+   time" (Redis overloaded or far away).
+2. When it answers again, nothing needs doing: the first request starts the shared cache afresh,
+   so nothing from before the outage is shown.
+3. To stop using Redis altogether, empty `REDIS_URL` in `backend/.env`.

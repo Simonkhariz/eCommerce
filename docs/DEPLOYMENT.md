@@ -20,7 +20,8 @@ setting was changed.
 | Email | Resend (domain verified) or SMTP; outbound HTTPS to api.resend.com or the SMTP port | `docs/EMAIL_SETUP.md`; Resend allows 10 requests a second per account |
 | Payments | Kora must reach `APP_URL/api/v1/webhooks/kora` over public HTTPS; Monnify's webhook URL is set in its dashboard; outbound HTTPS to both | System status warns when `APP_URL` is not public HTTPS |
 | Pictures | Server disk (default) or an S3-compatible bucket (Cloudflare R2 chosen, not set up) | `docs/STORAGE.md` |
-| Redis, SSE | Not used (owner decision); no requirement | |
+| Redis | Optional (`REDIS_URL`): shares the catalogue cache between servers; no PHP extension needed (TCP, TLS or a Unix socket, as many cPanel hosts give it). Without it, or when it is down, the file cache is used | `docs/REDIS.md` |
+| SSE | Not used (owner decision); no requirement | |
 
 ## Hosting options
 

@@ -25,7 +25,8 @@ storefront on :3100, and made-up provider keys with local stand-ins. Raw output:
 | Picture storage (bucket driver, migration, rollback) | Pass against a stand-in S3 (`S3StorageTest`, `MediaMigrationTest`: 87) |
 | Backups and restores (mysqldump and PHP-only) | Pass (`UploadsTest`, 43) |
 | Integrity after the live checks | 0 negative stock, 0 orders paid twice, 0 duplicate payment emails, 0 emails sent twice, no deadlocks |
-| Zustand, Redis, SSE | Not used (owner decisions); nothing to test |
+| Redis (optional, added after the gate, roadmap Prompts 27-28) | `RedisCacheTest` 33 / 33 against a stand-in Redis: shared version and listing pages, hang, outage, recovery without stale pages, restart, wrong password. Not yet run against a real Redis (see `docs/REDIS.md`) |
+| Zustand, SSE | Not used (owner decisions); nothing to test |
 
 Fixed during the gate: `npm run lint` failed because ESLint also read a downloaded copy of
 another site's bundle (`kravio-dashboard.vercel.app`, git-ignored); it is now excluded.
@@ -58,7 +59,8 @@ copy of `node_modules` in the isolated build folder; corrected and re-run.
 7. **Pictures** are on the server's disk; Cloudflare R2 is chosen but not set up. Off-server
    backup copies are the owner's step (`docs/BACKUPS.md`).
 8. **OPcache** must be turned on at the host (halved response times in the load test).
-9. **Redis and live updates (SSE)** were deferred (roadmap Prompts 27-30 and 32-35), not dropped.
+9. **Redis** is optional and tested only against a stand-in so far; **live updates (SSE)** were
+   deferred (roadmap Prompts 32-35), not dropped.
 10. Hero banners are 1200 px wide (soft on high-resolution screens); re-upload at 1800 px or more.
 11. `AGENTS.md` (written by `next dev`) is untracked; commit it or leave it.
 
