@@ -45,26 +45,67 @@ class RequestContext
     }
 
     /**
-     * Best-effort client IP. X-Forwarded-For is only honoured when the direct peer is a
-     * trusted proxy (the Next.js dev/prod server forwarding /api/v1), never from the open internet.
+     * Best-effort client IP (rate limits, sessions, audit). X-Forwarded-For is only honoured when
+     * the direct peer is a trusted proxy (TRUSTED_PROXIES: addresses or ranges such as
+     * 10.0.0.0/8, e.g. the Next.js server forwarding /api/v1), never from the open internet.
+     *
+     * The header is read from the right: each proxy appends the address it received the request
+     * from, so the entries on the left are whatever the visitor chose to send. The client is the
+     * last entry that is not one of our own proxies. (Taking the leftmost entry would let anyone
+     * pick their own address and step around every rate limit.)
      */
     public static function clientIp(): string
     {
         $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? 'cli');
-        $trusted = array_filter(array_map(
-            'trim',
-            explode(',', (string) \App\Config\Env::get('TRUSTED_PROXIES', '127.0.0.1,::1'))
-        ));
+        if (!self::isTrustedProxy($remote)) {
+            return $remote;
+        }
 
-        if (in_array($remote, $trusted, true)) {
-            $forwarded = (string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? '');
-            $first = trim(explode(',', $forwarded)[0] ?? '');
-            if ($first !== '' && filter_var($first, FILTER_VALIDATE_IP)) {
-                return $first;
+        $chain = array_map('trim', explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? '')));
+        for ($i = count($chain) - 1; $i >= 0; $i--) {
+            $hop = $chain[$i];
+            if ($hop === '' || !filter_var($hop, FILTER_VALIDATE_IP)) {
+                break; // a malformed entry: nothing to its left can be trusted
+            }
+            if (!self::isTrustedProxy($hop)) {
+                return $hop;
             }
         }
 
         return $remote;
+    }
+
+    /** Whether $ip is listed in TRUSTED_PROXIES (exact addresses or CIDR ranges, IPv4 or IPv6). */
+    public static function isTrustedProxy(string $ip): bool
+    {
+        $address = @inet_pton($ip);
+        if ($address === false) {
+            return false;
+        }
+        foreach (explode(',', (string) \App\Config\Env::get('TRUSTED_PROXIES', '127.0.0.1,::1')) as $entry) {
+            [$network, $bits] = array_pad(explode('/', trim($entry), 2), 2, null);
+            $net = $network !== null && $network !== '' ? @inet_pton($network) : false;
+            if ($net === false || strlen($net) !== strlen($address)) {
+                continue;
+            }
+            $bits = $bits === null ? strlen($net) * 8 : (int) $bits;
+            if ($bits < 0 || $bits > strlen($net) * 8) {
+                continue;
+            }
+            $whole = intdiv($bits, 8);
+            $rest = $bits % 8;
+            if (substr($address, 0, $whole) !== substr($net, 0, $whole)) {
+                continue;
+            }
+            if ($rest === 0) {
+                return true;
+            }
+            $mask = (0xFF << (8 - $rest)) & 0xFF;
+            if ((ord($address[$whole]) & $mask) === (ord($net[$whole]) & $mask)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static function userAgent(): ?string

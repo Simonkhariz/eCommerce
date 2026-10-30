@@ -41,6 +41,13 @@ $fail = static function (string $message): never {
     fwrite(STDERR, "[backup] {$message}\n");
     exit(1);
 };
+// Some hosts build PHP without these; fail before creating anything, with the reason.
+if (!function_exists('gzopen')) {
+    $fail('PHP\'s zlib extension is not enabled; it is needed to compress the backup.');
+}
+if (Storage::uploads() instanceof LocalStorage && !class_exists('PharData')) {
+    $fail('PHP\'s phar extension is not enabled; it is needed to archive the pictures.');
+}
 
 $root = rtrim((string) (Env::get('BACKUP_DIR', '') ?: BASE_PATH . '/storage/backups'), '/\\');
 $target = $root . '/' . date('Y-m-d_His');

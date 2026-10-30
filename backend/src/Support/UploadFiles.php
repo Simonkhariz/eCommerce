@@ -24,6 +24,43 @@ final class UploadFiles
     /** Files changed within this time are left alone: an admin may still be filling in a form. */
     private const MIN_AGE_SECONDS = 86400;
 
+    /** Largest picture the shop accepts. */
+    public const MAX_PICTURE_BYTES = 5 * 1024 * 1024;
+
+    /**
+     * The largest upload PHP on this server lets through: the smaller of upload_max_filesize and
+     * post_max_size (0 = no limit). Many hosts default to 2 MB, below the shop's own 5 MB.
+     */
+    public static function serverLimitBytes(): int
+    {
+        $limits = array_filter(
+            [self::iniBytes((string) ini_get('upload_max_filesize')), self::iniBytes((string) ini_get('post_max_size'))],
+            static fn (int $b): bool => $b > 0
+        );
+        return $limits === [] ? 0 : min($limits);
+    }
+
+    /** "8M", "512K", "1G" or bytes, as php.ini writes sizes. */
+    public static function iniBytes(string $value): int
+    {
+        $value = trim($value);
+        if ($value === '' || !preg_match('/^(\d+)\s*([KMG]?)/i', $value, $m)) {
+            return 0;
+        }
+        return (int) $m[1] * match (strtoupper($m[2])) {
+            'G' => 1 << 30,
+            'M' => 1 << 20,
+            'K' => 1 << 10,
+            default => 1,
+        };
+    }
+
+    /** "2 MB" for messages. */
+    public static function megabytes(int $bytes): string
+    {
+        return rtrim(rtrim(number_format($bytes / (1 << 20), 1, '.', ''), '0'), '.') . ' MB';
+    }
+
     /** The local uploads folder (used for the disk storage, backups and System status). */
     public static function directory(): string
     {

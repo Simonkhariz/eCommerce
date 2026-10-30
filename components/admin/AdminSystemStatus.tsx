@@ -43,6 +43,9 @@ function gatewayState(mode: string): { state: CheckState; text: string } {
   return { state: 'fail', text: 'Not configured' };
 }
 
+/** The shop accepts pictures up to 5 MB; PHP's own limit (0 = none) must allow that. */
+const uploadTooSmall = (limitBytes: number) => limitBytes > 0 && limitBytes < 5 * 1048576;
+
 /** Only what the backend recorded: set up or not, then the last attempt's real outcome. */
 function refreshState(refresh: SystemStatus['storefront_refresh']): { state: CheckState; text: React.ReactNode } {
   if (!refresh.configured) {
@@ -112,6 +115,17 @@ function StatusBody({ data }: { data: SystemStatus }) {
         </span>
       </div>
 
+      {data.config_warnings.length > 0 && (
+        <Notice tone="warning">
+          <span className="font-semibold">Settings to fix in backend/.env before customers use the shop:</span>
+          <ul className="mt-1 list-disc pl-5">
+            {data.config_warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </Notice>
+      )}
+
       {data.mail.mode === 'log_only' && (
         <Notice tone="warning">
           Email is in log-only mode: messages are written to <code className="font-mono text-xs">backend/storage/logs/mail.log</code> and are not
@@ -153,6 +167,50 @@ function StatusBody({ data }: { data: SystemStatus }) {
               }`}
             />
             <Row label="Shop page refresh after admin changes" state={refresh.state} value={refresh.text} />
+            <Row
+              label="PHP"
+              state={data.runtime.missing_extensions.length > 0 ? 'fail' : !data.runtime.opcache || data.runtime.missing_backup_extensions.length > 0 ? 'warn' : 'ok'}
+              value={
+                <span>
+                  {data.runtime.php} · OPcache {data.runtime.opcache ? 'on' : 'off'}
+                  {data.runtime.missing_extensions.length > 0 && (
+                    <span className="block text-xs text-red-700">Missing extensions: {data.runtime.missing_extensions.join(', ')}</span>
+                  )}
+                  {data.runtime.missing_backup_extensions.length > 0 && (
+                    <span className="block text-xs text-[#6b7280]">Backups need: {data.runtime.missing_backup_extensions.join(', ')}</span>
+                  )}
+                  {!data.runtime.opcache && <span className="block text-xs text-[#6b7280]">Turn OPcache on for faster pages</span>}
+                </span>
+              }
+            />
+            <Row
+              label="Largest picture upload"
+              state={uploadTooSmall(data.runtime.upload_limit_bytes) ? 'warn' : 'ok'}
+              value={
+                <span>
+                  {data.runtime.upload_limit_bytes > 0 ? `${(data.runtime.upload_limit_bytes / 1048576).toFixed(1).replace(/\.0$/, '')} MB` : 'No server limit'}
+                  {uploadTooSmall(data.runtime.upload_limit_bytes) && (
+                    <span className="block text-xs text-[#6b7280]">Pictures up to 5 MB are accepted; ask your host to set upload_max_filesize and post_max_size to 6M</span>
+                  )}
+                </span>
+              }
+            />
+            <Row
+              label="Visitor addresses"
+              state={data.network.public_address || data.environment !== 'production' ? 'ok' : 'warn'}
+              value={
+                <span>
+                  Your address as the shop sees it: <span className="font-mono">{data.network.client_ip}</span>
+                  {!data.network.public_address && (
+                    <span className="block text-xs text-[#6b7280]">
+                      {data.environment === 'production'
+                        ? 'A private or local address: every visitor looks the same, so sign-in and order limits are shared. Set up the proxy (docs/DEPLOYMENT.md).'
+                        : 'Expected on this computer; on the live server this should be your real public address.'}
+                    </span>
+                  )}
+                </span>
+              }
+            />
           </ul>
         </Panel>
 

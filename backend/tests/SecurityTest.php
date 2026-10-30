@@ -52,7 +52,61 @@ $customerCookie = (string) (Env::get('SESSION_COOKIE_NAME', 'shopco_session') ?:
 
 // -----------------------------------------------------------------------------
 $t->section('Health and the retired dev admin token');
-$t->check('health 200', 200, $t->http('GET', '/health')['status']);
+$health = $t->http('GET', '/health');
+$t->check('health 200', 200, $health['status']);
+$t->check('public health says only whether the API and database are up (no versions, names or settings)', ['database', 'status', 'timestamp'], (static function (array $d): array {
+    $keys = array_keys($d);
+    sort($keys);
+    return $keys;
+})((array) TestKit::get($health, 'data')));
+
+// -----------------------------------------------------------------------------
+$t->section('Client address behind proxies');
+$ipFor = static function (string $remote, ?string $forwarded, string $trusted = '127.0.0.1,::1'): string {
+    $saved = [$_SERVER['REMOTE_ADDR'] ?? null, $_SERVER['HTTP_X_FORWARDED_FOR'] ?? null];
+    $prop = new ReflectionProperty(Env::class, 'vars');
+    $vars = $prop->getValue();
+    $prop->setValue(null, array_merge($vars, ['TRUSTED_PROXIES' => $trusted]));
+    $_SERVER['REMOTE_ADDR'] = $remote;
+    if ($forwarded === null) {
+        unset($_SERVER['HTTP_X_FORWARDED_FOR']);
+    } else {
+        $_SERVER['HTTP_X_FORWARDED_FOR'] = $forwarded;
+    }
+    $ip = App\Support\RequestContext::clientIp();
+    $prop->setValue(null, $vars);
+    [$_SERVER['REMOTE_ADDR'], $_SERVER['HTTP_X_FORWARDED_FOR']] = $saved;
+    return $ip;
+};
+$t->check('a direct visitor cannot choose their address', '203.0.113.9', $ipFor('203.0.113.9', '1.2.3.4'));
+$t->check('through our proxy: the address the proxy saw', '198.51.100.7', $ipFor('127.0.0.1', '198.51.100.7'));
+$t->check('a made-up address sent to the proxy is ignored (the proxy appends the real one)', '198.51.100.7', $ipFor('127.0.0.1', '1.2.3.4, 198.51.100.7'));
+$t->check('several of our own proxies are skipped', '198.51.100.7', $ipFor('10.0.0.5', '1.2.3.4, 198.51.100.7, 10.0.0.9', '127.0.0.1,10.0.0.0/8'));
+$t->check('ranges work for IPv6 too', '2001:db8::1', $ipFor('fd00::2', '2001:db8::1', 'fd00::/8'));
+$t->check('an address outside the range is not trusted', '11.0.0.5', $ipFor('11.0.0.5', '198.51.100.7', '10.0.0.0/8'));
+$t->check('a malformed entry stops the walk at the proxy', '127.0.0.1', $ipFor('127.0.0.1', 'garbage'));
+$t->check('only our own addresses in the header: the proxy itself', '127.0.0.1', $ipFor('127.0.0.1', '::1'));
+
+$t->section('Live-server settings check (System status)');
+$warningsWith = static function (array $settings): array {
+    $prop = new ReflectionProperty(Env::class, 'vars');
+    $vars = $prop->getValue();
+    $prop->setValue(null, array_merge($vars, $settings));
+    $warnings = App\Controllers\AdminOperationsController::productionConfigWarnings();
+    $prop->setValue(null, $vars);
+    return $warnings;
+};
+$good = ['APP_URL' => 'https://shop.example.com', 'FRONTEND_URL' => 'https://shop.example.com', 'CORS_ALLOWED_ORIGINS' => 'https://shop.example.com', 'KORA_SECRET_KEY' => 'sk_live_x', 'MONNIFY_API_KEY' => '', 'MONNIFY_CONTRACT_CODE' => ''];
+$t->check('a correctly set live shop has no warnings', [], $warningsWith($good));
+$t->ok('an internal APP_URL with Kora on is reported (no payment notifications)', str_contains(implode(' ', $warningsWith(['APP_URL' => 'http://127.0.0.1:8080'] + $good)), 'Kora cannot send'));
+$t->ok('a private-network APP_URL is reported', str_contains(implode(' ', $warningsWith(['APP_URL' => 'https://10.0.0.4'] + $good)), 'Kora cannot send'));
+$t->ok('an http:// FRONTEND_URL is reported', str_contains(implode(' ', $warningsWith(['FRONTEND_URL' => 'http://shop.example.com'] + $good)), 'FRONTEND_URL'));
+$t->ok('localhost in CORS_ALLOWED_ORIGINS is reported', str_contains(implode(' ', $warningsWith(['CORS_ALLOWED_ORIGINS' => 'https://shop.example.com,http://localhost:3000'] + $good)), 'localhost'));
+$t->ok('sandbox payment keys are reported', str_contains(implode(' ', $warningsWith(['KORA_SECRET_KEY' => 'sk_test_x'] + $good)), 'sandbox'));
+
+$t->section('Upload size limits');
+$t->check('php.ini sizes are read like PHP does', [2097152, 8388608, 524288, 1073741824, 100, 0], array_map([App\Support\UploadFiles::class, 'iniBytes'], ['2M', '8m', '512K', '1G', '100', '']));
+$t->check('the limit is shown in megabytes', ['2 MB', '5 MB', '1.5 MB'], array_map([App\Support\UploadFiles::class, 'megabytes'], [2097152, 5242880, 1572864]));
 $t->check('old X-Dev-Admin-Token header -> 401', 401, $t->http('GET', '/admin/orders', ['headers' => ['X-Dev-Admin-Token: dev_admin_secret_token_12345']])['status']);
 $t->check('Bearer dev token -> 401', 401, $t->http('GET', '/admin/orders', ['headers' => ['Authorization: Bearer dev_admin_secret_token_12345']])['status']);
 

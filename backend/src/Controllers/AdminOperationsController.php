@@ -21,6 +21,7 @@ use App\Support\SessionCookie;
 use App\Support\StoreBrands;
 use App\Storage\Storage;
 use App\Support\StorefrontRefresh;
+use App\Support\UploadFiles;
 
 /**
  * Administrative operations: inventory, customers, payments, refunds, promotions, storefront
@@ -966,6 +967,42 @@ class AdminOperationsController
         return MailService::mode();
     }
 
+    /**
+     * Settings that work on a development PC but break a live shop, in plain words for System
+     * status. Only the settings are read; nothing is changed.
+     *
+     * @return list<string>
+     */
+    public static function productionConfigWarnings(): array
+    {
+        $warnings = [];
+        $isPublicHttps = static function (string $url): bool {
+            $host = (string) parse_url($url, PHP_URL_HOST);
+            if (strtolower((string) parse_url($url, PHP_URL_SCHEME)) !== 'https' || $host === '' || $host === 'localhost') {
+                return false;
+            }
+            $ip = filter_var(trim($host, '[]'), FILTER_VALIDATE_IP);
+            return $ip === false || filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+        };
+
+        $appUrl = (string) Env::get('APP_URL', '');
+        if (self::koraMode() !== 'not_configured' && !$isPublicHttps($appUrl)) {
+            $warnings[] = "APP_URL ({$appUrl}) is not a public https:// address, so Kora cannot send payment notifications to it. Set it to the shop's public address (usually the same as FRONTEND_URL).";
+        }
+        $frontend = Env::frontendUrl();
+        if (!$isPublicHttps($frontend)) {
+            $warnings[] = "FRONTEND_URL ({$frontend}) is not a public https:// address: links in emails and payment return pages would not work for customers.";
+        }
+        $origins = (string) Env::get('CORS_ALLOWED_ORIGINS', '');
+        if (preg_match('#//(localhost|127\.0\.0\.1)\b#i', $origins)) {
+            $warnings[] = 'CORS_ALLOWED_ORIGINS still lists a localhost address; list only the shop\'s https:// address.';
+        }
+        if (self::koraMode() === 'sandbox' || self::monnifyMode() === 'sandbox') {
+            $warnings[] = 'A payment gateway still uses test (sandbox) keys: customers cannot really pay with it.';
+        }
+        return $warnings;
+    }
+
     // =========================================================================
     // 10. SYSTEM STATUS
     // =========================================================================
@@ -987,11 +1024,28 @@ class AdminOperationsController
             'kora' => self::koraMode() !== 'not_configured',
             'monnify' => self::monnifyMode() !== 'not_configured',
         ];
+        $missing = static fn (array $extensions): array => array_values(array_filter($extensions, static fn (string $e): bool => !extension_loaded($e)));
+        // The address rate limits and sign-in protection use for this admin. A private or local
+        // address on a live server means every visitor looks the same (proxy not set up; see
+        // TRUSTED_PROXIES in docs/DEPLOYMENT.md), so they would all share one set of limits.
+        $clientIp = RequestContext::clientIp();
+        $publicIp = filter_var($clientIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
 
         Response::success([
             'system_health' => $checks['database'] && $checks['uploads_writable'] ? 'healthy' : 'degraded',
             'server_time' => date('Y-m-d H:i:s T'),
             'environment' => Env::isProduction() ? 'production' : 'development',
+            'runtime' => [
+                'php' => PHP_VERSION,
+                'missing_extensions' => $missing(['mysqli', 'curl', 'mbstring', 'openssl', 'json', 'fileinfo', 'simplexml', 'ctype']),
+                // Only scripts/backup.php needs these.
+                'missing_backup_extensions' => $missing(['zlib', 'phar']),
+                'opcache' => function_exists('opcache_get_status') && is_array(@opcache_get_status(false)),
+                // Pictures up to 5 MB need at least that from upload_max_filesize and post_max_size.
+                'upload_limit_bytes' => UploadFiles::serverLimitBytes(),
+            ],
+            'network' => ['client_ip' => $clientIp, 'public_address' => $publicIp],
+            'config_warnings' => Env::isProduction() ? self::productionConfigWarnings() : [],
             'database' => ['connected' => $dbPing['connected'], 'latency_ms' => $dbPing['latency_ms'] ?? null],
             'migrations' => ['applied' => (int) ($migrations['c'] ?? 0), 'latest' => $migrations['latest'] ?? null],
             'storage' => ['uploads_writable' => $checks['uploads_writable'], 'driver' => $storage->name()],
@@ -1074,20 +1128,30 @@ class AdminOperationsController
 
         $frontend = Env::frontendUrl();
         $mail = MailService::getInstance();
-        $this->db->transaction(function () use ($mail, $recipients, $subject, $content, $frontend): void {
+        // The same newsletter (subject and message) goes to each subscriber at most once a day: if
+        // the admin sends again after a timeout or a double click, nobody gets it twice.
+        $campaign = date('Y-m-d') . "\n" . $subject . "\n" . $content;
+        $broadcasts = fn (): int => (int) ($this->db->fetchOne("SELECT COUNT(*) AS c FROM `email_outbox` WHERE `template` = 'marketing_broadcast'")['c'] ?? 0);
+        $before = $broadcasts();
+        $this->db->transaction(function () use ($mail, $recipients, $subject, $content, $frontend, $campaign): void {
             foreach ($recipients as $r) {
-                $mail->queueBroadcast($r['email'], $subject, $content, $frontend . '/unsubscribe?token=' . $r['unsubscribe_token']);
+                $key = 'broadcast:' . sha1($campaign . "\n" . strtolower((string) $r['email']));
+                $mail->queueBroadcast($r['email'], $subject, $content, $frontend . '/unsubscribe?token=' . $r['unsubscribe_token'], $key);
             }
         });
+        $queued = max(0, $broadcasts() - $before);
+        $skipped = count($recipients) - $queued;
 
         AuditService::record($this->adminId(), 'marketing.broadcast', 'email_campaign', null, null, [
             'subject' => $subject,
             'recipient_count' => count($recipients),
+            'queued_count' => $queued,
         ]);
 
         Response::success(
-            ['queued_count' => count($recipients), 'mail_mode' => self::mailMode()],
-            'Queued for ' . count($recipients) . ' subscribers. The outbox worker sends them in batches.'
+            ['queued_count' => $queued, 'already_queued_today' => $skipped, 'mail_mode' => self::mailMode()],
+            ($queued > 0 ? 'Queued for ' . $queued . ' subscribers. The outbox worker sends them in batches.' : 'Nothing new to send.')
+            . ($skipped > 0 ? " {$skipped} already had this newsletter queued today, so they will not get it twice." : '')
         );
     }
 

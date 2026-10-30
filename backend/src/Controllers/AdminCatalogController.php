@@ -14,6 +14,7 @@ use App\Storage\StorageKey;
 use App\Support\ImageMetadata;
 use App\Support\RequestContext;
 use App\Support\Response;
+use App\Support\UploadFiles;
 use App\Validators\CategoryValidator;
 use App\Validators\ProductValidator;
 
@@ -383,14 +384,34 @@ class AdminCatalogController
      */
     public function uploadImage(): void
     {
+        // When PHP refuses an upload for its own size limits, say so plainly: otherwise the admin
+        // sees "no file" (whole request over post_max_size) or a bare error number.
+        $serverLimit = UploadFiles::serverLimitBytes();
+        $tooBigForServer = static fn () => Response::error(
+            'This picture is larger than this server accepts (' . UploadFiles::megabytes($serverLimit) . '). Use a smaller picture, or ask your host to raise upload_max_filesize and post_max_size to at least 6M.',
+            413,
+            'FILE_TOO_LARGE_FOR_SERVER'
+        );
         if (empty($_FILES['image']) || !is_array($_FILES['image'])) {
+            if ($serverLimit > 0 && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > UploadFiles::iniBytes((string) ini_get('post_max_size'))) {
+                $tooBigForServer();
+            }
             Response::error('No image file provided in request. Expected form field "image".', 400, 'NO_FILE_UPLOADED');
         }
 
         $file = $_FILES['image'];
 
+        if ($file['error'] === UPLOAD_ERR_INI_SIZE || $file['error'] === UPLOAD_ERR_FORM_SIZE) {
+            $tooBigForServer();
+        }
         if ($file['error'] !== UPLOAD_ERR_OK) {
-            Response::error('File upload failed with error code: ' . $file['error'], 400, 'UPLOAD_ERROR');
+            $reason = match ($file['error']) {
+                UPLOAD_ERR_PARTIAL => 'the upload was interrupted; please try again',
+                UPLOAD_ERR_NO_FILE => 'no file was received',
+                UPLOAD_ERR_NO_TMP_DIR, UPLOAD_ERR_CANT_WRITE => 'the server could not save the file (temporary folder missing or full); tell your host',
+                default => 'error code ' . $file['error'],
+            };
+            Response::error('The picture could not be uploaded: ' . $reason . '.', 400, 'UPLOAD_ERROR');
         }
 
         // Raster formats only: SVG can carry script and is served from our own origin.
@@ -407,9 +428,7 @@ class AdminCatalogController
             Response::error('Invalid image format. Allowed formats: JPEG, PNG, WebP.', 422, 'INVALID_IMAGE_TYPE');
         }
 
-        // Limit file size to 5MB
-        $maxBytes = 5 * 1024 * 1024;
-        if ($file['size'] > $maxBytes) {
+        if ($file['size'] > UploadFiles::MAX_PICTURE_BYTES) {
             Response::error('Image exceeds maximum permitted file size of 5MB.', 422, 'FILE_TOO_LARGE');
         }
 

@@ -71,7 +71,11 @@ export function AdminMarketing() {
     setSending(true);
     try {
       const res = await adminSendBroadcast({ subject: subject.trim(), content: content.trim(), confirm_recipients: activeCount });
-      toast.success(`Queued for ${res.queued_count.toLocaleString()} subscriber${res.queued_count === 1 ? '' : 's'}.`);
+      const plural = (n: number) => `${n.toLocaleString()} subscriber${n === 1 ? '' : 's'}`;
+      toast.success(
+        (res.queued_count > 0 ? `Queued for ${plural(res.queued_count)}.` : 'Nothing new to send.') +
+          (res.already_queued_today > 0 ? ` ${plural(res.already_queued_today)} already had this newsletter today and won't get it twice.` : '')
+      );
       setLogOnlyNotice(res.mail_mode === 'log_only');
       setSubject('');
       setContent('');

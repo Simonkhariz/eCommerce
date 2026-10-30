@@ -717,6 +717,13 @@ export interface SystemStatus {
   system_health: 'healthy' | 'degraded';
   server_time: string;
   environment: 'production' | 'development';
+  /** PHP version, required extensions that are missing (the API needs them), and whether OPcache is on. */
+  /** upload_limit_bytes: the largest upload PHP accepts (0 = no limit); pictures need 5 MB. */
+  runtime: { php: string; missing_extensions: string[]; missing_backup_extensions: string[]; opcache: boolean; upload_limit_bytes: number };
+  /** The admin's address as the API sees it; a private or local address on a live server means the proxy is not set up. */
+  network: { client_ip: string; public_address: boolean };
+  /** Live-server settings that would break the shop (empty outside production). */
+  config_warnings: string[];
   database: { connected: boolean; latency_ms: number | null };
   migrations: { applied: number; latest: string | null };
   /** driver: where pictures are kept ('local' = the server's disk). */
@@ -881,5 +888,6 @@ export function adminGetSubscribers(params: { status?: string; page?: number; pe
 
 /** confirm_recipients must equal the active-subscriber count the admin saw and confirmed. */
 export function adminSendBroadcast(data: { subject: string; content: string; confirm_recipients: number }) {
-  return send<{ queued_count: number; mail_mode: string }>('/admin/marketing/broadcast', 'POST', data);
+  // already_queued_today: subscribers who already had this exact newsletter queued today (not sent twice).
+  return send<{ queued_count: number; already_queued_today: number; mail_mode: string }>('/admin/marketing/broadcast', 'POST', data);
 }

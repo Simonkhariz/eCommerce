@@ -16,6 +16,12 @@ const LEGACY_ADMIN_TABS = {
 
 const nextConfig = {
   reactStrictMode: true,
+  experimental: {
+    // Calls forwarded to the API (/api/v1) give up after 30 s by default. Some admin actions
+    // (a newsletter to many subscribers, reports) can take longer on a slow host; cutting them
+    // off shows the admin an error while the server carries on. 120 s matches PHP's limit.
+    proxyTimeout: 120_000,
+  },
   async redirects() {
     return Object.entries(LEGACY_ADMIN_TABS).map(([tab, route]) => ({
       source: '/admin',

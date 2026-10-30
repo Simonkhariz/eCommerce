@@ -339,13 +339,17 @@ class MailService
     /**
      * Queue one newsletter email (delivered by the outbox worker, never inline).
      */
-    public function queueBroadcast(string $email, string $subject, string $content, string $unsubscribeUrl): void
+    /**
+     * $dedupKey (optional): the same key is never queued twice, so sending the same newsletter
+     * again (a retry after a timeout, a double click) does not email anyone a second time.
+     */
+    public function queueBroadcast(string $email, string $subject, string $content, string $unsubscribeUrl, ?string $dedupKey = null): void
     {
         $this->queue($email, 'marketing_broadcast', [
             'subject' => $subject,
             'content' => $content,
             'unsubscribe_url' => $unsubscribeUrl,
-        ], null, false);
+        ], $dedupKey, false);
     }
 
     // =========================================================================

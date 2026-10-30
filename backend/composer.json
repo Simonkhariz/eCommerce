@@ -10,7 +10,13 @@
     "ext-mbstring": "*",
     "ext-openssl": "*",
     "ext-fileinfo": "*",
-    "ext-simplexml": "*"
+    "ext-simplexml": "*",
+    "ext-ctype": "*"
+  },
+  "suggest": {
+    "ext-zlib": "scripts/backup.php compresses the database dump and pictures; API answers are gzipped",
+    "ext-phar": "scripts/backup.php archives the pictures",
+    "ext-opcache": "about twice as fast API answers (measured in the load test)"
   },
   "autoload": {
     "psr-4": {
