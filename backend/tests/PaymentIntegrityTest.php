@@ -201,6 +201,33 @@ try {
     } catch (RuntimeException) {
     }
     check('after-commit hook discarded on rollback', $rolledBackHook === false);
+
+    $beforeOrder = [];
+    $db->transaction(function (Database $tx) use ($marker, &$beforeOrder): void {
+        $tx->beforeCommit(function () use ($tx, $marker, &$beforeOrder): void {
+            $beforeOrder[] = $tx->inTransaction() ? 'in-transaction' : 'outside';
+            $tx->execute("INSERT INTO `store_settings` (`key_name`, `value`) VALUES (?, 'before')", 's', [$marker . '-before']);
+        });
+        $tx->afterCommit(function () use (&$beforeOrder): void {
+            $beforeOrder[] = 'after';
+        });
+        $beforeOrder[] = 'body';
+    });
+    check('before-commit hook runs after the body, inside the transaction, before after-commit hooks', $beforeOrder === ['body', 'in-transaction', 'after'], implode(',', $beforeOrder));
+    check('before-commit write is committed', $db->fetchOne("SELECT 1 AS x FROM `store_settings` WHERE `key_name` = ?", 's', [$marker . '-before']) !== null);
+    try {
+        $db->transaction(function (Database $tx) use ($marker): void {
+            $tx->execute("INSERT INTO `store_settings` (`key_name`, `value`) VALUES (?, 'x')", 's', [$marker . '-failed-body']);
+            $tx->beforeCommit(function () use ($tx, $marker): void {
+                $tx->execute("INSERT INTO `store_settings` (`key_name`, `value`) VALUES (?, 'x')", 's', [$marker . '-failed-hook']);
+                throw new RuntimeException('hook failure');
+            });
+        });
+    } catch (RuntimeException) {
+    }
+    check('a failing before-commit hook rolls back the whole transaction', $db->fetchOne(
+        "SELECT 1 AS x FROM `store_settings` WHERE `key_name` IN (?, ?)", 'ss', [$marker . '-failed-body', $marker . '-failed-hook']
+    ) === null);
     $db->execute("DELETE FROM `store_settings` WHERE `key_name` LIKE ?", 's', [$marker . '%']);
 
     // -----------------------------------------------------------------------
@@ -302,6 +329,23 @@ try {
     check('currency mismatch is rejected', ($wrongCur['outcome'] ?? '') === PaymentFinalizer::OUTCOME_REJECTED && orderRow($o3['order_number'])['order_status'] === 'pending_payment');
     $noCur = $finalizer->finalizeSuccess($init3['provider_reference'], ['amount' => $o3['grand_total'], 'currency' => '', 'label' => 'Test']);
     check('missing currency is rejected', ($noCur['outcome'] ?? '') === PaymentFinalizer::OUTCOME_REJECTED);
+
+    // The receipt is queued in the payment's own transaction: both happen or neither does.
+    $o3b = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);
+    $init3b = $koraMock->initializeCheckout($o3b['order_number']);
+    $receiptRows = static fn (): int => (int) $db->fetchOne(
+        "SELECT COUNT(*) c FROM `email_outbox` WHERE `dedup_key` = ?", 's', ['payment_verified:' . $o3b['order_number']]
+    )['c'];
+    try {
+        $db->transaction(function () use ($finalizer, $init3b, $o3b): void {
+            $finalizer->finalizeSuccess($init3b['provider_reference'], ['amount' => $o3b['grand_total'], 'currency' => 'NGN', 'label' => 'Kora']);
+            throw new RuntimeException('crash before commit');
+        });
+    } catch (RuntimeException) {
+    }
+    check('rolled-back payment leaves no receipt in the outbox', $receiptRows() === 0 && orderRow($o3b['order_number'])['order_status'] === 'pending_payment');
+    $paid3b = $finalizer->finalizeSuccess($init3b['provider_reference'], ['amount' => $o3b['grand_total'], 'currency' => 'NGN', 'label' => 'Kora']);
+    check('confirmed payment commits with exactly one receipt in the outbox', ($paid3b['outcome'] ?? '') === PaymentFinalizer::OUTCOME_PAID && $receiptRows() === 1, (string) $receiptRows());
 
     // Late payment for an expired order
     $db->execute("UPDATE `orders` SET `expires_at` = DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE `order_number` = ?", 's', [$o3['order_number']]);

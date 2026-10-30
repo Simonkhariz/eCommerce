@@ -73,7 +73,7 @@ class MailService
     }
 
     // =========================================================================
-    // Order emails (called from afterCommit callbacks)
+    // Order emails (called from afterCommit callbacks; the payment receipt from beforeCommit)
     // =========================================================================
 
     public function sendOrderReceived(array $order): bool
@@ -390,6 +390,11 @@ class MailService
             if ($dedupKey !== null && (int) $e->getCode() === 1062) {
                 return true;
             }
+            // Inside a caller's transaction a database error (a deadlock rolls the whole transaction
+            // back) must reach the caller, or it would carry on and commit a half-done change.
+            if ($e instanceof \mysqli_sql_exception && $this->db->inTransaction()) {
+                throw $e;
+            }
             error_log("[MailService] Could not queue {$template} for {$recipient}: " . $e->getMessage());
             return false;
         }
@@ -399,6 +404,8 @@ class MailService
                 $this->deliverAfterResponse($id);
             } elseif (!$this->db->inTransaction()) {
                 $this->deliver($id);
+            } else {
+                $this->db->afterCommit(fn () => $this->deliver($id));
             }
         }
         return true;

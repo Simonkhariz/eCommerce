@@ -162,8 +162,10 @@ class PaymentFinalizer
                     });
                 }
 
+                // Queued inside this transaction (just before it commits): a paid order always has
+                // its receipt in the outbox, and a rolled-back payment never does.
                 $mailOrder = $order;
-                $db->afterCommit(static function () use ($mailOrder, $providerReference, $label, $method): void {
+                $db->beforeCommit(static function () use ($mailOrder, $providerReference, $label, $method): void {
                     MailService::getInstance()->sendPaymentVerified($mailOrder, [
                         'reference' => $providerReference,
                         'payment_method' => trim($label . ' ' . ($method ?? '')),

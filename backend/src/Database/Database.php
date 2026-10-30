@@ -21,6 +21,8 @@ class Database
     private int $transactionDepth = 0;
     /** @var array<int, callable> */
     private array $afterCommitCallbacks = [];
+    /** @var array<int, callable> */
+    private array $beforeCommitCallbacks = [];
 
     private function __construct()
     {
@@ -229,6 +231,21 @@ class Database
     }
 
     /**
+     * Run a callback inside the outermost transaction, after its other work and just before it
+     * commits (immediately if none is open). Its writes commit or roll back with the transaction,
+     * and an exception from it rolls the whole transaction back. Use for rows that must exist
+     * exactly when the change does, such as an outbox email for a confirmed payment.
+     */
+    public function beforeCommit(callable $callback): void
+    {
+        if ($this->transactionDepth === 0) {
+            $callback();
+            return;
+        }
+        $this->beforeCommitCallbacks[] = $callback;
+    }
+
+    /**
      * Execute a callback inside an atomic MySQL transaction with automatic rollback on failure.
      * Nested calls join the outer transaction using a savepoint, so a service that opens a
      * transaction can safely call another service that does the same.
@@ -260,14 +277,20 @@ class Database
         $conn->begin_transaction();
         $this->transactionDepth = 1;
         $this->afterCommitCallbacks = [];
+        $this->beforeCommitCallbacks = [];
 
         try {
             $result = $callback($this);
+            while ($this->beforeCommitCallbacks !== []) {
+                $before = array_shift($this->beforeCommitCallbacks);
+                $before();
+            }
             $conn->commit();
             $this->transactionDepth = 0;
         } catch (Throwable $e) {
             $this->transactionDepth = 0;
             $this->afterCommitCallbacks = [];
+            $this->beforeCommitCallbacks = [];
             $conn->rollback();
             error_log(sprintf('[Transaction Rollback] Error: %s', $e->getMessage()));
             throw $e;
