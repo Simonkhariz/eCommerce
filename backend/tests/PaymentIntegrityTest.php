@@ -266,6 +266,20 @@ try {
         $koraMock->initializeCheckout($o1['order_number']);
     }, 'cancelled');
 
+    // The quick sweep (checkout, admin lists) does not ask the gateway, so an overdue order whose
+    // Kora/Monnify payment may still be clearing gets a grace period; one with no gateway
+    // attempt is released at its deadline.
+    $graceOrder = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);
+    $koraMock->initializeCheckout($graceOrder['order_number']);
+    $plainOrder = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);
+    $db->execute("UPDATE `orders` SET `expires_at` = DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE `order_number` IN (?, ?)", 'ss', [$graceOrder['order_number'], $plainOrder['order_number']]);
+    $swept = $fulfillment->expireOverdueOrders(500);
+    check('quick sweep releases an overdue order with no gateway attempt', in_array($plainOrder['order_number'], $swept, true) && orderRow($plainOrder['order_number'])['order_status'] === 'cancelled');
+    check('quick sweep leaves an order with an open Kora attempt during the grace period', !in_array($graceOrder['order_number'], $swept, true) && orderRow($graceOrder['order_number'])['order_status'] === 'pending_payment');
+    $db->execute("UPDATE `orders` SET `expires_at` = DATE_SUB(NOW(), INTERVAL ? MINUTE) WHERE `order_number` = ?", 'is', [FulfillmentService::GATEWAY_GRACE_MINUTES + 1, $graceOrder['order_number']]);
+    $swept = $fulfillment->expireOverdueOrders(500);
+    check('after the grace period the quick sweep releases it', in_array($graceOrder['order_number'], $swept, true) && orderRow($graceOrder['order_number'])['order_status'] === 'cancelled');
+
     // -----------------------------------------------------------------------
     echo "== Kora: attempts, signed webhooks, idempotency, mismatches\n";
     $o2 = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);

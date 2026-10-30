@@ -150,6 +150,7 @@ $router->get('/api/v1/checkout/orders/{orderNumber}', [CheckoutController::class
 $router->post('/api/v1/checkout/orders/{orderNumber}/initialize-payment', [CheckoutController::class, 'initializePayment']);
 $router->get('/api/v1/checkout/orders/{orderNumber}/verify-payment', [CheckoutController::class, 'verifyPayment']);
 $router->post('/api/v1/checkout/orders/{orderNumber}/payment-sent', [CheckoutController::class, 'markPaymentSent']);
+$router->post('/api/v1/checkout/orders/{orderNumber}/release', [CheckoutController::class, 'releaseOrder']);
 
 // --- Payment Webhook Routes ---
 $router->post('/api/v1/webhooks/kora', [PaymentWebhookController::class, 'handleKora']);

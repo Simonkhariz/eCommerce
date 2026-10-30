@@ -146,6 +146,38 @@ $t->ok('admin "Customer says paid" list shows the order', in_array($onum, array_
 $t->ok('admin order shows when it was marked', TestKit::get($t->http('GET', "/admin/orders/{$onum}", ['jar' => $admin['jar']]), 'data.customer_marked_paid_at') !== null);
 
 // -----------------------------------------------------------------------------
+$t->section('Payment windows are published for the storefront text');
+$pm = $t->http('GET', '/checkout/payment-methods');
+$t->check('online payment window in minutes', \App\Services\PaymentAttempts::gatewayWindowMinutes(), TestKit::get($pm, 'data.payment_window_minutes'));
+$t->check('WhatsApp transfer window in hours', intdiv(\App\Services\PaymentAttempts::manualWindowMinutes(), 60), TestKit::get($pm, 'data.manual_payment_window_hours'));
+
+// -----------------------------------------------------------------------------
+$t->section('"Change delivery details" releases an order no payment was started for');
+$t->check('an order with a payment attempt is not released', false, TestKit::get(
+    $t->http('POST', "/checkout/orders/{$onum}/release", ['headers' => ["X-Guest-Access-Token: {$token}"], 'json' => []]), 'data.released'
+));
+$t->check('it stays awaiting payment', 'pending_payment', $t->scalar("SELECT `order_status` FROM `orders` WHERE `order_number` = ?", 's', [$onum]));
+$stockBeforeLeft = (int) $t->scalar("SELECT `stock_quantity` FROM `product_variants` WHERE `id` = ?", 'i', [$vid]);
+$leftEmail = $t->uniq('t-store-left') . '@example.test';
+$emails[] = $leftEmail;
+$left = $t->http('POST', '/checkout/orders', ['headers' => ['Idempotency-Key: left' . bin2hex(random_bytes(12))], 'json' => ['email' => $leftEmail] + $orderBody]);
+$leftNum = (string) TestKit::get($left, 'data.order_number');
+$ordersCreated[] = $leftNum;
+$leftToken = (string) TestKit::get($left, 'data.guest_access_token');
+$t->check('the order reserved one unit', $stockBeforeLeft - 1, (int) $t->scalar("SELECT `stock_quantity` FROM `product_variants` WHERE `id` = ?", 'i', [$vid]));
+$t->check('release without access -> 404', 404, $t->http('POST', "/checkout/orders/{$leftNum}/release", ['json' => []])['status']);
+$t->check('release with the access key', true, TestKit::get(
+    $t->http('POST', "/checkout/orders/{$leftNum}/release", ['headers' => ["X-Guest-Access-Token: {$leftToken}"], 'json' => []]), 'data.released'
+));
+$t->check('released order is cancelled', 'cancelled', $t->scalar("SELECT `order_status` FROM `orders` WHERE `order_number` = ?", 's', [$leftNum]));
+$t->check('its unit is back on sale at once', $stockBeforeLeft, (int) $t->scalar("SELECT `stock_quantity` FROM `product_variants` WHERE `id` = ?", 'i', [$vid]));
+$t->check('no cancellation email for a released order', 0, (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `dedup_key` = ?", 's', ["order_cancelled:{$leftNum}"]));
+$t->check('releasing again changes nothing', false, TestKit::get(
+    $t->http('POST', "/checkout/orders/{$leftNum}/release", ['headers' => ["X-Guest-Access-Token: {$leftToken}"], 'json' => []]), 'data.released'
+));
+$t->check('a released order cannot start a payment', 422, $t->http('POST', "/checkout/orders/{$leftNum}/initialize-payment", ['headers' => ["X-Guest-Access-Token: {$leftToken}"], 'json' => ['gateway' => 'whatsapp']])['status']);
+
+// -----------------------------------------------------------------------------
 $t->section('Magic link links guest orders; saved cart and wishlist');
 $t->check('magic link requested', 200, $t->http('POST', '/auth/customer/magic-link', ['json' => ['email' => $email]])['status']);
 $link = $t->magicLinkToken($email);

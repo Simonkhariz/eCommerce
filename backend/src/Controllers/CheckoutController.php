@@ -8,6 +8,7 @@ use App\Config\Env;
 use App\Database\Database;
 use App\Middleware\JsonBodyMiddleware;
 use App\Services\CheckoutService;
+use App\Services\FulfillmentService;
 use App\Services\KoraService;
 use App\Services\MailService;
 use App\Services\MonnifyService;
@@ -339,6 +340,9 @@ class CheckoutController
         Response::success([
             'methods' => $methods,
             'support_phone' => CheckoutService::supportWhatsAppPhone(),
+            // How long an unpaid order holds its items, so the storefront states the real values.
+            'payment_window_minutes' => PaymentAttempts::gatewayWindowMinutes(),
+            'manual_payment_window_hours' => intdiv(PaymentAttempts::manualWindowMinutes(), 60),
         ], 'Payment methods retrieved.');
     }
 
@@ -613,6 +617,33 @@ class CheckoutController
      * store (orders list, header bell, email); the order is paid once an admin confirms it.
      * POST /api/v1/checkout/orders/{orderNumber}/payment-sent
      */
+    /**
+     * POST /api/v1/checkout/orders/{orderNumber}/release
+     * The customer went back to change their delivery details before paying: the order they
+     * leave gives its items back at once instead of holding them until its deadline. Nothing
+     * changes once a payment attempt exists (`released: false`); that order keeps its deadline.
+     */
+    public function releaseOrder(array $params): void
+    {
+        $orderNumber = trim($params['orderNumber'] ?? '');
+        $order = $orderNumber === '' ? null : $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$orderNumber]);
+        if ($order === null) {
+            Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
+        }
+
+        RateLimiter::attempt('order_release', RequestContext::clientIp(), 30, 600);
+        $body = JsonBodyMiddleware::getBody();
+        if (!$this->canViewOrder($order, false, true, (string) ($body['guest_access_token'] ?? ''))) {
+            Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
+        }
+
+        $released = (new FulfillmentService($this->db))->releaseUnstartedOrder((int) $order['id']);
+        Response::success(
+            ['order_number' => $orderNumber, 'released' => $released],
+            $released ? 'The order was released.' : 'This order keeps its reservation until its payment deadline.'
+        );
+    }
+
     public function markPaymentSent(array $params): void
     {
         $orderNumber = trim($params['orderNumber'] ?? '');

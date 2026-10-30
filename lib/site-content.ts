@@ -23,10 +23,26 @@ export interface FaqItem {
   answer: string;
 }
 
-// Keep these equal to ORDER_PAYMENT_WINDOW_MINUTES / ORDER_MANUAL_PAYMENT_WINDOW_HOURS in backend/.env
-// (defaults 60 and 24; admin → Store settings shows the values in use).
-export const PAYMENT_WINDOW_GATEWAY_MINUTES = 60;
-export const PAYMENT_WINDOW_MANUAL_HOURS = 24;
+/** How long an unpaid order holds its items (ORDER_PAYMENT_WINDOW_MINUTES / ORDER_MANUAL_PAYMENT_WINDOW_HOURS). */
+export interface PaymentWindows {
+  gatewayMinutes: number;
+  manualHours: number;
+}
+
+// The backend's defaults, used only when its values could not be loaded.
+export const DEFAULT_PAYMENT_WINDOWS: PaymentWindows = { gatewayMinutes: 60, manualHours: 24 };
+
+/** The windows from GET /checkout/payment-methods, or the defaults. */
+export function paymentWindowsFrom(res: { payment_window_minutes?: number; manual_payment_window_hours?: number } | null | undefined): PaymentWindows {
+  const minutes = Number(res?.payment_window_minutes);
+  const hours = Number(res?.manual_payment_window_hours);
+  return {
+    gatewayMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_PAYMENT_WINDOWS.gatewayMinutes,
+    manualHours: Number.isFinite(hours) && hours > 0 ? hours : DEFAULT_PAYMENT_WINDOWS.manualHours,
+  };
+}
+
+const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
 
 export const ABOUT: { intro: string; sections: ContentSection[] } = {
   // TODO(store owner): replace the intro with your own story (who you are, where you are based).
@@ -129,7 +145,7 @@ export const PRIVACY: { intro: string; sections: ContentSection[] } = {
   ],
 };
 
-export const TERMS: { intro: string; sections: ContentSection[] } = {
+export const termsContent = (w: PaymentWindows = DEFAULT_PAYMENT_WINDOWS): { intro: string; sections: ContentSection[] } => ({
   // TODO(store owner): have these terms reviewed by a lawyer and add your legal business name and registered address.
   intro: 'These terms describe how ordering from this store works.',
   sections: [
@@ -137,7 +153,7 @@ export const TERMS: { intro: string; sections: ContentSection[] } = {
       heading: 'Prices and payment',
       body: [
         'Prices are in Nigerian naira (NGN). The total you pay — items, any discount and the delivery fee for your state — is shown at checkout before you pay.',
-        `An order is confirmed only when payment is verified. Unpaid orders reserve their items for ${PAYMENT_WINDOW_GATEWAY_MINUTES} minutes when paying online, or ${PAYMENT_WINDOW_MANUAL_HOURS} hours when paying by bank transfer arranged on WhatsApp; after that the order is cancelled and the items are released.`,
+        `An order is confirmed only when payment is verified. Unpaid orders reserve their items for ${plural(w.gatewayMinutes, 'minute')} when paying online, or ${plural(w.manualHours, 'hour')} when paying by bank transfer arranged on WhatsApp; after that the order is cancelled and the items are released.`,
       ],
     },
     {
@@ -155,9 +171,9 @@ export const TERMS: { intro: string; sections: ContentSection[] } = {
       body: ['See the Returns page for how returns and refunds work.'],
     },
   ],
-};
+});
 
-export const FAQ: FaqItem[] = [
+export const faqContent = (w: PaymentWindows = DEFAULT_PAYMENT_WINDOWS): FaqItem[] => [
   {
     question: 'How do I pay?',
     answer:
@@ -165,7 +181,7 @@ export const FAQ: FaqItem[] = [
   },
   {
     question: 'How long do I have to pay?',
-    answer: `Your items are reserved for ${PAYMENT_WINDOW_GATEWAY_MINUTES} minutes when you pay online, or ${PAYMENT_WINDOW_MANUAL_HOURS} hours if you arrange a bank transfer on WhatsApp. If payment isn't completed in time the order is cancelled and the items are released.`,
+    answer: `Your items are reserved for ${plural(w.gatewayMinutes, 'minute')} when you pay online, or ${plural(w.manualHours, 'hour')} if you arrange a bank transfer on WhatsApp. If payment isn't completed in time the order is cancelled and the items are released.`,
   },
   {
     question: 'My payment went through but the order still says "awaiting payment".',

@@ -35,6 +35,9 @@ class FulfillmentService
         'refunded'        => [],
     ];
 
+    /** Extra time the quick expiry sweep gives an overdue order with an open gateway attempt. */
+    public const GATEWAY_GRACE_MINUTES = 30;
+
     /** Order statuses for which stock is still reserved and must be released on cancellation. */
     private const STOCK_HOLDING_STATUSES = ['pending_payment', 'paid', 'processing'];
 
@@ -111,16 +114,47 @@ class FulfillmentService
     }
 
     /**
+     * Release an unpaid order that the customer replaced before starting any payment (they went
+     * back to change the delivery details), so its items go back on sale at once instead of at
+     * its deadline. No email: the customer is placing the new order. Once any payment attempt
+     * exists money may be on its way, so the order is left alone (it keeps its deadline).
+     *
+     * @return bool True if this call released the order
+     */
+    public function releaseUnstartedOrder(int $orderId): bool
+    {
+        return $this->db->transaction(function (Database $db) use ($orderId): bool {
+            // The same lock PaymentAttempts::open takes, so an attempt can't start halfway through.
+            $order = $db->fetchOne("SELECT * FROM `orders` WHERE `id` = ? FOR UPDATE", 'i', [$orderId]);
+            if ($order === null || $order['order_status'] !== 'pending_payment') {
+                return false;
+            }
+            if ($db->fetchOne("SELECT 1 AS x FROM `payments` WHERE `order_id` = ? LIMIT 1", 'i', [$orderId]) !== null) {
+                return false;
+            }
+
+            $this->transition($db, $order, 'cancelled', 'Customer went back to change the delivery details before paying. Reserved stock released.', null, false, false);
+            return true;
+        });
+    }
+
+    /**
      * Expire up to $limit overdue unpaid orders.
      *
      * @return string[] Order numbers that were expired
      */
     public function expireOverdueOrders(int $limit = 50): array
     {
+        // This quick sweep (checkout, admin lists) does not ask the gateways. An order with an
+        // open Kora/Monnify attempt gets GATEWAY_GRACE_MINUTES past its deadline, so a payment
+        // still clearing is confirmed by its webhook or by expire_pending_orders.php (which asks
+        // the gateway first) instead of turning into a late payment that needs a refund.
         $candidates = $this->db->fetchAll(
-            "SELECT `id`, `order_number` FROM `orders`
-             WHERE `order_status` = 'pending_payment' AND `expires_at` IS NOT NULL AND `expires_at` <= NOW()
-             ORDER BY `expires_at` ASC LIMIT ?",
+            "SELECT o.`id`, o.`order_number` FROM `orders` o
+             WHERE o.`order_status` = 'pending_payment' AND o.`expires_at` IS NOT NULL AND o.`expires_at` <= NOW()
+               AND (o.`expires_at` <= NOW() - INTERVAL " . self::GATEWAY_GRACE_MINUTES . " MINUTE
+                    OR NOT EXISTS (SELECT 1 FROM `payments` p WHERE p.`order_id` = o.`id` AND p.`status` = 'pending' AND p.`provider` IN ('kora', 'monnify')))
+             ORDER BY o.`expires_at` ASC LIMIT ?",
             'i',
             [$limit]
         );
@@ -478,7 +512,7 @@ class FulfillmentService
     /**
      * Apply one validated status transition plus its side effects. Returns the updated order row.
      */
-    private function transition(Database $db, array $order, string $newStatus, ?string $comment, ?int $adminId, bool $audit = true): array
+    private function transition(Database $db, array $order, string $newStatus, ?string $comment, ?int $adminId, bool $audit = true, bool $notify = true): array
     {
         $orderId = (int) $order['id'];
         $currentStatus = $order['order_status'];
@@ -550,7 +584,7 @@ class FulfillmentService
         $order['order_status'] = $newStatus;
         $order['payment_status'] = $newPaymentStatus;
 
-        if ($newStatus === 'cancelled') {
+        if ($newStatus === 'cancelled' && $notify) {
             $mailOrder = $order;
             $db->beforeCommit(static function () use ($mailOrder, $histComment): void {
                 MailService::getInstance()->sendCancellationOrRefund($mailOrder, 'cancellation', ['reason' => $histComment]);

@@ -198,6 +198,8 @@ function TrackOrderContent() {
     } catch (err) {
       whatsappTab?.close();
       setPaymentError(errorMessage(err, 'Payment initialization failed. Please retry.'));
+      // The error is shown in the payment window, which the WhatsApp shortcut does not open.
+      setShowPaymentModal(true);
     } finally {
       setIsInitializingPayment(null);
     }
@@ -402,18 +404,23 @@ function TrackOrderContent() {
                       <span>{isInitializingPayment ? 'Connecting…' : `Pay now (${formatPrice(order.grand_total)})`}</span>
                     </button>
 
-                    <a
-                      href={whatsAppInvoiceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-2.5 bg-neutral-100 hover:bg-neutral-200 text-[#128C7E] rounded-full transition-colors relative group shrink-0"
-                      aria-label="Send the invoice on WhatsApp (opens in a new tab)"
-                    >
-                      <WhatsAppIcon className="w-4 h-4" aria-hidden="true" />
-                      <div aria-hidden="true" className="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:block group-focus-visible:block z-20 whitespace-nowrap bg-neutral-900 text-white text-xs rounded-lg px-2 py-1 shadow-md">
-                        WhatsApp Invoice
-                      </div>
-                    </a>
+                    {/* The same path as "Continue to WhatsApp": the server opens the WhatsApp
+                        attempt (the order is held for the manual-transfer window and shows in
+                        the admin's "Awaiting WhatsApp payment") before the invoice opens. */}
+                    {paymentMethods.some((m) => m.id === 'whatsapp') && (
+                      <button
+                        type="button"
+                        onClick={() => handleInitiatePayment('whatsapp')}
+                        disabled={Boolean(isInitializingPayment)}
+                        className="p-2.5 bg-neutral-100 hover:bg-neutral-200 text-[#128C7E] rounded-full transition-colors relative group shrink-0 disabled:opacity-60"
+                        aria-label="Send the invoice on WhatsApp (opens in a new tab)"
+                      >
+                        <WhatsAppIcon className="w-4 h-4" aria-hidden="true" />
+                        <div aria-hidden="true" className="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:block group-focus-visible:block z-20 whitespace-nowrap bg-neutral-900 text-white text-xs rounded-lg px-2 py-1 shadow-md">
+                          WhatsApp Invoice
+                        </div>
+                      </button>
+                    )}
                   </>
                 ) : (
                   <a

@@ -23,6 +23,7 @@ import {
   apiGetOrder,
   apiVerifyPayment,
   apiMarkPaymentSent,
+  apiReleaseOrder,
   CheckoutQuoteResponse,
   errorMessage,
 } from '@/lib/api-client';
@@ -132,7 +133,7 @@ function CheckoutSession({
 }) {
   const { items, appliedPromo, settlePendingOrder } = useCart();
   const { user } = useAuth();
-  const { supportPhone, paymentMethods } = useStoreSupport();
+  const { supportPhone, paymentMethods, paymentWindows } = useStoreSupport();
 
   const [step, setStep] = useState<'details' | 'payment'>('details');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -431,7 +432,12 @@ function CheckoutSession({
   };
 
   const startOver = () => {
-    if (order) clearPendingOrder(order.order_number);
+    if (order) {
+      // Give the order's items back now if no payment was started for it (the server decides).
+      // Best effort: if this fails, the order still releases them at its deadline.
+      apiReleaseOrder(order.order_number, readGuestToken(order.order_number)).catch(() => {});
+      clearPendingOrder(order.order_number);
+    }
     setOrder(null);
     setStep('details');
   };
@@ -634,7 +640,7 @@ function CheckoutSession({
                   )}
                 </button>
                 <p className="text-xs text-neutral-600 text-center">
-                  Your items are reserved for 60 minutes while you pay.
+                  Your items are reserved for {paymentWindows.gatewayMinutes} minutes while you pay.
                 </p>
               </div>
             </form>

@@ -1198,6 +1198,9 @@ export interface PaymentMethodItem {
 export interface PaymentMethodsResponse {
   methods: PaymentMethodItem[];
   support_phone: string;
+  /** How long an unpaid order holds its items when paying online / by WhatsApp transfer. */
+  payment_window_minutes?: number;
+  manual_payment_window_hours?: number;
 }
 
 /**
@@ -1252,6 +1255,23 @@ export async function apiInitializePayment(
  * "Mark as paid" for a WhatsApp transfer: tells the store to check and confirm it. This never
  * marks the order paid; the store does that once the money has arrived.
  */
+/**
+ * The customer left an unpaid order to change their delivery details. If no payment was
+ * started for it, the server releases it so its items go back on sale at once; otherwise it
+ * keeps its reservation until its deadline (`released: false`).
+ */
+export async function apiReleaseOrder(orderNumber: string, guestAccessToken?: string): Promise<{ order_number: string; released: boolean }> {
+  const headers: Record<string, string> = {};
+  if (guestAccessToken) {
+    headers['X-Guest-Access-Token'] = guestAccessToken;
+  }
+  return fetchFromApi(`/checkout/orders/${encodeURIComponent(orderNumber)}/release`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ guest_access_token: guestAccessToken }),
+  });
+}
+
 export async function apiMarkPaymentSent(
   orderNumber: string,
   guestAccessToken?: string

@@ -1,14 +1,18 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ContentPage } from '@/components/content/ContentPage';
-import { FAQ } from '@/lib/site-content';
+import type { PaymentMethodsResponse } from '@/lib/api-client';
+import { serverApiGet } from '@/lib/server-api';
+import { faqContent, paymentWindowsFrom } from '@/lib/site-content';
 
 export const metadata: Metadata = {
   title: 'FAQ | SHOP.CO',
   description: 'Answers about payment, payment windows, delivery fees, order tracking, accounts and returns.',
 };
 
-export default function FaqPage() {
+export default async function FaqPage() {
+  // The payment windows in force (the same cached answer the layout loads); defaults if unreachable.
+  const FAQ = faqContent(paymentWindowsFrom(await serverApiGet<PaymentMethodsResponse>('/checkout/payment-methods')));
   return (
     <ContentPage title="Frequently asked questions">
       <div className="mt-6 divide-y divide-neutral-200 rounded-2xl border border-neutral-200">
