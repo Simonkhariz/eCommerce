@@ -157,5 +157,62 @@ $t->check('the uploads archive holds the pictures', true, in_array(basename($use
 $manifest = json_decode((string) @file_get_contents("{$folder}/manifest.json"), true) ?: [];
 $t->check('the manifest checksum matches the dump', hash_file('sha256', "{$folder}/database.sql.gz"), $manifest['database_dump']['sha256'] ?? null);
 
+// -----------------------------------------------------------------------------
+$t->section('Backups without mysqldump, and restoring them');
+// Throw-away databases next to the test database, dropped at the end; nothing else is touched.
+$source = (string) Env::get('DB_DATABASE');
+$restoreA = "{$source}_ra" . getmypid();
+$restoreB = "{$source}_rb" . getmypid();
+$restoreC = "{$source}_rc" . getmypid();
+$t->cleanup(function () use ($t, $restoreA, $restoreB, $restoreC): void {
+    foreach ([$restoreA, $restoreB, $restoreC] as $db) {
+        $t->sql("DROP DATABASE IF EXISTS `{$db}`");
+    }
+});
+$script = static function (string $name, array $args, array $env = []) use ($backupDir): array {
+    $proc = proc_open(array_merge([PHP_BINARY, BASE_PATH . "/scripts/{$name}.php"], $args), [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, BASE_PATH, array_merge(getenv(), ['BACKUP_DIR' => $backupDir], $env));
+    $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+    return ['code' => proc_close($proc), 'out' => trim($out)];
+};
+$tableCount = static fn (string $db): int => (int) $t->scalar("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'", 's', [$db]);
+
+$r = $script('restore_database', ["--backup={$folder}", "--database={$restoreA}", '--create']);
+$t->ok('a mysqldump backup restores into a new database without shell tools', $r['code'] === 0 && $tableCount($restoreA) === $tableCount($source), $r['out']);
+
+sleep(1); // a new dated folder
+$r = $script('backup', ['--php-dump']);
+$t->ok('--php-dump writes the backup with PHP alone (as on hosts that block mysqldump)', $r['code'] === 0 && str_contains($r['out'], 'written by PHP'), $r['out']);
+$folders = glob("{$backupDir}/*", GLOB_ONLYDIR) ?: [];
+sort($folders);
+$phpFolder = (string) end($folders);
+$phpManifest = json_decode((string) @file_get_contents("{$phpFolder}/manifest.json"), true) ?: [];
+$t->check('the manifest says how it was written and counts every table', ['php', $tableCount($source)], [$phpManifest['database_dump_method'] ?? null, count($phpManifest['table_rows'] ?? [])]);
+
+sleep(1);
+$r = $script('backup', [], ['MYSQLDUMP_PATH' => BASE_PATH . '/no-such-mysqldump']);
+$t->ok('when mysqldump is missing, the backup is written by PHP instead of failing', $r['code'] === 0 && str_contains($r['out'], 'written by PHP'), $r['out']);
+
+$r = $script('restore_database', ["--backup={$phpFolder}", "--database={$restoreB}", '--create']);
+$t->ok('it restores with every table holding the same number of rows', $r['code'] === 0 && str_contains($r['out'], 'same number of rows'), $r['out']);
+$sample = static fn (string $db): array => $t->db->fetchAll("SELECT `id`, `order_number`, `grand_total`, `created_at`, `shipping_address_snapshot` FROM `{$db}`.`orders` ORDER BY `id` LIMIT 50");
+$t->check('restored orders are identical, field for field (text, money, dates, JSON)', $sample($source), $sample($restoreB));
+
+$r = $script('restore_database', ["--backup={$phpFolder}", "--database={$restoreB}"]);
+$t->ok('a database that already has tables is never restored over', $r['code'] === 1 && str_contains($r['out'], 'already has tables'), $r['out']);
+$r = $script('restore_database', ["--backup={$phpFolder}", "--database={$source}"]);
+$t->ok('nor is the live database', $r['code'] === 1 && str_contains($r['out'], 'already has tables'), $r['out']);
+
+$damaged = "{$backupDir}/damaged";
+@mkdir($damaged, 0700, true);
+copy("{$phpFolder}/manifest.json", "{$damaged}/manifest.json");
+file_put_contents("{$damaged}/database.sql.gz", gzencode('SELECT 1;'));
+$r = $script('restore_database', ["--backup={$damaged}", "--database={$restoreC}", '--create']);
+$t->ok('a dump that does not match its manifest is refused before loading', $r['code'] === 1 && str_contains($r['out'], 'does not match') && $tableCount($restoreC) === 0, $r['out']);
+
+$whole = (string) gzdecode((string) file_get_contents("{$phpFolder}/database.sql.gz"));
+file_put_contents("{$damaged}/cut.sql.gz", gzencode(substr($whole, 0, (int) (strlen($whole) * 0.6))));
+$r = $script('restore_database', ["--file={$damaged}/cut.sql.gz", "--database={$restoreC}", '--create']);
+$t->ok('a cut-off dump stops and leaves the new database empty again', $r['code'] === 1 && $tableCount($restoreC) === 0, $r['out']);
+
 array_map('unlink', glob("{$uploadDir}/*") ?: []);
 exit($t->finish());

@@ -11,15 +11,19 @@ declare(strict_types=1);
  *
  * BACKUP_DIR defaults to backend/storage/backups. Old backups are never deleted by this script:
  * copy them off the server (another machine, or a separate MinIO/S3 bucket) and remove old ones
- * there. mysqldump is found on PATH, in XAMPP's folder, or at MYSQLDUMP_PATH. The database
- * password is passed in the environment, never on the command line.
+ * there. mysqldump is found on PATH, in XAMPP's folder, or at MYSQLDUMP_PATH (its password goes
+ * in the environment, never on the command line). Where PHP may not run programs (common on
+ * cPanel) or mysqldump is missing, PHP writes the same consistent dump itself; manifest.json
+ * records which way was used.
  *
  * Usage:
  *   php backend/scripts/backup.php
+ *   php backend/scripts/backup.php --php-dump      (always the PHP way)
  *   cron (daily 02:30):  30 2 * * *  php /var/www/shopco/backend/scripts/backup.php
  *
- * Restore (see docs/BACKUPS.md): gunzip < database.sql.gz | mysql <database>, then unpack
- * uploads.tar.gz into the uploads folder.
+ * Restore (see docs/BACKUPS.md): php backend/scripts/restore_database.php (no shell tools
+ * needed) or gunzip < database.sql.gz | mysql <database>; then unpack uploads.tar.gz into the
+ * uploads folder.
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -33,6 +37,7 @@ require_once BASE_PATH . '/src/autoload.php';
 use App\Config\Env;
 use App\Storage\LocalStorage;
 use App\Storage\Storage;
+use App\Support\SqlDump;
 
 Env::load(BASE_PATH . '/.env');
 date_default_timezone_set(Env::get('APP_TIMEZONE', 'Africa/Lagos') ?: 'Africa/Lagos');
@@ -56,50 +61,92 @@ if (!@mkdir($target, 0750, true) && !is_dir($target)) {
 }
 
 // 1. Database -----------------------------------------------------------------------------
-$mysqldump = (string) Env::get('MYSQLDUMP_PATH', '');
-if ($mysqldump === '') {
-    $mysqldump = PHP_OS_FAMILY === 'Windows' && is_file('C:/xampp/mysql/bin/mysqldump.exe') ? 'C:/xampp/mysql/bin/mysqldump.exe' : 'mysqldump';
-}
+// mysqldump when PHP may run it; otherwise (shared/cPanel hosts often disable proc_open, or have
+// no mysqldump) the same consistent snapshot written by PHP itself (App\Support\SqlDump).
+// --php-dump forces the PHP way.
 $database = (string) Env::get('DB_DATABASE', '');
 if ($database === '') {
     $fail('DB_DATABASE is not set.');
 }
-$command = [
-    $mysqldump,
-    '--host=' . Env::get('DB_HOST', '127.0.0.1'),
-    '--port=' . Env::int('DB_PORT', 3306),
-    '--user=' . Env::get('DB_USERNAME', 'root'),
-    '--single-transaction',      // one consistent snapshot without locking the shop
-    '--quick',
-    '--routines',
-    '--triggers',
-    '--default-character-set=utf8mb4',
-    $database,
-];
-$env = array_merge(getenv(), ['MYSQL_PWD' => (string) Env::get('DB_PASSWORD', '')]);
-$process = @proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, BASE_PATH, $env);
-if (!is_resource($process)) {
-    $fail("Could not start mysqldump ({$mysqldump}). Set MYSQLDUMP_PATH.");
-}
 $dbFile = "{$target}/database.sql.gz";
-$gz = gzopen($dbFile, 'wb6');
-$dumped = 0;
-while (!feof($pipes[1])) {
-    $chunk = fread($pipes[1], 1 << 20);
-    if ($chunk === false) {
-        break;
+$disabled = array_map('trim', explode(',', (string) ini_get('disable_functions')));
+$canRun = function_exists('proc_open') && !in_array('proc_open', $disabled, true);
+$method = in_array('--php-dump', $argv, true) || !$canRun ? 'php' : 'mysqldump';
+$note = $canRun ? '' : ' (this host does not let PHP run programs)';
+$tableRows = null; // rows per table, known when PHP writes the dump (restore_database.php checks them)
+
+if ($method === 'mysqldump') {
+    $mysqldump = (string) Env::get('MYSQLDUMP_PATH', '');
+    if ($mysqldump === '') {
+        $mysqldump = PHP_OS_FAMILY === 'Windows' && is_file('C:/xampp/mysql/bin/mysqldump.exe') ? 'C:/xampp/mysql/bin/mysqldump.exe' : 'mysqldump';
     }
-    $dumped += strlen($chunk);
-    gzwrite($gz, $chunk);
+    $command = [
+        $mysqldump,
+        '--host=' . Env::get('DB_HOST', '127.0.0.1'),
+        '--port=' . Env::int('DB_PORT', 3306),
+        '--user=' . Env::get('DB_USERNAME', 'root'),
+        '--single-transaction',      // one consistent snapshot without locking the shop
+        '--quick',
+        '--routines',
+        '--triggers',
+        '--default-character-set=utf8mb4',
+        $database,
+    ];
+    $env = array_merge(getenv(), ['MYSQL_PWD' => (string) Env::get('DB_PASSWORD', '')]);
+    $process = @proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, BASE_PATH, $env);
+    if (!is_resource($process)) {
+        $method = 'php';
+        $note = " (mysqldump could not be started: {$mysqldump})";
+    } else {
+        $gz = gzopen($dbFile, 'wb6');
+        $dumped = 0;
+        while (!feof($pipes[1])) {
+            $chunk = fread($pipes[1], 1 << 20);
+            if ($chunk === false) {
+                break;
+            }
+            $dumped += strlen($chunk);
+            gzwrite($gz, $chunk);
+        }
+        gzclose($gz);
+        $errors = trim((string) stream_get_contents($pipes[2]));
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($process);
+        if ($code === 127 || ($code === 1 && $dumped === 0 && preg_match('/not (found|recognized)/i', $errors))) {
+            // The program is not installed here: the PHP way works anywhere PHP reaches MySQL.
+            @unlink($dbFile);
+            $method = 'php';
+            $note = ' (mysqldump is not installed here; set MYSQLDUMP_PATH to use it)';
+        } elseif ($code !== 0 || $dumped === 0) {
+            @unlink($dbFile);
+            $fail("mysqldump failed (exit {$code}): " . mb_substr($errors, 0, 300));
+        }
+    }
 }
-gzclose($gz);
-$errors = trim((string) stream_get_contents($pipes[2]));
-fclose($pipes[1]);
-fclose($pipes[2]);
-$code = proc_close($process);
-if ($code !== 0 || $dumped === 0) {
-    @unlink($dbFile);
-    $fail("mysqldump failed (exit {$code}): " . mb_substr($errors, 0, 300));
+
+if ($method === 'php') {
+    try {
+        mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+        // A connection of its own: the dump holds one transaction open while it reads.
+        $conn = new mysqli(
+            (string) Env::get('DB_HOST', '127.0.0.1'),
+            (string) Env::get('DB_USERNAME', 'root'),
+            (string) Env::get('DB_PASSWORD', ''),
+            $database,
+            Env::int('DB_PORT', 3306)
+        );
+        $conn->set_charset('utf8mb4');
+        $gz = gzopen($dbFile, 'wb6');
+        $tableRows = SqlDump::dump($conn, static function (string $sql) use ($gz): void {
+            gzwrite($gz, $sql);
+        });
+        gzclose($gz);
+        $conn->close();
+    } catch (Throwable $e) {
+        @unlink($dbFile);
+        $fail('The database dump failed: ' . $e->getMessage());
+    }
 }
 
 // 2. Uploaded pictures ----------------------------------------------------------------------
@@ -139,6 +186,8 @@ $manifest = [
     'created_at' => date('c'),
     'database' => $database,
     'database_dump' => $entry($dbFile),
+    'database_dump_method' => $method,
+    'table_rows' => $tableRows,
     'uploads_archive' => $entry($uploadsFile),
     'upload_files' => $files,
     'uploads_storage' => $storage->name(),
@@ -146,10 +195,12 @@ $manifest = [
 file_put_contents("{$target}/manifest.json", json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
 
 printf(
-    "[%s] backup written to %s: database %.1f KB, %d picture files (%.1f KB)\n",
+    "[%s] backup written to %s: database %.1f KB (%s%s), %d picture files (%.1f KB)\n",
     date('Y-m-d H:i:s'),
     $target,
     filesize($dbFile) / 1024,
+    $method === 'php' ? 'written by PHP' : 'mysqldump',
+    $note,
     $files,
     is_file($uploadsFile) ? filesize($uploadsFile) / 1024 : 0
 );
