@@ -290,7 +290,8 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
     if (fixed && (amount === null || !Number.isFinite(amount) || amount <= 0)) local.discount_amount = 'Enter the amount to take off (above 0).';
     if (minOrder !== null && (!Number.isFinite(minOrder) || minOrder <= 0)) local.min_order_amount = 'Leave empty for no minimum, or enter an amount above 0.';
     if (!fixed && maxDiscount !== null && (!Number.isFinite(maxDiscount) || maxDiscount <= 0)) local.max_discount_amount = 'Leave empty for no cap, or enter an amount above 0.';
-    if (fixed && amount !== null && minOrder !== null && amount > minOrder) local.discount_amount = 'The amount off cannot be more than the minimum order.';
+    if (fixed && minOrder === null && !local.min_order_amount) local.min_order_amount = 'A fixed-amount code needs a minimum order above the amount off.';
+    if (fixed && amount !== null && minOrder !== null && amount >= minOrder) local.discount_amount = 'The amount off must be less than the minimum order.';
     if (!Number.isFinite(maxUses) || maxUses < 0) local.max_uses = 'Use 0 for unlimited, or a positive limit.';
     if (form.starts_at && form.expires_at && form.expires_at < form.starts_at) local.expires_at = 'The end date must be on or after the start date.';
     setErrors(local);

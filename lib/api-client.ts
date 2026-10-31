@@ -1304,11 +1304,15 @@ export async function apiReleaseOrder(orderNumber: string, guestAccessToken?: st
 
 export async function apiMarkPaymentSent(
   orderNumber: string,
-  guestAccessToken?: string
+  guestAccessToken?: string,
+  /** The checkout email, when the order was opened from "Track order" (no access key here). */
+  orderEmail?: string
 ): Promise<{ order_number: string; recorded: boolean; order_status: string; customer_marked_paid_at?: string | null; expires_at?: string | null }> {
   const headers: Record<string, string> = {};
   if (guestAccessToken) {
     headers['X-Guest-Access-Token'] = guestAccessToken;
+  } else if (orderEmail) {
+    headers['X-Order-Email'] = orderEmail;
   }
   return fetchFromApi(`/checkout/orders/${encodeURIComponent(orderNumber)}/payment-sent`, {
     method: 'POST',

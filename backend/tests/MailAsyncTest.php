@@ -197,6 +197,15 @@ if ($variant === null) {
 
 // -----------------------------------------------------------------------------
 $t->section('Due emails are retried by ordinary requests, without a scheduler');
+// The sweep sends the oldest due emails first (5 at a time). Emails other suites left waiting
+// (admin alerts now go to the outbox worker) are parked for this section, then put back.
+$parked = array_map('intval', array_column($t->db->fetchAll(
+    "SELECT `id` FROM `email_outbox` WHERE `status` = 'pending' AND (`next_attempt_at` IS NULL OR `next_attempt_at` <= NOW())"
+), 'id'));
+if ($parked !== []) {
+    $t->sql('UPDATE `email_outbox` SET `next_attempt_at` = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE `id` IN (' . implode(',', $parked) . ')');
+    $t->cleanup(fn () => $t->sql("UPDATE `email_outbox` SET `next_attempt_at` = NULL WHERE `status` = 'pending' AND `id` IN (" . implode(',', $parked) . ')'));
+}
 $received = static fn (string $to): int => count(array_filter(
     file($countFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [],
     static fn (string $l): bool => $l === strtolower($to)

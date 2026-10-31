@@ -122,6 +122,13 @@ $t->check('guest token opens the order', 200, $t->http('GET', "/checkout/orders/
 $t->check('full checkout email opens the order', 200, $t->http('GET', "/checkout/orders/{$onum}", ['headers' => ["X-Order-Email: {$email}"]])['status']);
 $t->check('the receipt page can read the payment status with the checkout email', 200, $t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => ["X-Order-Email: {$email}"]])['status']);
 $t->check('but not with a wrong email', 404, $t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => ['X-Order-Email: wrong@example.test']])['status']);
+// Email checks share the order lookup's failure limit (20 per 15 minutes per address).
+$guesser = ['X-Forwarded-For: 203.0.113.250'];
+for ($i = 0; $i < 20; $i++) {
+    $t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => array_merge($guesser, ["X-Order-Email: guess{$i}@example.test"])]);
+}
+$t->check('after 20 wrong emails the address is paused, even for the right email', 429, $t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => array_merge($guesser, ["X-Order-Email: {$email}"])])['status']);
+$t->check('and the pause covers the order lookup too', 429, $t->http('GET', "/checkout/orders/{$onum}", ['headers' => array_merge($guesser, ["X-Order-Email: {$email}"])])['status']);
 $wa = $t->http('POST', "/checkout/orders/{$onum}/initialize-payment", ['headers' => ["X-Guest-Access-Token: {$token}"], 'json' => ['gateway' => 'whatsapp']]);
 $t->check('WhatsApp payment attempt opens', 'whatsapp', TestKit::get($wa, 'data.provider'));
 $hours = (int) $t->scalar("SELECT TIMESTAMPDIFF(HOUR, NOW(), `expires_at`) FROM `orders` WHERE `order_number` = ?", 's', [$onum]);
@@ -148,6 +155,7 @@ $t->check('a nonsense pin is dropped (the order still goes through)', null, $pin
 
 $t->section('"Mark as paid" for a WhatsApp transfer alerts the store, never pays the order');
 $t->check('mark as paid without access -> 404', 404, $t->http('POST', "/checkout/orders/{$onum}/payment-sent", ['json' => []])['status']);
+$t->check('mark as paid with a wrong email -> 404', 404, $t->http('POST', "/checkout/orders/{$onum}/payment-sent", ['headers' => ['X-Order-Email: wrong@example.test'], 'json' => []])['status']);
 $claim = $t->http('POST', "/checkout/orders/{$onum}/payment-sent", ['headers' => ["X-Guest-Access-Token: {$token}"], 'json' => []]);
 $t->check('mark as paid 200', 200, $claim['status']);
 $t->check('claim recorded', true, TestKit::get($claim, 'data.recorded'));

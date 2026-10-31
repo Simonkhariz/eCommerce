@@ -130,6 +130,9 @@ function CheckoutCallbackContent() {
   useEffect(() => {
     if (!paidOrderSettled || settled.current) return;
     settled.current = true;
+    // Opened from "Track order" with only the order number and email: this device may not be the
+    // one the order was placed from, so its cart is left as it is.
+    if (!token && lookupEmail) return;
     const paidOrder = orderDetails.data ?? null;
     const paidAtMs = new Date(String(result?.verified_at || paidOrder?.payment?.verified_at || '').replace(' ', 'T')).getTime();
     const recent = Number.isFinite(paidAtMs) && Date.now() - paidAtMs < 2 * 24 * 60 * 60 * 1000;
@@ -139,7 +142,7 @@ function CheckoutCallbackContent() {
         ? paidOrder.items.map((it) => ({ variant_id: it.variant_id ? Number(it.variant_id) : null, quantity: Number(it.quantity) }))
         : undefined
     );
-  }, [paidOrderSettled, orderDetails.data, result?.verified_at, orderNumber, completePaidOrder]);
+  }, [paidOrderSettled, orderDetails.data, result?.verified_at, orderNumber, completePaidOrder, token, lookupEmail]);
 
   useEffect(() => {
     if (view !== 'paid' || celebrated.current) return;
@@ -228,7 +231,8 @@ function CheckoutCallbackContent() {
         orderNumber,
         token,
         `${window.location.origin}/checkout/callback?order=${encodeURIComponent(orderNumber)}`,
-        retryMethod
+        retryMethod,
+        token ? undefined : lookupEmail
       );
       if (retryMethod === 'whatsapp') {
         const url = buildWhatsAppInvoiceUrl(
@@ -259,7 +263,7 @@ function CheckoutCallbackContent() {
       // Not confirmed yet: tell the store the transfer was sent (it emails the admins). The page
       // then shows "Awaiting confirmation" and opens the receipt once the store confirms.
       if (paymentStatus === 'pending') {
-        const sent = await apiMarkPaymentSent(orderNumber, token).catch(() => null);
+        const sent = await apiMarkPaymentSent(orderNumber, token, token ? undefined : lookupEmail).catch(() => null);
         if (sent) {
           void checkAgain();
           return;

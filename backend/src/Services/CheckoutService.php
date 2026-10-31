@@ -78,6 +78,10 @@ class CheckoutService
 
         // 5. Safe Grand Total Calculation
         $grandTotal = round(max(0.0, $subtotal - $discountAmount + $shippingFee), 2);
+        if ($grandTotal <= 0) {
+            // Nothing to charge: the gateways refuse a zero amount, so such an order could never be paid.
+            throw new InvalidArgumentException('This order would cost ₦0. A promo code cannot cover the whole order: remove the code or add more items.');
+        }
 
         // 6. Fetch store origin for reference
         $origin = $this->getStoreOrigin();
@@ -206,6 +210,9 @@ class CheckoutService
 
                 // C. Calculate final grand total
                 $grandTotal = round(max(0.0, $subtotal - $discountAmount + $shippingFee), 2);
+                if ($grandTotal <= 0) {
+                    throw new InvalidArgumentException('This order would cost ₦0. A promo code cannot cover the whole order: remove the code or add more items.');
+                }
 
                 // D. ATOMIC INVENTORY RESERVATION POLICY
                 // We decrement variant stock atomically using conditional WHERE stock_quantity >= requested.

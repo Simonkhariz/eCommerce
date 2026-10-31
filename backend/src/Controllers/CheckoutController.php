@@ -378,7 +378,9 @@ class CheckoutController
         // link to the tracking page, so a guest on another device has only the order number and
         // email. Starting a payment can't harm the owner (whoever pays, pays for this order) and
         // can't hold the stock past the order's overall limit.
+        $this->guardEmailGuesses();
         if (!$this->canViewOrder($order, true, true, (string) ($body['guest_access_token'] ?? ''))) {
+            $this->countEmailGuess();
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
@@ -458,7 +460,9 @@ class CheckoutController
         RateLimiter::attempt('payment_verify', RequestContext::clientIp(), 240, 600);
 
         $customRef = $this->returnReference();
+        $this->guardEmailGuesses();
         if (!$this->canSeePaymentStatus($order, $customRef)) {
+            $this->countEmailGuess();
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
@@ -653,7 +657,11 @@ class CheckoutController
 
         RateLimiter::attempt('payment_claim', RequestContext::clientIp(), 30, 600);
         $body = JsonBodyMiddleware::getBody();
-        if (!$this->canViewOrder($order, false, true, (string) ($body['guest_access_token'] ?? ''))) {
+        // The checkout email counts here too (a customer who reached the order through "Track
+        // order"): a claim only alerts the store once and never marks anything paid.
+        $this->guardEmailGuesses();
+        if (!$this->canViewOrder($order, true, true, (string) ($body['guest_access_token'] ?? ''))) {
+            $this->countEmailGuess();
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
@@ -759,7 +767,9 @@ class CheckoutController
         RateLimiter::attempt('sse_open', RequestContext::clientIp(), 20, 600);
         $orderNumber = trim($params['orderNumber'] ?? '');
         $order = $orderNumber === '' ? null : $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$orderNumber]);
+        $this->guardEmailGuesses();
         if ($order === null || !$this->canSeePaymentStatus($order, $this->returnReference())) {
+            $this->countEmailGuess();
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
@@ -828,6 +838,31 @@ class CheckoutController
         }
         $send("event: end\ndata: " . json_encode(['reason' => $reason]) . "\n\n");
         exit;
+    }
+
+    /** A checkout email came with this request (X-Order-Email header or ?email=). */
+    private function emailOffered(): bool
+    {
+        return trim((string) ($_GET['email'] ?? $_SERVER['HTTP_X_ORDER_EMAIL'] ?? '')) !== '';
+    }
+
+    /**
+     * Every endpoint that accepts the checkout email shares the order lookup's limit on failed
+     * email checks (20 per 15 minutes per address), so none of them is a faster way to guess
+     * which email belongs to an order number.
+     */
+    private function guardEmailGuesses(): void
+    {
+        if ($this->emailOffered()) {
+            RateLimiter::guard('order_lookup_fail', RequestContext::clientIp(), 20, 900, 'Too many unsuccessful lookups. Please wait 15 minutes and try again.');
+        }
+    }
+
+    private function countEmailGuess(): void
+    {
+        if ($this->emailOffered()) {
+            RateLimiter::hit('order_lookup_fail', RequestContext::clientIp(), 900);
+        }
     }
 
     private function canViewOrder(array $order, bool $allowEmailMatch, bool $enforceCsrf = false, string $bodyToken = ''): bool

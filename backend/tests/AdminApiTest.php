@@ -127,9 +127,26 @@ $t->check('10% of N50,000 is capped at N1,000', 1000.0, (float) TestKit::get($pr
 $t->check('10% of N5,000 is N500 (under the cap)', 500.0, (float) TestKit::get($promoCheck($capped, 5000), 'data.discount_amount'));
 $t->check('a fixed code never takes off more than the items cost', 0, (int) $t->scalar("SELECT COUNT(*) FROM `promotions` WHERE `code` = ? AND `discount_amount` > `min_order_amount`", 's', [$fixed]));
 $fixedId = (int) $t->scalar("SELECT `id` FROM `promotions` WHERE `code` = ?", 's', [$fixed]);
-$A('PUT', "/admin/promotions/{$fixedId}", ['json' => ['min_order_amount' => '']]);
-$t->check('clearing the minimum saves it as none', null, $t->scalar("SELECT `min_order_amount` FROM `promotions` WHERE `id` = ?", 'i', [$fixedId]));
-$t->check('the homepage shows the wording', true, in_array('₦5,000 off', array_column((array) TestKit::get($t->http('GET', '/storefront/homepage'), 'data.promotions'), 'label'), true));
+$t->check('a fixed code must keep a minimum order above its amount (an order is never free)', 422, $A('PUT', "/admin/promotions/{$fixedId}", ['json' => ['min_order_amount' => '']])['status']);
+$t->check('an amount equal to the minimum is refused too', 422, $A('PUT', "/admin/promotions/{$fixedId}", ['json' => ['discount_amount' => 20000]])['status']);
+$t->check('the homepage shows the wording', true, in_array('₦5,000 off on orders of ₦20,000+', array_column((array) TestKit::get($t->http('GET', '/storefront/homepage'), 'data.promotions'), 'label'), true));
+// Safety net for any code (e.g. one made before these rules): an order is never priced at N0.
+$freeCode = 'TZ0' . strtoupper(bin2hex(random_bytes(3)));
+$freeZone = 'TF0' . strtoupper(bin2hex(random_bytes(3)));
+$t->sql("INSERT INTO `promotions` (`code`, `description`, `discount_type`, `discount_percent`, `discount_amount`) VALUES (?, 't', 'fixed', 0, 99999999)", 's', [$freeCode]);
+$t->cleanup(fn () => $t->sql("DELETE FROM `promotions` WHERE `code` = ?", 's', [$freeCode]));
+$fz = $A('POST', '/admin/shipping-zones', ['json' => ['name' => 'Free Zone', 'code' => $freeZone, 'fee' => 0, 'estimated_days' => '1 day', 'states_covered' => ['Borno']]]);
+$t->cleanup(fn () => $t->sql("DELETE FROM `shipping_zones` WHERE `code` = ?", 's', [$freeZone]));
+$fv = $t->variant(1);
+if ($fv !== null) {
+    $zeroQuote = $t->http('POST', '/checkout/quote', ['json' => [
+        'items' => [['product_id' => (int) $fv['product_id'], 'variant_id' => (int) $fv['variant_id'], 'quantity' => 1]],
+        'shipping_address' => ['state' => 'Borno', 'country' => 'Nigeria'],
+        'shipping_zone_id' => (int) TestKit::get($fz, 'data.id'),
+        'coupon_code' => $freeCode,
+    ]]);
+    $t->check('a quote that would cost N0 is refused with a clear reason', [422, true], [$zeroQuote['status'], str_contains((string) TestKit::get($zeroQuote, 'error.message'), 'would cost ₦0')]);
+}
 
 // -----------------------------------------------------------------------------
 $t->section('Banners');

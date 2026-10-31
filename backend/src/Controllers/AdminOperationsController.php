@@ -539,8 +539,14 @@ class AdminOperationsController
         if ($minOrder !== null && $minOrder <= 0) {
             $errors['min_order_amount'] = 'Leave empty for no minimum, or enter an amount above 0.';
         }
-        if (!isset($errors['discount_amount']) && !isset($errors['min_order_amount']) && $type === 'fixed' && $amount !== null && $minOrder !== null && $amount > $minOrder) {
-            $errors['discount_amount'] = 'The amount off cannot be more than the minimum order.';
+        // A fixed amount needs a minimum order above it, so an order is never brought to ₦0
+        // (the payment gateways cannot charge nothing).
+        if ($type === 'fixed' && !isset($errors['discount_amount']) && !isset($errors['min_order_amount'])) {
+            if ($minOrder === null) {
+                $errors['min_order_amount'] = 'A fixed-amount code needs a minimum order above the amount off.';
+            } elseif ($amount !== null && $amount >= $minOrder) {
+                $errors['discount_amount'] = 'The amount off must be less than the minimum order.';
+            }
         }
         if ($maxUses < 0) {
             $errors['max_uses'] = 'Use 0 for unlimited, or a positive limit.';
