@@ -16,6 +16,7 @@ function VerifyMagicLink() {
   const [token] = useState(() => searchParams.get('token') || '');
   const [verifyState, setState] = useState<VerifyState>('verifying');
   const [verifyMessage, setMessage] = useState<string>('');
+  const [passwordRemoved, setPasswordRemoved] = useState(false);
   const state: VerifyState = token ? verifyState : 'error';
   const message = token ? verifyMessage : 'This sign-in link is missing its security token. Please request a new link.';
   // Sign-in tokens are single use; guard against React StrictMode running the effect twice.
@@ -30,9 +31,11 @@ function VerifyMagicLink() {
     if (!token) return;
 
     verifyMagicLink(token)
-      .then(() => {
+      .then((removed) => {
         setState('success');
-        setTimeout(() => router.replace('/orders'), 1200);
+        setPasswordRemoved(removed);
+        // Leave time to read the note about the removed password.
+        setTimeout(() => router.replace('/orders'), removed ? 6000 : 1200);
       })
       .catch((err: Error) => {
         setState('error');
@@ -53,6 +56,12 @@ function VerifyMagicLink() {
         <>
           <CheckCircle2 className="w-10 h-10 text-green-600 mx-auto" aria-hidden="true" />
           <h1 className="text-lg font-bold text-black">You&apos;re signed in</h1>
+          {passwordRemoved && (
+            <p className="text-sm text-neutral-700 max-w-md mx-auto">
+              For your safety, the password set on this account before your email was confirmed has been removed
+              and other devices were signed out. Use &quot;Email me a sign-in link&quot; to sign in next time.
+            </p>
+          )}
           <p className="text-sm text-neutral-600">Taking you to your orders…</p>
         </>
       )}

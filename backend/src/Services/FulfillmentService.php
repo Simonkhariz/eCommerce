@@ -145,6 +145,25 @@ class FulfillmentService
      */
     public function expireOverdueOrders(int $limit = 50): array
     {
+        // One sweep at a time: when many shoppers check out together they would otherwise all
+        // try to expire the same overdue orders and queue behind each other's row locks
+        // (measured: 100 buyers at once took 5.6-9.3 s with 1,700 overdue orders, 0.9-1.5 s
+        // without). Whoever finds the sweep busy skips it; the next request or the scheduled
+        // job (expire_pending_orders.php) carries on.
+        $lock = $this->db->fetchOne("SELECT GET_LOCK('shopco_quick_expiry_sweep', 0) AS got");
+        if ((int) ($lock['got'] ?? 0) !== 1) {
+            return [];
+        }
+        try {
+            return $this->expireOverdueBatch($limit);
+        } finally {
+            $this->db->fetchOne("SELECT RELEASE_LOCK('shopco_quick_expiry_sweep') AS released");
+        }
+    }
+
+    /** @return string[] */
+    private function expireOverdueBatch(int $limit): array
+    {
         // This quick sweep (checkout, admin lists) does not ask the gateways. An order with an
         // open Kora/Monnify attempt gets GATEWAY_GRACE_MINUTES past its deadline, so a payment
         // still clearing is confirmed by its webhook or by expire_pending_orders.php (which asks

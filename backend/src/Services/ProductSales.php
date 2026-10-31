@@ -20,8 +20,22 @@ final class ProductSales
     /**
      * Recount the products on one order after its payment or order status changed.
      * Never lets a statistics problem break a payment, refund or status change.
+     *
+     * Inside a transaction the recount waits until after the commit. Its subquery reads every
+     * order holding the product with shared locks, so running it inside two payments for
+     * orders sharing a product could deadlock them, and the database would then roll one
+     * payment back while this method carried on as if nothing happened.
      */
     public static function refreshForOrder(Database $db, int $orderId): void
+    {
+        if ($db->inTransaction()) {
+            $db->afterCommit(static fn () => self::recount($db, $orderId));
+            return;
+        }
+        self::recount($db, $orderId);
+    }
+
+    private static function recount(Database $db, int $orderId): void
     {
         try {
             $db->executeUpdate(

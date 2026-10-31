@@ -107,7 +107,7 @@ class CheckoutService
     {
         // Release stock held by abandoned orders before reserving more (cheap, bounded).
         try {
-            (new FulfillmentService($this->db))->expireOverdueOrders(20);
+            (new FulfillmentService($this->db))->expireOverdueOrders(5);
         } catch (\Throwable $e) {
             error_log('[Order Expiry Sweep] ' . $e->getMessage());
         }

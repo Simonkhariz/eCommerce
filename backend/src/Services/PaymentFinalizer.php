@@ -374,14 +374,19 @@ class PaymentFinalizer
      */
     private function flagAttention(Database $db, int $orderId, string $reason): void
     {
+        // A repeated status check (e.g. an underpaid Monnify payment that stays pending) must not
+        // add the same note again: the column keeps 500 characters, so repeats would push later,
+        // different alerts out of sight.
         $db->executeUpdate(
             "UPDATE `orders`
              SET `requires_attention` = 1,
-                 `attention_reason` = LEFT(CONCAT_WS(' | ', NULLIF(`attention_reason`, ''), ?), 500),
+                 `attention_reason` = IF(LOCATE(?, COALESCE(`attention_reason`, '')) > 0,
+                     `attention_reason`,
+                     LEFT(CONCAT_WS(' | ', NULLIF(`attention_reason`, ''), ?), 500)),
                  `updated_at` = NOW()
              WHERE `id` = ?",
-            'si',
-            [$reason, $orderId]
+            'ssi',
+            [$reason, $reason, $orderId]
         );
     }
 

@@ -509,6 +509,8 @@ export interface ApiAuthResponse {
   user: ApiUser;
   csrf_token: string;
   expires_at: string;
+  /** Sign-in link only: a password set before the email was confirmed was removed. */
+  password_removed?: boolean;
 }
 
 export interface ApiShippingZone {

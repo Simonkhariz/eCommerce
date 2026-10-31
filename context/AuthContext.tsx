@@ -30,7 +30,8 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (data: { full_name: string; email: string; password: string; phone?: string }) => Promise<void>;
   requestMagicLink: (email: string) => Promise<{ message: string }>;
-  verifyMagicLink: (token: string) => Promise<void>;
+  /** Resolves true when a password set before the email was confirmed was removed. */
+  verifyMagicLink: (token: string) => Promise<boolean>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   loadAddresses: () => Promise<void>;
@@ -124,6 +125,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(res.user);
     setIsAuthModalOpen(false);
     loadAddresses();
+    return res.password_removed === true;
   };
 
   const logout = async () => {

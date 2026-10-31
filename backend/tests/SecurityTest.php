@@ -159,6 +159,30 @@ $t->check('magic link verifies once', 200, $t->http('POST', '/auth/customer/veri
 $t->check('magic link cannot be reused', 401, $t->http('POST', '/auth/customer/verify', ['json' => ['token' => (string) $token]])['status']);
 $t->check('unknown magic token rejected', 401, $t->http('POST', '/auth/customer/verify', ['json' => ['token' => str_repeat('a', 64)]])['status']);
 
+$t->section('Registering someone else\'s email first gains nothing');
+$victimEmail = $t->uniq('t-sec-prehijack') . '@example.test';
+$legitEmail = $t->uniq('t-sec-legit') . '@example.test';
+$t->cleanup(function () use ($t, $victimEmail, $legitEmail): void {
+    foreach ([$victimEmail, $legitEmail] as $e) {
+        $t->sql("DELETE FROM `email_outbox` WHERE `recipient_email` = ?", 's', [$e]);
+        $t->sql("DELETE FROM `email_verification_tokens` WHERE `email` = ?", 's', [$e]);
+        $t->sql("DELETE FROM `users` WHERE `email` = ?", 's', [$e]);
+    }
+});
+$t->check('a stranger registers the address with their own password', 201, $t->http('POST', '/auth/register', ['jar' => 'stranger', 'json' => ['full_name' => 'Stranger', 'email' => $victimEmail, 'password' => 'StrangerPass123']])['status']);
+$t->http('POST', '/auth/customer/magic-link', ['json' => ['email' => $victimEmail]]);
+$ownerVerify = $t->http('POST', '/auth/customer/verify', ['jar' => 'owner', 'json' => ['token' => (string) $t->magicLinkToken($victimEmail)]]);
+$t->check('the real owner signs in with the emailed link', 200, $ownerVerify['status']);
+$t->check('the response says the earlier password was removed', true, TestKit::get($ownerVerify, 'data.password_removed'));
+$t->check("the stranger's session is signed out", 401, $t->http('GET', '/auth/me', ['jar' => 'stranger'])['status']);
+$t->ok("the stranger's password no longer works", $t->http('POST', '/auth/login', ['json' => ['email' => $victimEmail, 'password' => 'StrangerPass123']])['status'] !== 200);
+$t->check("the owner's own session works", 200, $t->http('GET', '/auth/me', ['jar' => 'owner'])['status']);
+$t->check('a normal sign-up: register', 201, $t->http('POST', '/auth/register', ['jar' => 'legit', 'json' => ['full_name' => 'Legit', 'email' => $legitEmail, 'password' => 'LegitPass12345']])['status']);
+$t->http('POST', '/auth/customer/magic-link', ['json' => ['email' => $legitEmail]]);
+$legitVerify = $t->http('POST', '/auth/customer/verify', ['jar' => 'legit', 'json' => ['token' => (string) $t->magicLinkToken($legitEmail)]]);
+$t->check('then confirming in the same browser keeps the password', false, TestKit::get($legitVerify, 'data.password_removed'));
+$t->check('and the password still signs in', 200, $t->http('POST', '/auth/login', ['json' => ['email' => $legitEmail, 'password' => 'LegitPass12345']])['status']);
+
 // -----------------------------------------------------------------------------
 $t->section('Admin sessions');
 $admin = $t->adminSession('sec');

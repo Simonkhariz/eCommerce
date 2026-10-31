@@ -554,6 +554,57 @@ try {
     $toPaid = http('PATCH', "{$api}/admin/orders/{$o5['order_number']}/status", json_encode(['status' => 'paid']), $h, $jar);
     check("PATCH status 'paid' is refused", $toPaid['status'] === 422, (string) $toPaid['status']);
 
+    // -----------------------------------------------------------------------
+    echo "== Review fixes: stats after the commit, one expiry sweep at a time, capped holds, no repeated alerts\n";
+    $db->execute("UPDATE `product_variants` SET `stock_quantity` = 100 WHERE `id` = ?", 'i', [$variantA]);
+    $line = [['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 2]];
+    $soldOf = static fn (): int => (int) $db->fetchOne("SELECT `units_sold` FROM `products` WHERE `id` = ?", 'i', [$productId])['units_sold'];
+
+    $r1 = $placeOrder($line);
+    $r1Id = (int) orderRow($r1['order_number'])['id'];
+    $soldBefore = $soldOf();
+    $soldInside = null;
+    $db->transaction(function (Database $tx) use ($r1Id, $soldOf, &$soldInside): void {
+        $tx->execute("UPDATE `orders` SET `order_status` = 'paid', `payment_status` = 'successful' WHERE `id` = ?", 'i', [$r1Id]);
+        App\Services\ProductSales::refreshForOrder($tx, $r1Id);
+        $soldInside = $soldOf();
+    });
+    check('units-sold recount waits until after the commit (no shared locks inside a payment)', $soldInside === $soldBefore && $soldOf() === $soldBefore + 2, "inside {$soldInside}, after {$soldOf()}, before {$soldBefore}");
+
+    $r2 = $placeOrder($line);
+    $db->execute("UPDATE `orders` SET `expires_at` = NOW() - INTERVAL 2 HOUR WHERE `order_number` = ?", 's', [$r2['order_number']]);
+    $other = new mysqli(Env::get('DB_HOST', '127.0.0.1'), Env::get('DB_USERNAME', 'root'), Env::get('DB_PASSWORD', ''), Env::get('DB_DATABASE'), (int) Env::get('DB_PORT', '3306'));
+    $other->query("SELECT GET_LOCK('shopco_quick_expiry_sweep', 5)");
+    $busyStart = microtime(true);
+    $whileBusy = (new FulfillmentService($db))->expireOverdueOrders(50);
+    check('while another request sweeps, the next one skips the sweep instead of waiting', $whileBusy === [] && orderRow($r2['order_number'])['order_status'] === 'pending_payment' && microtime(true) - $busyStart < 1);
+    $other->query("SELECT RELEASE_LOCK('shopco_quick_expiry_sweep')");
+    $other->close();
+    $free = (new FulfillmentService($db))->expireOverdueOrders(50);
+    check('once free, the sweep expires the overdue order', in_array($r2['order_number'], $free, true) && orderRow($r2['order_number'])['order_status'] === 'cancelled');
+
+    $r3 = $placeOrder($line);
+    $db->execute("UPDATE `orders` SET `created_at` = NOW() - INTERVAL 30 DAY, `expires_at` = NOW() + INTERVAL 10 MINUTE WHERE `order_number` = ?", 's', [$r3['order_number']]);
+    $heldUntil = orderRow($r3['order_number'])['expires_at'];
+    (new PaymentAttempts($db))->open(orderRow($r3['order_number']), 'whatsapp', 'WA-CAP-' . $stamp, PaymentAttempts::manualWindowMinutes());
+    check("starting payment again can't hold an old order's stock past the overall limit", orderRow($r3['order_number'])['expires_at'] === $heldUntil, orderRow($r3['order_number'])['expires_at'] . " vs {$heldUntil}");
+    $r4 = $placeOrder($line);
+    (new PaymentAttempts($db))->open(orderRow($r4['order_number']), 'whatsapp', 'WA-NEW-' . $stamp, PaymentAttempts::manualWindowMinutes());
+    $r4Row = orderRow($r4['order_number']);
+    $r4Hold = (strtotime((string) $r4Row['expires_at']) - time()) / 60;
+    check('a new order still gets the full manual-transfer window', $r4Hold > PaymentAttempts::manualWindowMinutes() - 5 && strtotime((string) $r4Row['expires_at']) <= strtotime((string) $r4Row['created_at']) + PaymentAttempts::maxHoldMinutes() * 60, round($r4Hold) . ' min');
+
+    $flag = new ReflectionMethod(PaymentFinalizer::class, 'flagAttention');
+    $flag->setAccessible(true);
+    $finalizer = new PaymentFinalizer($db);
+    $r4Id = (int) $r4Row['id'];
+    foreach ([1, 2, 3] as $_) {
+        $flag->invoke($finalizer, $db, $r4Id, "Underpaid: Monnify payment REF-{$stamp} received NGN 10.00 of 20.00.");
+    }
+    $flag->invoke($finalizer, $db, $r4Id, 'Payment received after the order was cancelled.');
+    $reason = (string) orderRow($r4['order_number'])['attention_reason'];
+    check('a repeated alert is kept once, and a later different alert still shows', substr_count($reason, "REF-{$stamp}") === 1 && str_contains($reason, 'after the order was cancelled'), $reason);
+
     @unlink($jar);
 } catch (Throwable $e) {
     $fail++;

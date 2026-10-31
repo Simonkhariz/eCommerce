@@ -67,6 +67,9 @@ class AuditService
                 [$adminId, $action, $entityType, $entityId, $beforeJson, $afterJson, $ip, $ua]
             );
         } catch (Throwable $e) {
+            if ($e instanceof \mysqli_sql_exception && Database::getInstance()->inTransaction()) {
+                throw $e;
+            }
             error_log('[AuditService Record Error] ' . $e->getMessage());
         }
     }

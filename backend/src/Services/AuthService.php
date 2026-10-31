@@ -289,10 +289,28 @@ class AuthService
             Response::error('Account has been suspended. Please contact customer support.', 403, 'ACCOUNT_SUSPENDED');
         }
 
+        // First proof that this person owns the email. A password chosen before that proof may
+        // belong to someone who registered the address first (to read the owner's orders once
+        // they verify). It is kept only when the link is opened in the browser that registered
+        // (signed in as this same account); otherwise the password and every other session of
+        // the account are removed, and the owner can sign in with email links.
+        $previousToken = SessionCookie::read(SessionCookie::SCOPE_CUSTOMER);
+        $passwordRemoved = false;
+        if (empty($user['email_verified_at']) && !empty($user['password_hash'])) {
+            $current = $previousToken !== null ? $this->sessionRepo->find($previousToken) : null;
+            if ($current === null || (int) $current['user_id'] !== (int) $user['id']) {
+                $this->db->execute("UPDATE `users` SET `password_hash` = NULL WHERE `id` = ?", 'i', [(int) $user['id']]);
+                $this->sessionRepo->destroyUserSessions((int) $user['id']);
+                $passwordRemoved = true;
+            }
+        }
+
         $this->userRepo->markEmailVerified((int) $user['id']);
         $user = $this->userRepo->findById((int) $user['id']);
 
-        return $this->startSession($user, SessionCookie::read(SessionCookie::SCOPE_CUSTOMER));
+        $result = $this->startSession($user, $previousToken);
+        $result['password_removed'] = $passwordRemoved;
+        return $result;
     }
 
     /**

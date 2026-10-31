@@ -35,6 +35,12 @@ class PaymentAttempts
     /**
      * Minutes an unpaid order stays reserved while awaiting a manual/WhatsApp transfer.
      */
+    /** The longest an unpaid order can hold its stock, counted from when it was placed. */
+    public static function maxHoldMinutes(): int
+    {
+        return self::manualWindowMinutes() + self::gatewayWindowMinutes();
+    }
+
     public static function manualWindowMinutes(): int
     {
         return max(60, Env::int('ORDER_MANUAL_PAYMENT_WINDOW_HOURS', 24) * 60);
@@ -86,12 +92,17 @@ class PaymentAttempts
             );
 
             // Keep stock reserved long enough to finish this attempt (never shortens an existing window).
+            // Starting payment again and again cannot hold the stock forever: the deadline never
+            // moves past the order's placing time plus the manual window and one gateway window.
             $db->executeUpdate(
                 "UPDATE `orders`
-                 SET `expires_at` = GREATEST(COALESCE(`expires_at`, NOW()), DATE_ADD(NOW(), INTERVAL ? MINUTE))
+                 SET `expires_at` = GREATEST(
+                         COALESCE(`expires_at`, NOW()),
+                         LEAST(DATE_ADD(NOW(), INTERVAL ? MINUTE), DATE_ADD(`created_at`, INTERVAL ? MINUTE))
+                     )
                  WHERE `id` = ?",
-                'ii',
-                [$windowMinutes, (int) $locked['id']]
+                'iii',
+                [$windowMinutes, self::maxHoldMinutes(), (int) $locked['id']]
             );
 
             return $paymentId;
