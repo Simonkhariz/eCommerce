@@ -274,9 +274,10 @@ if ($variant === null) {
         $t->sql("DELETE FROM `email_outbox` WHERE `recipient_email` = ?", 's', [$email2]);
     });
     $A('POST', "/admin/orders/{$onum2}/confirm-payment", ['json' => ['reference' => 'BANK-' . bin2hex(random_bytes(4))]]);
+    $t->check('a shipping label can be created before dispatch', 200, $A('POST', "/admin/orders/{$onum2}/shipment", ['json' => ['carrier' => 'GIG Logistics', 'tracking_number' => 'LBL' . random_int(1000, 9999), 'status' => 'label_created']])['status']);
     $pending = $A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'refund_pending', 'comment' => 'Customer asked for a refund']]);
     $t->check('an unsent paid order can be marked refund pending', 'refund_pending', TestKit::get($pending, 'data.order_status'));
-    $t->check('declining it offers "processing" (never sent, so not "delivered")', ['processing'], TestKit::get($pending, 'data.allowed_transitions'));
+    $t->check('declining it offers "processing" (a label alone is not "sent")', ['processing'], TestKit::get($pending, 'data.allowed_transitions'));
     $t->check('"delivered" is refused for an order that was never sent', 422, $A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'delivered']])['status']);
     $t->check('declined: back to processing', 'processing', TestKit::get($A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'processing', 'comment' => 'Refund declined']]), 'data.order_status'));
     $t->check('and it can now be shipped', 200, $A('POST', "/admin/orders/{$onum2}/shipment", ['json' => ['carrier' => 'GIG Logistics', 'tracking_number' => 'TRK' . random_int(1000, 9999), 'status' => 'in_transit']])['status']);

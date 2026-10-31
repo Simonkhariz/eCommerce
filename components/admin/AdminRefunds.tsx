@@ -195,9 +195,9 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
             {form.status === 'completed' ? 'marked as already paid back to the customer.' : 'recorded as pending until you mark it completed.'}
           </p>
           {form.restock && eligibility.can_restock && (completesRefund(amount) ? (
-            <p>The order’s items will be returned to stock.</p>
+            <p>The order’s items will be returned to stock{form.status === 'completed' ? '' : ' when this refund is completed'}.</p>
           ) : (
-            <p>This is a partial refund, so the order’s items stay out of stock. Items go back only with a full refund.</p>
+            <p>This is a partial refund: the order’s items go back to stock once the order is fully refunded.</p>
           ))}
           <p className="text-[#6b7280]">This records the refund. It does not send money.</p>
         </div>
@@ -213,7 +213,7 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
         amount,
         reason: form.reason.trim(),
         status: form.status,
-        restock: form.restock && eligibility.can_restock && completesRefund(amount),
+        restock: form.restock && eligibility.can_restock,
         provider_refund_reference: form.reference.trim() || undefined,
       });
       toast.success(
@@ -356,7 +356,7 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
                 <div className="sm:col-span-2">
                   <Checkbox
                     label="Return the order’s items to stock"
-                    hint="Only if the items were never shipped, or came back in sellable condition. Applies to a full refund only: a partial refund keeps the items out of stock."
+                    hint="Only if the items were never shipped, or came back in sellable condition. Items go back once the order is fully refunded."
                     checked={form.restock}
                     onChange={(restock) => setForm((f) => ({ ...f, restock }))}
                   />

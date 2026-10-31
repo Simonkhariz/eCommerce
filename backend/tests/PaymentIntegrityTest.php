@@ -567,6 +567,13 @@ try {
     $newSku = "P2E-{$stamp}";
     $put(['sku' => $newSku]);
     check('editing the SKU is saved', $prodRow()['sku'] === $newSku, (string) $prodRow()['sku']);
+    $newSku2 = "P2F-{$stamp}";
+    $activeVariants = $db->fetchAll("SELECT `id`, `sku`, `size`, `color_name`, `color_hex`, `stock_quantity` FROM `product_variants` WHERE `product_id` = ? AND `is_active` = 1", 'i', [$productId]);
+    $variantsBody = array_map(static fn (array $v): array => ['id' => (int) $v['id'], 'sku' => $v['sku'], 'size' => $v['size'], 'color_name' => $v['color_name'], 'color_hex' => $v['color_hex'], 'stock_quantity' => (int) $v['stock_quantity'], 'original_stock_quantity' => (int) $v['stock_quantity']], $activeVariants);
+    $variantsBody[] = ['sku' => '', 'size' => 'XL', 'color_name' => 'Teal', 'color_hex' => '#008080', 'stock_quantity' => 3];
+    $withVariant = $put(['sku' => $newSku2, 'variants' => $variantsBody]);
+    $tealSku = (string) ($db->fetchOne("SELECT `sku` FROM `product_variants` WHERE `product_id` = ? AND `size` = 'XL' AND `color_name` = 'Teal'", 'i', [$productId])['sku'] ?? '');
+    check('a new variant added in the same save as a SKU change is named after the new SKU', $withVariant['status'] === 200 && str_starts_with($tealSku, $newSku2 . '-'), $tealSku . ' ' . $withVariant['status']);
     $put(['images' => [['image_url' => '/uploads/p2-only.jpg', 'alt_text' => 'only', 'is_primary' => 1]]]);
     $put(['images' => []]);
     check('removing every photo is saved', (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `product_images` WHERE `product_id` = ?", 'i', [$productId])['c'] === 0);
@@ -617,6 +624,21 @@ try {
     $r4Row = orderRow($r4['order_number']);
     $r4Hold = (strtotime((string) $r4Row['expires_at']) - time()) / 60;
     check('a new order still gets the full manual-transfer window', $r4Hold > PaymentAttempts::manualWindowMinutes() - 5 && strtotime((string) $r4Row['expires_at']) <= strtotime((string) $r4Row['created_at']) + PaymentAttempts::maxHoldMinutes() * 60, round($r4Hold) . ' min');
+
+    // Refunds: "return to stock" ticked only on the refund that completes first (not the full one).
+    $r5 = $placeOrder($line);
+    $r5Id = (int) orderRow($r5['order_number'])['id'];
+    (new PaymentFinalizer($db))->recordManualPayment($r5Id, 'RF-' . $stamp, null, 'refund test');
+    $paidTotal = (float) orderRow($r5['order_number'])['grand_total'];
+    $stockAfterSale = stockOf($variantA);
+    $fs = new FulfillmentService($db);
+    $first = $fs->recordRefund($r5Id, round($paidTotal / 2, 2), 'first half', 'pending', false, null);
+    $fs->recordRefund($r5Id, round($paidTotal - round($paidTotal / 2, 2), 2), 'second half', 'completed', true, null);
+    check('a partial refund does not restock yet', stockOf($variantA) === $stockAfterSale);
+    $firstId = (int) ($first['id'] ?? $db->fetchOne("SELECT `id` FROM `refunds` WHERE `order_id` = ? AND `reason` = 'first half'", 'i', [$r5Id])['id']);
+    $fs->resolveRefund($firstId, 'completed', null);
+    check('when the order becomes fully refunded the items go back to stock, once', stockOf($variantA) === $stockAfterSale + 2, stockOf($variantA) . " vs {$stockAfterSale}+2");
+    check('and exactly one refund is marked as the one that restocked', (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `refunds` WHERE `order_id` = ? AND `restocked` = 1", 'i', [$r5Id])['c'] === 1 && (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `refunds` WHERE `order_id` = ? AND `restocked` = 2", 'i', [$r5Id])['c'] === 0);
 
     $flag = new ReflectionMethod(PaymentFinalizer::class, 'flagAttention');
     $flag->setAccessible(true);

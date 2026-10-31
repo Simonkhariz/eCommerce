@@ -1062,7 +1062,8 @@ class ProductRepository
             // Sync variants if provided: upsert by id so variant IDs (referenced by orders, carts
             // and inventory logs) stay stable.
             if ($variants !== null && is_array($variants)) {
-                $this->syncVariants($db, $id, (string) ($existing['sku'] ?? ''), $variants);
+                // New variants without a SKU are named after the SKU being saved, not the old one.
+                $this->syncVariants($db, $id, $sku !== '' ? $sku : (string) ($existing['sku'] ?? ''), $variants);
             }
 
             // Sync images if provided; an empty list removes every photo (the editor allows it).

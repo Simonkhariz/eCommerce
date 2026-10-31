@@ -77,8 +77,9 @@ class FulfillmentService
         if ($status !== 'refund_pending') {
             return $allowed;
         }
+        // A label alone (status label_created, no dispatch date) is not "sent".
         $sent = $this->db->fetchOne(
-            "SELECT 1 AS x FROM `shipments` WHERE `order_id` = ?
+            "SELECT 1 AS x FROM `shipments` WHERE `order_id` = ? AND (`shipped_at` IS NOT NULL OR `status` <> 'label_created')
              UNION SELECT 1 FROM `order_status_history` WHERE `order_id` = ? AND `new_status` IN ('shipped', 'delivered', 'completed', 'returned')
              LIMIT 1",
             'ii',
@@ -692,11 +693,22 @@ class FulfillmentService
         $newOrderStatus = ($fullyRefunded && $previousStatus !== 'cancelled') ? 'refunded' : $previousStatus;
 
         // Put goods back on sale only for a full refund where the items are not with the customer
-        // (unshipped, returned, or a refund request the admin chose to restock).
+        // (unshipped, returned, or a refund request the admin chose to restock). The admin may tick
+        // "return to stock" on any of the order's refunds: the wish is kept (restocked = 2) until
+        // the refund that makes the order fully refunded completes, then the stock goes back once,
+        // whichever refund carried the tick and in whatever order they complete.
+        $asked = $restock || $db->fetchOne(
+            "SELECT 1 AS x FROM `refunds` WHERE `order_id` = ? AND `id` <> ? AND `restocked` = 2 AND `status` IN ('pending', 'completed') LIMIT 1",
+            'ii',
+            [(int) $order['id'], $refundId]
+        ) !== null;
         $restocked = 0;
-        if ($restock && $fullyRefunded && in_array($previousStatus, ['paid', 'processing', 'returned', 'refund_pending'], true)) {
+        if ($asked && $fullyRefunded && in_array($previousStatus, ['paid', 'processing', 'returned', 'refund_pending'], true)) {
             $this->releaseReservation($db, ['id' => $order['id'], 'applied_promo_code' => null]);
             $restocked = 1;
+            $db->executeUpdate("UPDATE `refunds` SET `restocked` = 0 WHERE `order_id` = ? AND `id` <> ? AND `restocked` = 2", 'ii', [(int) $order['id'], $refundId]);
+        } elseif ($restock && !$fullyRefunded) {
+            $restocked = 2; // still wanted, once the rest of the money is refunded
         }
         $db->executeUpdate("UPDATE `refunds` SET `restocked` = ? WHERE `id` = ?", 'ii', [$restocked, $refundId]);
 
