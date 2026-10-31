@@ -10,6 +10,7 @@ import {
   apiSaveCart,
   apiValidatePromotion,
   apiVerifyPayment,
+  ApiError,
   errorMessage,
   getProductDetail,
 } from '@/lib/api-client';
@@ -157,6 +158,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [cartNotices, setCartNotices] = useState<string[]>([]);
   const [isRevalidating, setIsRevalidating] = useState(false);
   const serverSyncReady = useRef(false);
+  // The cart key whose stored cart has been loaded into `items` (null while loading).
+  const loadedKey = useRef<string | null>(null);
   const loadedRef = useRef(false);
   loadedRef.current = isLoaded;
   /** Counts cart changes, so a finished save knows whether a newer change is still unsaved. */
@@ -182,6 +185,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (authLoading) return;
     let cancelled = false;
     serverSyncReady.current = false;
+    loadedKey.current = null;
     setIsLoaded(false);
 
     (async () => {
@@ -209,6 +213,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (!cancelled) {
+        loadedKey.current = cartStorageKey;
         setItems(next);
         setIsLoaded(true);
       }
@@ -242,6 +247,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Persist locally on every change; for customers also save to the account (debounced).
   useEffect(() => {
     if (!isLoaded) return;
+    // Right after signing in or out this effect runs once more with the previous identity's
+    // items (isLoaded is still true in that render). Writing them would store them under the new
+    // account and mark that account's old local copy as "unsaved", which the load then merges
+    // back in (bringing back items of an order that was already paid). Wait for the load.
+    if (loadedKey.current !== cartStorageKey) return;
     if (fromOtherTab.current) {
       // Already stored (and saved to the account) by the tab that made the change.
       fromOtherTab.current = false;
@@ -298,9 +308,12 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             description: res.description || `${res.discount_percent}% off`,
           });
         } else {
-          throw new Error('Coupon is no longer valid.');
+          throw new ApiError('Coupon is no longer valid.', 422, 'INVALID_PROMOTION');
         }
       } catch (err) {
+        // Only the server saying the code is invalid removes it. A network blip, a busy server
+        // or the per-minute limit keeps it: the checkout quote checks the code again anyway.
+        if (!(err instanceof ApiError && err.errorCode === 'INVALID_PROMOTION')) return;
         setAppliedPromo(null);
         writeStorage(PROMO_STORAGE_KEY, null);
         setCartNotices((prev) => [...prev, `Promo code ${promoCode} was removed: ${errorMessage(err, 'it is no longer valid.')}`]);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiGetPaymentMethods, PaymentMethodItem, PaymentMethodsResponse } from '@/lib/api-client';
 import { useStoreSeed } from '@/components/layout/StoreDataProvider';
 import { DEFAULT_PAYMENT_WINDOWS, PaymentWindows, paymentWindowsFrom } from '@/lib/site-content';
@@ -38,14 +38,15 @@ function load(): Promise<StoreSupport> {
  * Comes with the page when the server fetched it; otherwise loaded once per page session and
  * shared by every component that needs it.
  */
-export function useStoreSupport(): StoreSupport {
+export function useStoreSupport(): StoreSupport & { retry: () => void } {
   const seeded = useStoreSeed()?.payments;
   const [state, setState] = useState<StoreSupport>(() =>
     seeded ? fromResponse(seeded) : { supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, livePaymentStatus: false, loaded: false }
   );
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (seeded) {
+    if (seeded && attempt === 0) {
       cache ??= Promise.resolve(fromResponse(seeded));
       return;
     }
@@ -56,7 +57,14 @@ export function useStoreSupport(): StoreSupport {
     return () => {
       active = false;
     };
-  }, [seeded]);
+  }, [seeded, attempt]);
 
-  return state;
+  /** Ask the server again (after a failed load, or to pick up methods switched back on). */
+  const retry = useCallback(() => {
+    cache = null;
+    setState((s) => ({ ...s, loaded: false }));
+    setAttempt((a) => a + 1);
+  }, []);
+
+  return { ...state, retry };
 }

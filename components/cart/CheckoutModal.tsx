@@ -41,6 +41,7 @@ import {
 import { useInvoiceSent } from '@/lib/use-order-data';
 import { NIGERIAN_STATES } from '@/lib/nigeria';
 import { Dialog } from '@/components/ui/Dialog';
+import { PaymentMethodsNotice } from '@/components/cart/PaymentMethodsNotice';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -131,9 +132,9 @@ function CheckoutSession({
   formData: CheckoutForm;
   setFormData: React.Dispatch<React.SetStateAction<CheckoutForm>>;
 }) {
-  const { items, appliedPromo, settlePendingOrder } = useCart();
+  const { items, appliedPromo, settlePendingOrder, removePromoCode } = useCart();
   const { user } = useAuth();
-  const { supportPhone, paymentMethods, paymentWindows } = useStoreSupport();
+  const { supportPhone, paymentMethods, paymentWindows, loaded: paymentMethodsLoaded, retry: retryPaymentMethods } = useStoreSupport();
 
   const [step, setStep] = useState<'details' | 'payment'>('details');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -159,6 +160,10 @@ function CheckoutSession({
   // One key per checkout attempt: a double click or a retry after a dropped response
   // returns the same order instead of creating (and reserving stock for) a second one.
   const idempotencyKeyRef = useRef<string | null>(null);
+  // The order details the key was made for: a retry after a lost answer reuses the key (so the
+  // server returns the order it may already have made), but changed details get a new key, or
+  // the server would silently return the earlier order with the old address or items.
+  const idempotencySignatureRef = useRef<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const busy = isSubmitting || isInitializingPayment;
@@ -277,31 +282,32 @@ function CheckoutSession({
     }
 
     setIsSubmitting(true);
-    if (!idempotencyKeyRef.current) {
+    const orderPayload = {
+      email: formData.email.trim(),
+      items: checkoutItems(),
+      shipping_address: {
+        full_name: formData.fullName.trim(),
+        phone: formData.phone.trim(),
+        address_line1: formData.address.trim(),
+        city: formData.city.trim(),
+        state: formData.state,
+        country: 'Nigeria',
+      },
+      shipping_zone_id: quote.shipping_zone.id,
+      coupon_code: appliedPromo?.code,
+      notes: formData.notes.trim() || undefined,
+    };
+    const payloadSignature = JSON.stringify(orderPayload);
+    if (!idempotencyKeyRef.current || idempotencySignatureRef.current !== payloadSignature) {
       idempotencyKeyRef.current = newIdempotencyKey();
+      idempotencySignatureRef.current = payloadSignature;
     }
 
     try {
-      const placed = await apiCreateCheckoutOrder(
-        {
-          email: formData.email.trim(),
-          items: checkoutItems(),
-          shipping_address: {
-            full_name: formData.fullName.trim(),
-            phone: formData.phone.trim(),
-            address_line1: formData.address.trim(),
-            city: formData.city.trim(),
-            state: formData.state,
-            country: 'Nigeria',
-          },
-          shipping_zone_id: quote.shipping_zone.id,
-          coupon_code: appliedPromo?.code,
-          notes: formData.notes.trim() || undefined,
-        },
-        idempotencyKeyRef.current
-      );
+      const placed = await apiCreateCheckoutOrder(orderPayload, idempotencyKeyRef.current);
 
       idempotencyKeyRef.current = null;
+      idempotencySignatureRef.current = null;
       saveGuestToken(placed.order_number, placed.guest_access_token);
       // The cart stays as it is until payment is verified; remember which order it belongs to.
       savePendingOrder({
@@ -561,6 +567,15 @@ function CheckoutSession({
                 ) : quoteError ? (
                   <div role="alert" className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-900">
                     {quoteError}
+                    {appliedPromo && /coupon|promo/i.test(quoteError) && (
+                      <button
+                        type="button"
+                        onClick={removePromoCode}
+                        className="block mt-2 font-semibold underline underline-offset-2"
+                      >
+                        Remove code {appliedPromo.code} and continue without it
+                      </button>
+                    )}
                   </div>
                 ) : zones.length > 1 ? (
                   <fieldset className="space-y-1.5">
@@ -710,7 +725,7 @@ function CheckoutSession({
             <fieldset className="space-y-2">
               <legend className="text-xs font-bold uppercase tracking-wider text-neutral-700 mb-1">Payment method</legend>
               {paymentMethods.length === 0 && (
-                <p className="text-sm text-neutral-600" role="status">Loading payment methods…</p>
+                <PaymentMethodsNotice loaded={paymentMethodsLoaded} supportPhone={supportPhone} onRetry={retryPaymentMethods} />
               )}
               {paymentMethods.map((m) => (
                 <label

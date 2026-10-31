@@ -19,6 +19,7 @@ import { useCart } from '@/context/CartContext';
 import { clearPendingOrder, markInvoiceSent, saveGuestToken } from '@/lib/pending-order';
 import { useGuestToken, useInvoiceSent } from '@/lib/use-order-data';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
+import { PaymentMethodsNotice } from '@/components/cart/PaymentMethodsNotice';
 
 type ViewState = 'checking' | PaymentView | 'error';
 
@@ -42,7 +43,7 @@ function CheckoutCallbackContent() {
   }
 
   const { completePaidOrder } = useCart();
-  const { supportPhone, paymentMethods, livePaymentStatus } = useStoreSupport();
+  const { supportPhone, paymentMethods, livePaymentStatus, loaded: paymentMethodsLoaded, retry: retryPaymentMethods } = useStoreSupport();
 
   // Guest access key and "invoice sent", as saved on this device (they update when saved).
   const token = useGuestToken(orderNumber);
@@ -282,9 +283,7 @@ function CheckoutCallbackContent() {
       <fieldset className="space-y-1.5">
         <legend className="sr-only">Payment method</legend>
         {paymentMethods.length === 0 && (
-          <p className="text-sm text-neutral-700" role="status">
-            Loading payment methods…
-          </p>
+          <PaymentMethodsNotice loaded={paymentMethodsLoaded} supportPhone={supportPhone} onRetry={retryPaymentMethods} />
         )}
         {paymentMethods.map((m) => (
           <label key={m.id} className="flex items-center gap-2 rounded-xl border border-neutral-200 px-3 py-2 text-sm cursor-pointer has-[:checked]:border-black">

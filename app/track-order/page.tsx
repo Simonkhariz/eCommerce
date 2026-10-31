@@ -28,6 +28,7 @@ import { useLatestOrderNumber } from '@/lib/use-order-data';
 import { getOrderStatusDisplay, STATUS_TONE_CLASSES } from '@/lib/order-status';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { Dialog } from '@/components/ui/Dialog';
+import { PaymentMethodsNotice } from '@/components/cart/PaymentMethodsNotice';
 
 /** Safari-safe parsing of MySQL "YYYY-MM-DD HH:MM:SS" timestamps. */
 function toDate(value: string): Date {
@@ -62,7 +63,7 @@ function TrackOrderContent() {
   const [isInitializingPayment, setIsInitializingPayment] = useState<string | null>(null);
   // null until the shopper opens or closes it; "Pay now" links (?pay=1) open it on arrival.
   const [paymentModalChoice, setShowPaymentModal] = useState<boolean | null>(null);
-  const { supportPhone, paymentMethods } = useStoreSupport();
+  const { supportPhone, paymentMethods, loaded: paymentMethodsLoaded, retry: retryPaymentMethods } = useStoreSupport();
   // The shopper's choice; until they pick, the store's default method.
   const [chosenGateway, setSelectedGateway] = useState<string>('');
   const selectedGateway = chosenGateway || (paymentMethods.find((m) => m.is_default) || paymentMethods[0])?.id || '';
@@ -781,9 +782,7 @@ function TrackOrderContent() {
               <fieldset className="space-y-3">
                 <legend className="text-xs font-bold uppercase tracking-wider text-neutral-700">Payment method</legend>
                 {paymentMethods.length === 0 && (
-                  <p className="text-sm text-neutral-700" role="status">
-                    Loading payment methods…
-                  </p>
+                  <PaymentMethodsNotice loaded={paymentMethodsLoaded} supportPhone={supportPhone} onRetry={retryPaymentMethods} />
                 )}
                 {paymentMethods.map((m) => (
                   <label
