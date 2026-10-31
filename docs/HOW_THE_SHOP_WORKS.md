@@ -227,11 +227,16 @@ crossed out on sale items, a "Sold out" badge, and a heart.
 
 1. The shopper fills in full name, phone, email, street address, **state** (36 states + FCT),
    city, and an optional delivery note.
+   - **"Use my current location"** (optional): the phone asks permission, then a map pin is saved
+     with the order so the rider can open it on Google Maps. The typed address is still what the
+     order relies on.
    - Signed-in customers get their details and default address pre-filled.
    - What the shopper types is kept if they close and reopen the window.
 2. As soon as a state is chosen, the server **re-prices every item from the database, checks
    stock, finds the delivery zone and fee, applies the promo code** and returns the totals.
    - Example: "Delivery to Lagos: Lagos Express · 1–2 days".
+   - **The delivery fee can grow with the number of items:** each zone's fee covers the first N
+     items, and each extra item adds an amount the owner sets (₦0 by default, so one fee).
    - If several delivery options exist, the shopper chooses one.
    - A state the store doesn't serve is refused clearly. **A free delivery is never applied by
      mistake.**
@@ -248,6 +253,7 @@ happen at all:**
   *"Insufficient stock … Available: 0"*: always the true number.
 - An order number like `ORD-20261030-A1B2C3` is created, with a payment deadline (60 minutes by
   default).
+- **The owner is emailed too** (*"New order … (₦…)"*): every active admin, once per order.
 - Guests receive a private **order access key** (only a scrambled copy is stored).
 - The email *"Order … received – complete your payment"* is queued.
 
@@ -274,13 +280,17 @@ started the first order keeps its reservation, because money may be on its way.
 The window changes to **"Complete your payment"**: *"Order ORD-… is reserved until 14:35."*,
 the order summary, and for guests the access key with a Copy button.
 
-The shopper picks a payment method (the owner chooses which ones are on):
+The shopper sees **two buttons, not a list of gateways**:
 
-| Method | What the shopper does | How it is confirmed |
+| Button | What the shopper does | How it is confirmed |
 |---|---|---|
-| **Monnify** (card or bank transfer) | Taken to Monnify's secure payment page | Automatically: Monnify's signed notice, and the shop asks Monnify directly when the shopper returns |
-| **Kora** (card or bank transfer) | Taken to Kora's secure payment page | Automatically, the same way |
-| **WhatsApp bank transfer** | A WhatsApp chat opens with a ready-made pro-forma invoice (items, totals, delivery address). The shopper pays by transfer and taps **"Mark as paid"** | By the owner, after seeing the money arrive, by entering the bank reference |
+| **Pay now** (card or bank transfer) | Taken to the secure payment page of the store's gateway: **Monnify by default, or Kora if the owner chose it** in Settings. If the chosen one is switched off, the other is used | Automatically: the gateway's signed notice, and the shop asks the gateway directly when the shopper returns |
+| **Pay via WhatsApp** (bank transfer) | A WhatsApp chat opens with **only the order number** filled in (the shopper writes the rest). They pay by transfer and tap **"I've sent the transfer"** | By the owner, after seeing the money arrive, by entering the bank reference |
+
+After **"I've sent the transfer"** the page shows **"Awaiting confirmation"** with a loader. It
+watches for the owner's confirmation for as long as it stays open (live when live status is on,
+otherwise a check every 15 seconds), and **the receipt appears by itself** the moment the owner
+confirms. The receipt email goes out at the same moment.
 
 - **Card details are entered only on Kora's or Monnify's pages.** The shop never sees or stores
   them.
@@ -288,8 +298,11 @@ The shopper picks a payment method (the owner chooses which ones are on):
 - Each payment try gets its own reference. If the shopper tries twice, both references stay
   valid, so a late payment on the first try is still matched to the order.
 - WhatsApp orders are held for 24 hours instead of 60 minutes, because transfers take longer.
-- Tapping "Mark as paid" **never marks the order paid by itself.** It tells the store: all
-  admins get the email *"Customer says order … is paid (₦…)"*, and the reservation is extended.
+- Tapping "I've sent the transfer" **never marks the order paid by itself.** It tells the store:
+  all admins get the email *"Customer says order … is paid (₦…)"*, and the reservation is
+  extended.
+- **Every confirmed payment emails the owner** (*"Payment received for order …"*), whichever way
+  it was paid, in the same database step as the payment.
 
 ### 4.7 Coming back from the payment page
 
@@ -325,6 +338,13 @@ Customer emails sent along the way:
 - refund recorded.
 
 ### 4.8 Tracking and order history
+
+- **Receipts by order number:** on "Track order", the order number plus the checkout email (or
+  the access key) finds the order; a paid order shows **"View receipt"**, which opens the full
+  receipt to view, print, save as an image or share. An order number alone never opens a receipt,
+  because it shows the customer's name, phone and address.
+- **Emails at each stage:** order received, payment confirmed, **being prepared**, shipped (with
+  the tracking number), **delivered**, and cancelled or refunded.
 
 - **Track order** (`/track-order`): enter the order number **or the courier's tracking number**,
   plus the checkout email (or the access key). On the device used to order, no email is needed.
@@ -524,6 +544,8 @@ instead of cancelled.
   - One-click **Ship** and **Mark delivered**.
 - **Delivery zones:**
   - Groups of states, each with a fee and a delivery estimate.
+  - **Fee by quantity:** "Items the fee covers" and "Each extra item (₦)", e.g. ₦1,000 covers 2
+    items, then ₦500 per extra item (3 items: ₦1,500).
   - An "All other states" catch-all is possible.
   - A warning lists states that no zone covers, since customers there can't check out.
   - Past orders keep the fee they were charged, even if a zone changes later.
@@ -586,7 +608,12 @@ instead of cancelled.
 ### 5.9 Growth: promo codes, newsletter, banners and reviews
 
 - **Promo codes:**
-  - 1–90% off the items.
+  - **A percentage (1–90%) or a fixed amount off** the items, e.g. ₦5,000 off.
+  - **Minimum order:** the code works only when the items total at least a set amount
+    (e.g. ₦20,000); below it the shopper is told how much more to add.
+  - **Maximum discount** for percentage codes, e.g. "10% off, at most ₦10,000".
+  - The shop describes each code the same way everywhere, e.g. "10% off (up to ₦10,000) on
+    orders of ₦20,000+".
   - Optional start and end dates, and a maximum number of uses (or unlimited).
   - Can be paused.
   - Statuses: Live, Paused, Scheduled, Expired, Used up.
@@ -663,6 +690,13 @@ instead of cancelled.
 - When customer records are kept forever, the page mentions the Nigeria Data Protection Act.
 
 ### 5.14 Store settings, system status and account
+
+- **"Pay now" gateway:** Monnify or Kora, plus on/off switches for each method.
+- **Dark mode:** the sun/moon button in the admin header; remembered on that browser (it starts
+  from the device's own light or dark setting). The storefront is not affected.
+- **Contact developer:** a card in Settings links to kharizDigital (https://khariz.vercel.app);
+  the storefront footer says "Developed by kharizDigital".
+- **Order page:** the customer's delivery pin, when shared, opens in Google Maps.
 
 - **Store settings:**
   - Store name, support email and phone, WhatsApp number, dispatch address and the brand strip.
@@ -945,7 +979,7 @@ payment keys, demo catalogue from `backend/seeds`).
 | 5 | Cart | Cart page with a promo code: "SAVE10 applied" | "Promo codes apply instantly, and prices are always checked live." |
 | 6 | Delivery | Checkout: choose Lagos; "Delivery to Lagos: 1–2 days" with the fee | "Pick your state and see your delivery fee right away." |
 | 7 | Reserved | "Order ORD-… is reserved until 14:35" | "Your items are reserved while you pay. Nobody can take them." |
-| 8 | Pay | Choose Monnify or Kora; secure page; or WhatsApp invoice | "Pay by card or bank transfer, or arrange a transfer on WhatsApp." |
+| 8 | Pay | One "Pay now" button to the secure page, or "Pay via WhatsApp"; then "Awaiting confirmation" turning into the receipt | "One tap to pay by card or bank transfer, or arrange a transfer on WhatsApp." |
 | 9 | Confirmed | Return page: confetti, receipt, "Save receipt as image" | "Payment confirmed, straight from the payment provider." |
 | 10 | Email | Inbox: "Payment received for order …" | "Your receipt is in your inbox." |
 | 11 | Track | Track order: 5-step progress, courier card with tracking code | "Follow your order from packing to your door." |
@@ -1049,8 +1083,9 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | What if two people buy the last item? | Only one gets it; the other is told it's sold out. Tested with 100 buyers at once |
 | What if the payment provider sends the same notice several times? | The order is paid once and one receipt is sent. Tested with 990 notices |
 | What if a customer pays and closes the page? | The provider's notice and the scheduled check still confirm it, and the customer is emailed |
-| How are delivery fees set? | Per group of states, by the owner. States not covered are refused, never charged a guess |
-| Can I run sales? | Yes: promo codes (percentage, dates, limits), flash deals with countdowns, "was" prices |
+| How are delivery fees set? | Per group of states, by the owner, optionally growing with the number of items. States not covered are refused, never charged a guess |
+| Is the cart in the browser safe? | Yes. It only remembers what the shopper picked; every price, stock level, discount and delivery fee is worked out again on the server when the order is placed, so changing the browser copy can't change what anyone pays. Signed-in customers' carts are also saved to their account |
+| Can I run sales? | Yes: promo codes (percentage or fixed amount, minimum order, maximum discount, dates, limits), flash deals with countdowns, "was" prices |
 | Can I see who changed what? | Yes, every admin change is in the audit log with before and after values |
 | What about backups? | Daily, database and pictures, verified, with a careful restore into a new database |
 | Is my customers' data safe? | Secure sessions, protection against cross-site tricks, rate limits, card details never stored, keep periods, and deletion only with a password and an emailed code |
@@ -1077,10 +1112,19 @@ Honest list, so proposals never overclaim:
 | Customer screens for saved addresses and profile | **Planned** (the API exists; checkout pre-fills the default address) |
 | Self-service returns form | **Planned.** Returns are arranged by contacting the store |
 | Newsletter double opt-in (confirm by email) | **Planned** |
-| Email to admins for every new order | **Planned.** New orders show on the dashboard and in the order list |
 | Storefront on Vercel with the API elsewhere | Needs a signed storefront header first (**Planned**) |
 | Shared storefront page cache for several servers | **Planned** (stage 3) |
 | Resend batch sending for very large newsletters | **Planned** |
+
+**Considered and deliberately not built (for now):**
+
+| Idea | Decision and why |
+|---|---|
+| Checkout and coupons handled "in the background" through Redis | **Not used.** A buyer needs an immediate answer (order placed, or sold out). Database row locks already make simultaneous buyers take turns safely: 100 buyers at once for 20 items sold exactly 20, in under 1.5 s each. A queue would make each buyer wait for a worker anyway and add another part that can fail. A coupon check is one indexed lookup. Redis is used where it helps: the shared catalogue cache (optional) |
+| Database table partitioning | **Not used.** MySQL cannot partition tables that have foreign keys, and those keys are what protect orders, payments and refunds from orphaned rows. At this shop's size, indexes and the keep periods in "Data & storage" keep tables fast. Worth revisiting only at tens of millions of rows |
+| Pictures on MinIO | **Already possible:** the S3-compatible storage driver works with MinIO, Cloudflare R2 or Amazon S3 (`docs/STORAGE.md`); R2 was chosen as the default target |
+| Redis "smart" query cache | **Already built (optional):** catalogue and product queries cached in Redis with automatic invalidation on every admin change, falling back to MySQL (`docs/REDIS.md`) |
+| TanStack Query / Zustand everywhere | Pages load their data on the Next.js server (fast first view, cached for 60 s); TanStack Query caches what the browser fetches (admin screens, payment page). Zustand was not needed: no shared client state exists that React context doesn't already handle |
 
 **Small things to know:**
 
@@ -1135,3 +1179,4 @@ When something changes, update the matching section in the same commit:
 | 31 Oct 2026 | Live payment status built (roadmap Prompt 33): optional, off by default, falls back to the usual checks. 955 backend checks |
 | 31 Oct 2026 | Live payment status load-tested (roadmap Prompt 35) at 8, 32 and 64 watchers; closed tabs and restarts now free their places in seconds. 958 backend checks |
 | 31 Oct 2026 | Full review of shop and admin: 23 defects fixed (payment safety under simultaneous payments, account takeover by registering an email first, slow checkout with many expired orders, endless stock holds, "Pay now" after an email lookup, product edits that didn't save, the data clean-up's second run, declined refunds, review badges, promo and checkout-window fixes). Details in the commit history |
+| 31 Oct 2026 | Owner requests: admin emails for new orders and payments; customer emails for "being prepared" and "delivered"; fixed-amount coupons, minimum order and maximum discount; delivery fee by quantity; one "Pay now" button (Monnify default) plus WhatsApp; "Awaiting confirmation" until the store confirms; WhatsApp messages carry only the order number; receipts from Track order with order number + email; optional delivery pin and store location; admin dark mode; developer credit |
