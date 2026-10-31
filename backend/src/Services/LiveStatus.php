@@ -27,7 +27,8 @@ final class LiveStatus
     public const PER_VISITOR = 4;
     public const SLOT_RENEW_SECONDS = 10;
     public const SLOT_TTL_SECONDS = 30;
-    private const LOCK = 'shopco_sse_slots';
+    /** Suffix of the slot lock; the database name is put in front (named locks are server-wide). */
+    private const LOCK = ':sse_slots';
 
     public static function enabled(): bool
     {
@@ -106,7 +107,7 @@ final class LiveStatus
         $now = time();
         $since = $now - self::SLOT_TTL_SECONDS;
 
-        $got = $this->db->fetchOne("SELECT GET_LOCK(?, 2) AS got", 's', [self::LOCK]);
+        $got = $this->db->fetchOne("SELECT GET_LOCK(CONCAT(LEFT(DATABASE(), 40), ?), 2) AS got", 's', [self::LOCK]);
         if ((int) ($got['got'] ?? 0) !== 1) {
             return null;
         }
@@ -129,7 +130,7 @@ final class LiveStatus
             $this->db->execute("DELETE FROM `rate_limits` WHERE `id` LIKE 'sse:%' AND `window_start` <= ?", 'i', [$since]);
             return $slot;
         } finally {
-            $this->db->fetchOne("SELECT RELEASE_LOCK(?) AS released", 's', [self::LOCK]);
+            $this->db->fetchOne("SELECT RELEASE_LOCK(CONCAT(LEFT(DATABASE(), 40), ?)) AS released", 's', [self::LOCK]);
         }
     }
 

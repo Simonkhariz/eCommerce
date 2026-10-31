@@ -177,14 +177,16 @@ class FulfillmentService
         // (measured: 100 buyers at once took 5.6-9.3 s with 1,700 overdue orders, 0.9-1.5 s
         // without). Whoever finds the sweep busy skips it; the next request or the scheduled
         // job (expire_pending_orders.php) carries on.
-        $lock = $this->db->fetchOne("SELECT GET_LOCK('shopco_quick_expiry_sweep', 0) AS got");
+        // Named locks are server-wide: the database name keeps two shops (or staging beside live)
+        // on one MySQL server from sharing it.
+        $lock = $this->db->fetchOne("SELECT GET_LOCK(CONCAT(LEFT(DATABASE(), 40), ':quick_expiry_sweep'), 0) AS got");
         if ((int) ($lock['got'] ?? 0) !== 1) {
             return [];
         }
         try {
             return $this->expireOverdueBatch($limit);
         } finally {
-            $this->db->fetchOne("SELECT RELEASE_LOCK('shopco_quick_expiry_sweep') AS released");
+            $this->db->fetchOne("SELECT RELEASE_LOCK(CONCAT(LEFT(DATABASE(), 40), ':quick_expiry_sweep')) AS released");
         }
     }
 

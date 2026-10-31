@@ -605,11 +605,11 @@ try {
     $r2 = $placeOrder($line);
     $db->execute("UPDATE `orders` SET `expires_at` = NOW() - INTERVAL 2 HOUR WHERE `order_number` = ?", 's', [$r2['order_number']]);
     $other = new mysqli(Env::get('DB_HOST', '127.0.0.1'), Env::get('DB_USERNAME', 'root'), Env::get('DB_PASSWORD', ''), Env::get('DB_DATABASE'), (int) Env::get('DB_PORT', '3306'));
-    $other->query("SELECT GET_LOCK('shopco_quick_expiry_sweep', 5)");
+    $other->query("SELECT GET_LOCK(CONCAT(LEFT(DATABASE(), 40), ':quick_expiry_sweep'), 5)");
     $busyStart = microtime(true);
     $whileBusy = (new FulfillmentService($db))->expireOverdueOrders(50);
     check('while another request sweeps, the next one skips the sweep instead of waiting', $whileBusy === [] && orderRow($r2['order_number'])['order_status'] === 'pending_payment' && microtime(true) - $busyStart < 1);
-    $other->query("SELECT RELEASE_LOCK('shopco_quick_expiry_sweep')");
+    $other->query("SELECT RELEASE_LOCK(CONCAT(LEFT(DATABASE(), 40), ':quick_expiry_sweep'))");
     $other->close();
     $free = (new FulfillmentService($db))->expireOverdueOrders(50);
     check('once free, the sweep expires the overdue order', in_array($r2['order_number'], $free, true) && orderRow($r2['order_number'])['order_status'] === 'cancelled');
