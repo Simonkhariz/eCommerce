@@ -729,7 +729,9 @@ class CheckoutController
      */
     private function canSeePaymentStatus(array $order, string $reference): bool
     {
-        if ($this->canViewOrder($order, false)) {
+        // The checkout email counts as for the order lookup (the receipt page opened from
+        // "Track order" with order number + email): it only reads the status.
+        if ($this->canViewOrder($order, true)) {
             return true;
         }
         return $reference !== '' && $this->db->fetchOne(

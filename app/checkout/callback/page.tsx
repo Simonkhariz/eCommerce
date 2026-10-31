@@ -17,7 +17,7 @@ import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptU
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useCart } from '@/context/CartContext';
 import { clearPendingOrder, markInvoiceSent, saveGuestToken } from '@/lib/pending-order';
-import { useGuestToken, useInvoiceSent } from '@/lib/use-order-data';
+import { useGuestToken, useInvoiceSent, useLookupEmail } from '@/lib/use-order-data';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { PaymentMethodsNotice } from '@/components/cart/PaymentMethodsNotice';
 
@@ -47,6 +47,8 @@ function CheckoutCallbackContent() {
 
   // Guest access key and "invoice sent", as saved on this device (they update when saved).
   const token = useGuestToken(orderNumber);
+  // Opened from "Track order" with order number + email (this tab only): read with that email.
+  const lookupEmail = useLookupEmail(orderNumber);
   const invoiceSent = useInvoiceSent(orderNumber);
   // The saved access key can only be read once the page is running in the browser; checking
   // before that would ask without it.
@@ -74,7 +76,7 @@ function CheckoutCallbackContent() {
   const liveMode = livePaymentStatus && live !== 'failed';
   const delays = liveMode ? LIVE_VERIFY_DELAYS : POLL_DELAYS;
   const queryClient = useQueryClient();
-  const statusQuery = paymentStatusQuery(orderNumber, token ?? null, reference || null);
+  const statusQuery = paymentStatusQuery(orderNumber, token ?? null, reference || null, token ? null : (lookupEmail ?? null));
   const status = useQuery({
     ...statusQuery,
     enabled: hydrated && !!orderNumber,
@@ -115,7 +117,7 @@ function CheckoutCallbackContent() {
 
   // Receipt details: asked once while the payment is open, and again once it is paid.
   const orderDetails = useQuery({
-    ...paymentOrderQuery(orderNumber, token ?? null, view === 'paid' ? 'paid' : 'open'),
+    ...paymentOrderQuery(orderNumber, token ?? null, view === 'paid' ? 'paid' : 'open', token ? null : (lookupEmail ?? null)),
     enabled: hydrated && !!orderNumber && (view === 'paid' || view === 'pending' || view === 'failed'),
   });
   const order = orderDetails.data ?? null;

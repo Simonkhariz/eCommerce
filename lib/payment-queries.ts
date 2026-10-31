@@ -34,20 +34,20 @@ export function paymentViewFor(res: PaymentVerificationResponse): PaymentView {
  * still pending, and records a result once). Safe to repeat: one retry after a network or
  * server error, as for every query.
  */
-export const paymentStatusQuery = (orderNumber: string, token: string | null, reference: string | null) =>
+export const paymentStatusQuery = (orderNumber: string, token: string | null, reference: string | null, email: string | null = null) =>
   queryOptions({
     queryKey: paymentKeys.status(orderNumber, token, reference),
-    queryFn: ({ signal }) => apiVerifyPayment(orderNumber, token ?? undefined, reference ?? undefined, signal),
+    queryFn: ({ signal }) => apiVerifyPayment(orderNumber, token ?? undefined, reference ?? undefined, signal, email ?? undefined),
   });
 
 /**
  * The order for the receipt. Asked once while the payment is open and once more when it is
  * paid. Without the access key or sign-in the server refuses it: the status still shows.
  */
-export const paymentOrderQuery = (orderNumber: string, token: string | null, stage: 'open' | 'paid') =>
+export const paymentOrderQuery = (orderNumber: string, token: string | null, stage: 'open' | 'paid', email: string | null = null) =>
   queryOptions({
     queryKey: paymentKeys.order(orderNumber, token, stage),
-    queryFn: ({ signal }) => apiGetOrder(orderNumber, token ? { token } : undefined, signal),
+    queryFn: ({ signal }) => apiGetOrder(orderNumber, token ? { token } : email ? { email } : undefined, signal),
     staleTime: 5 * 60_000,
     retry: false,
   });

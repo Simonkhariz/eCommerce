@@ -6,13 +6,22 @@
  * during hydration they read as "not set", so the first render matches the server HTML.
  */
 import { useSyncExternalStore } from 'react';
-import { readGuestToken, subscribeToOrderData, wasInvoiceSent } from '@/lib/pending-order';
+import { readGuestToken, readLookupEmail, subscribeToOrderData, wasInvoiceSent } from '@/lib/pending-order';
 
 /** The guest access key saved for this order, if any. */
 export function useGuestToken(orderNumber: string | null | undefined): string | undefined {
   return useSyncExternalStore(
     subscribeToOrderData,
     () => (orderNumber ? readGuestToken(orderNumber) : undefined),
+    () => undefined
+  );
+}
+
+/** The checkout email this tab looked the order up with ("Track order"), if any. */
+export function useLookupEmail(orderNumber: string | null | undefined): string | undefined {
+  return useSyncExternalStore(
+    subscribeToOrderData,
+    () => (orderNumber ? readLookupEmail(orderNumber) : undefined),
     () => undefined
   );
 }

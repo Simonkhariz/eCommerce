@@ -120,6 +120,8 @@ $t->check('no variant -> order refused', 422, $t->http('POST', '/checkout/orders
 $t->check('verify before paying: not_started', 'not_started', TestKit::get($t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => ["X-Guest-Access-Token: {$token}"]]), 'data.status'));
 $t->check('guest token opens the order', 200, $t->http('GET', "/checkout/orders/{$onum}", ['headers' => ["X-Guest-Access-Token: {$token}"]])['status']);
 $t->check('full checkout email opens the order', 200, $t->http('GET', "/checkout/orders/{$onum}", ['headers' => ["X-Order-Email: {$email}"]])['status']);
+$t->check('the receipt page can read the payment status with the checkout email', 200, $t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => ["X-Order-Email: {$email}"]])['status']);
+$t->check('but not with a wrong email', 404, $t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => ['X-Order-Email: wrong@example.test']])['status']);
 $wa = $t->http('POST', "/checkout/orders/{$onum}/initialize-payment", ['headers' => ["X-Guest-Access-Token: {$token}"], 'json' => ['gateway' => 'whatsapp']]);
 $t->check('WhatsApp payment attempt opens', 'whatsapp', TestKit::get($wa, 'data.provider'));
 $hours = (int) $t->scalar("SELECT TIMESTAMPDIFF(HOUR, NOW(), `expires_at`) FROM `orders` WHERE `order_number` = ?", 's', [$onum]);

@@ -22,7 +22,7 @@ import {
 import { formatPrice } from '@/lib/currency';
 import { ApiOrder, apiGetOrder, apiInitializePayment, errorMessage } from '@/lib/api-client';
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, formatSupportPhone, whatsAppOrderFrom } from '@/lib/whatsapp';
-import { readGuestToken, saveGuestToken } from '@/lib/pending-order';
+import { readGuestToken, saveGuestToken, saveLookupEmail } from '@/lib/pending-order';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useLatestOrderNumber } from '@/lib/use-order-data';
 import { getOrderStatusDisplay, STATUS_TONE_CLASSES } from '@/lib/order-status';
@@ -95,7 +95,10 @@ function TrackOrderContent() {
         (res) => {
           setOrder(res);
           setOrderNumber(cleanNum);
-          setLookupEmail(verificationOpts?.email?.trim().toLowerCase() || '');
+          const usedEmail = verificationOpts?.email?.trim().toLowerCase() || '';
+          setLookupEmail(usedEmail);
+          // Lets "View receipt" open the full receipt in this tab without the access key.
+          if (usedEmail) saveLookupEmail(res.order_number, usedEmail);
         },
         (err) => {
           setOrder(null);
@@ -427,6 +430,15 @@ function TrackOrderContent() {
                     )}
                   </>
                 ) : (
+                  <>
+                  {isPaid && (
+                    <Link
+                      href={`/checkout/callback?order=${encodeURIComponent(order.order_number)}`}
+                      className="inline-flex items-center gap-1.5 bg-black hover:bg-neutral-800 text-white font-semibold px-4 py-2 rounded-full text-xs transition-colors"
+                    >
+                      <span>View receipt</span>
+                    </Link>
+                  )}
                   <a
                     href={buildWhatsAppMessageUrl(`Hello! I'm checking on my order #${order.order_number}.`, supportPhone)}
                     target="_blank"
@@ -437,6 +449,7 @@ function TrackOrderContent() {
                     <span>WhatsApp help</span>
                     <span className="sr-only">(opens in a new tab)</span>
                   </a>
+                  </>
                 )}
               </div>
             </div>

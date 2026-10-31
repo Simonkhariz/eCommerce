@@ -145,6 +145,27 @@ export function saveGuestToken(orderNumber: string, token: string, asLatest = tr
   }
 }
 
+/**
+ * The checkout email an order was looked up with on "Track order", kept for this browser tab only
+ * (sessionStorage), so its receipt can be opened without the access key.
+ */
+export function saveLookupEmail(orderNumber: string, email: string): void {
+  try {
+    sessionStorage.setItem(`shopco_lookup_email_${orderNumber}`, email.trim().toLowerCase());
+    notifyChange();
+  } catch {
+    // ignore
+  }
+}
+
+export function readLookupEmail(orderNumber: string): string | undefined {
+  try {
+    return sessionStorage.getItem(`shopco_lookup_email_${orderNumber}`) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function readGuestToken(orderNumber: string): string | undefined {
   try {
     return localStorage.getItem(`shopco_guest_token_${orderNumber}`) || undefined;

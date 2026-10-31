@@ -1341,7 +1341,9 @@ export async function apiVerifyPayment(
   orderNumber: string,
   guestAccessToken?: string,
   reference?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** The checkout email, when the receipt was opened from "Track order" (no access key here). */
+  orderEmail?: string
 ): Promise<PaymentVerificationResponse> {
   const params = new URLSearchParams();
   if (reference) {
@@ -1355,6 +1357,9 @@ export async function apiVerifyPayment(
   }
   if (reference) {
     headers['X-Payment-Reference'] = reference;
+  }
+  if (orderEmail && !guestAccessToken) {
+    headers['X-Order-Email'] = orderEmail;
   }
 
   return fetchFromApi<PaymentVerificationResponse>(
