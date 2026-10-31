@@ -140,7 +140,9 @@ class MailService
 
         $queued = 0;
         foreach ($this->adminRecipients() as $email) {
-            if ($this->queue($email, 'payment_claimed', $data, "payment_claimed:{$data['order_number']}:{$email}")) {
+            // Queued for the outbox worker (within a minute), not sent in the customer's request:
+            // one email per admin would otherwise hold that request's worker per admin.
+            if ($this->queue($email, 'payment_claimed', $data, "payment_claimed:{$data['order_number']}:{$email}", false)) {
                 $queued++;
             }
         }
@@ -204,7 +206,10 @@ class MailService
         $data = $extra + $payload['data'];
         $queued = 0;
         foreach ($this->adminRecipients() as $email) {
-            if ($email !== '' && $this->queue($email, $template, $data, "{$template}:{$data['order_number']}:{$email}")) {
+            // Admin alerts go to the outbox worker (sent within a minute by process_outbox.php or the
+            // after-response sweep), never delivered in the customer's own request: with a slow or
+            // stuck mail server that would hold the request's worker once per admin.
+            if ($email !== '' && $this->queue($email, $template, $data, "{$template}:{$data['order_number']}:{$email}", false)) {
                 $queued++;
             }
         }
