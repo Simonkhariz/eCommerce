@@ -152,7 +152,7 @@ export function AdminPromotions() {
     <div>
       <PageHeader
         title="Promo codes"
-        description="Percentage discounts customers enter at checkout. The server checks dates, limits and status on every order."
+        description="Percentage or fixed-amount discounts customers enter at checkout, with an optional minimum order and maximum discount. The server checks dates, limits and status on every order."
         actions={
           <Button variant="primary" onClick={() => setEditing('new')}>
             <Plus className="size-4" aria-hidden="true" />

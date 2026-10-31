@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { AdminUiProvider } from '@/components/admin/ui';
+import './admin-dark.css';
 
 export const metadata: Metadata = {
   title: 'Store Admin',

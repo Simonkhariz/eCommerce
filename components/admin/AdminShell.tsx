@@ -1,15 +1,61 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ExternalLink, LogOut } from 'lucide-react';
+import { ExternalLink, LogOut, Moon, Sun } from 'lucide-react';
 import { AdminIcon } from '@/components/admin/AdminIcon';
 import { useAdminSession } from '@/components/admin/AdminAuthGate';
 import { ADMIN_NAV, AdminNavItem, findAdminNav, isActiveAdminLink } from '@/lib/admin-nav';
 import { bellCountsQuery, storageAlertQuery } from '@/lib/admin-queries';
+
+const THEME_KEY = 'shopco_admin_theme';
+const THEME_EVENT = 'shopco-admin-theme';
+
+function readTheme(): 'light' | 'dark' {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch {
+    // storage blocked: follow the device
+  }
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function subscribeTheme(onChange: () => void): () => void {
+  const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+  window.addEventListener(THEME_EVENT, onChange);
+  window.addEventListener('storage', onChange);
+  media?.addEventListener?.('change', onChange);
+  return () => {
+    window.removeEventListener(THEME_EVENT, onChange);
+    window.removeEventListener('storage', onChange);
+    media?.removeEventListener?.('change', onChange);
+  };
+}
+
+/**
+ * Admin light/dark theme: the admin's choice on this browser, else the device setting. Dark sets
+ * html.admin-dark (app/admin/admin-dark.css) only while an admin screen is open.
+ */
+function useAdminTheme(): ['light' | 'dark', () => void] {
+  const theme = useSyncExternalStore(subscribeTheme, readTheme, () => 'light' as const);
+  useEffect(() => {
+    document.documentElement.classList.toggle('admin-dark', theme === 'dark');
+    return () => document.documentElement.classList.remove('admin-dark');
+  }, [theme]);
+  const toggle = () => {
+    try {
+      localStorage.setItem(THEME_KEY, theme === 'dark' ? 'light' : 'dark');
+    } catch {
+      // not saved: still switches for this visit
+    }
+    window.dispatchEvent(new Event(THEME_EVENT));
+  };
+  return [theme, toggle];
+}
 
 /**
  * Admin chrome: sidebar navigation (real links), header breadcrumb, attention bell and sign-out.
@@ -21,6 +67,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [theme, toggleTheme] = useAdminTheme();
   const alertsRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -145,6 +192,16 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               <ExternalLink className="size-3 text-neutral-400" aria-hidden="true" />
               <span className="sr-only">(opens in a new tab)</span>
             </Link>
+
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              className="flex size-9 items-center justify-center rounded-lg border border-[#e5e7eb] bg-white text-[#4b5563] outline-none transition-colors hover:bg-[#f3f4f6] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
+            >
+              {theme === 'dark' ? <Sun className="size-4" aria-hidden="true" /> : <Moon className="size-4" aria-hidden="true" />}
+            </button>
 
             <div ref={alertsRef} className="relative">
               <button
