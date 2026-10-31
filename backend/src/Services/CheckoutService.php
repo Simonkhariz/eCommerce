@@ -341,6 +341,7 @@ class CheckoutService
                 // Order-received email goes out only once the order is committed.
                 $db->afterCommit(static function () use ($createdOrder): void {
                     MailService::getInstance()->sendOrderReceived($createdOrder);
+                    MailService::getInstance()->sendNewOrderToAdmins((string) $createdOrder['order_number']);
                 });
 
                 return $createdOrder;
@@ -693,7 +694,8 @@ class CheckoutService
         }
 
         $promo = $this->db->fetchOne(
-            "SELECT `id`, `code`, `description`, `discount_percent`, `max_uses`, `used_count`, `is_active`, `starts_at`, `expires_at`
+            "SELECT `id`, `code`, `description`, `discount_type`, `discount_percent`, `discount_amount`, `min_order_amount`, `max_discount_amount`,
+                    `max_uses`, `used_count`, `is_active`, `starts_at`, `expires_at`
              FROM `promotions` WHERE `code` = ?",
             's',
             [$code]
@@ -719,10 +721,14 @@ class CheckoutService
             throw new InvalidArgumentException("Coupon code '{$code}' has expired.");
         }
 
-        $discountPercent = (int) $promo['discount_percent'];
-        $discountAmount = round($subtotal * ($discountPercent / 100.0), 2);
-        if ($discountAmount > $subtotal) {
-            $discountAmount = $subtotal;
+        $minimum = CouponRules::minimum($promo);
+        if ($minimum !== null && $subtotal + 0.001 < $minimum) {
+            throw new InvalidArgumentException(sprintf(
+                "Coupon code '%s' works on orders of at least ₦%s (items, before delivery). Add ₦%s more to use it.",
+                $code,
+                number_format($minimum, 2),
+                number_format($minimum - $subtotal, 2)
+            ));
         }
 
         return [
@@ -730,9 +736,8 @@ class CheckoutService
                 'id' => (int) $promo['id'],
                 'code' => $promo['code'],
                 'description' => $promo['description'],
-                'discount_percent' => $discountPercent,
-            ],
-            'discount_amount' => $discountAmount,
+            ] + CouponRules::publicFields($promo),
+            'discount_amount' => CouponRules::discountFor($promo, $subtotal),
         ];
     }
 

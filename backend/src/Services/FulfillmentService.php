@@ -633,6 +633,17 @@ class FulfillmentService
         $order['order_status'] = $newStatus;
         $order['payment_status'] = $newPaymentStatus;
 
+        // Progress emails only for real progress: paid -> processing, shipped -> delivered (not a
+        // declined refund moving the order back).
+        $progress = ($newStatus === 'processing' && $currentStatus === 'paid')
+            || ($newStatus === 'delivered' && $currentStatus === 'shipped');
+        if ($progress && $notify) {
+            $mailOrder = $order;
+            $db->beforeCommit(static function () use ($mailOrder, $newStatus): void {
+                MailService::getInstance()->sendOrderStatusUpdate($mailOrder, $newStatus);
+            });
+        }
+
         if ($newStatus === 'cancelled' && $notify) {
             $mailOrder = $order;
             $db->beforeCommit(static function () use ($mailOrder, $histComment): void {

@@ -148,6 +148,70 @@ class MailService
     }
 
     /**
+     * Tell the admins a new order was placed (unpaid until a payment is confirmed). One email
+     * per order and admin.
+     *
+     * @return int Number of emails queued
+     */
+    public function sendNewOrderToAdmins(string $orderNumber): int
+    {
+        return $this->queueForAdmins($orderNumber, 'admin_new_order', []);
+    }
+
+    /**
+     * Tell the admins a payment was confirmed (gateway, webhook, reconciliation or a manual
+     * confirmation). Only for a verified payment; one email per order and admin.
+     *
+     * @return int Number of emails queued
+     */
+    public function sendPaymentReceivedToAdmins(string $orderNumber, string $methodLabel = '', string $reference = ''): int
+    {
+        $payload = $this->orderPayload($orderNumber);
+        if ($payload === null || !in_array($payload['data']['payment_status'], ['successful', 'partially_refunded'], true)) {
+            return 0;
+        }
+        return $this->queueForAdmins($orderNumber, 'admin_payment_received', ['payment_label' => $methodLabel, 'payment_reference' => $reference], $payload);
+    }
+
+    /**
+     * Customer email for an order moving forward: 'processing' (being prepared) or 'delivered'.
+     * Shipping, cancellation and refunds have their own emails. One email per order and stage.
+     */
+    public function sendOrderStatusUpdate(array $order, string $status): bool
+    {
+        if (!in_array($status, ['processing', 'delivered'], true)) {
+            return false;
+        }
+        $payload = $this->orderPayload((string) ($order['order_number'] ?? ''));
+        if ($payload === null) {
+            return false;
+        }
+        $data = $payload['data'];
+        $data['stage'] = $status;
+        return $this->queue($payload['recipient'], 'order_status_update', $data, "order_status_update:{$data['order_number']}:{$status}");
+    }
+
+    /**
+     * @param array<string, mixed> $extra
+     * @param array{recipient: string, data: array<string, mixed>}|null $payload
+     */
+    private function queueForAdmins(string $orderNumber, string $template, array $extra, ?array $payload = null): int
+    {
+        $payload ??= $this->orderPayload($orderNumber);
+        if ($payload === null) {
+            return 0;
+        }
+        $data = $extra + $payload['data'];
+        $queued = 0;
+        foreach ($this->adminRecipients() as $email) {
+            if ($email !== '' && $this->queue($email, $template, $data, "{$template}:{$data['order_number']}:{$email}")) {
+                $queued++;
+            }
+        }
+        return $queued;
+    }
+
+    /**
      * Tell the admins the database is getting too big or the site slow (a StorageHealth
      * report). Sent at most once a week per problem level.
      *

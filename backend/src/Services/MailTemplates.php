@@ -29,6 +29,9 @@ final class MailTemplates
         'refund_processed',
         'marketing_broadcast',
         'payment_claimed',
+        'admin_new_order',
+        'admin_payment_received',
+        'order_status_update',
         'storage_alert',
         'data_cleanup_done',
     ];
@@ -73,6 +76,9 @@ final class MailTemplates
             'marketing_broadcast' => $this->marketingBroadcast($p),
             'magic_link' => $this->magicLink($p),
             'payment_claimed' => $this->paymentClaimed($p),
+            'admin_new_order' => $this->adminNewOrder($p),
+            'admin_payment_received' => $this->adminPaymentReceived($p),
+            'order_status_update' => $this->orderStatusUpdate($p),
             'storage_alert' => $this->storageAlert($p),
             'admin_confirm_code' => $this->adminConfirmCode($p),
             'data_cleanup_done' => $this->dataCleanupDone($p),
@@ -246,6 +252,94 @@ final class MailTemplates
             . "\nOpen the order: {$adminUrl}\n"
             . $this->footerText();
 
+        return compact('subject', 'html', 'text');
+    }
+
+    /** To the admins: a new order was placed. It is not paid yet. */
+    private function adminNewOrder(array $p): array
+    {
+        $num = (string) $p['order_number'];
+        $amount = $this->money($p['grand_total'] ?? 0, $p['currency'] ?? 'NGN');
+        $subject = "New order {$num} ({$amount})";
+        $address = is_array($p['address'] ?? null) ? $p['address'] : [];
+        $adminUrl = $this->frontendUrl . '/admin/orders/' . rawurlencode($num);
+        $rows = [
+            ['Order', $num],
+            ['Total', $amount],
+            ['Customer', trim((string) ($p['customer_name'] ?? ''))],
+            ['Phone', trim((string) ($address['phone'] ?? ''))],
+            ['Deliver to', trim(implode(', ', array_filter([(string) ($address['city'] ?? ''), (string) ($address['state'] ?? '')])))],
+        ];
+        $html = $this->layout(
+            'New order',
+            '<p style="margin:0 0 16px">Order <strong>' . $this->e($num) . '</strong> was just placed. '
+            . 'It is <strong>not paid yet</strong>: you will get another email when the payment is confirmed.</p>'
+            . $this->keyValueTable($rows)
+            . $this->itemsTable($p)
+            . $this->button($adminUrl, 'Open the order in admin')
+        );
+        $text = "Order {$num} was just placed. It is not paid yet: you will get another email when the payment is confirmed.\n\n"
+            . $this->keyValueText($rows) . "\n"
+            . $this->itemsText($p)
+            . "\nOpen the order: {$adminUrl}\n"
+            . $this->footerText();
+        return compact('subject', 'html', 'text');
+    }
+
+    /** To the admins: a payment was confirmed; the order is ready to pack. */
+    private function adminPaymentReceived(array $p): array
+    {
+        $num = (string) $p['order_number'];
+        $amount = $this->money($p['grand_total'] ?? 0, $p['currency'] ?? 'NGN');
+        $subject = "Payment received for order {$num} ({$amount})";
+        $address = is_array($p['address'] ?? null) ? $p['address'] : [];
+        $adminUrl = $this->frontendUrl . '/admin/orders/' . rawurlencode($num);
+        $rows = [
+            ['Order', $num],
+            ['Amount', $amount],
+            ['Paid with', trim((string) ($p['payment_label'] ?? ''))],
+            ['Reference', trim((string) ($p['payment_reference'] ?? ''))],
+            ['Customer', trim((string) ($p['customer_name'] ?? ''))],
+            ['Phone', trim((string) ($address['phone'] ?? ''))],
+        ];
+        $html = $this->layout(
+            'Payment received',
+            '<p style="margin:0 0 16px">The payment for order <strong>' . $this->e($num) . '</strong> is confirmed. The order is ready to pack and ship.</p>'
+            . $this->keyValueTable($rows)
+            . $this->itemsTable($p)
+            . $this->button($adminUrl, 'Open the order in admin')
+        );
+        $text = "The payment for order {$num} is confirmed. The order is ready to pack and ship.\n\n"
+            . $this->keyValueText($rows) . "\n"
+            . $this->itemsText($p)
+            . "\nOpen the order: {$adminUrl}\n"
+            . $this->footerText();
+        return compact('subject', 'html', 'text');
+    }
+
+    /** To the customer: the order is being prepared, or was delivered. */
+    private function orderStatusUpdate(array $p): array
+    {
+        $num = (string) $p['order_number'];
+        $delivered = ($p['stage'] ?? '') === 'delivered';
+        $subject = $delivered ? "Order {$num} has been delivered" : "Order {$num} is being prepared";
+        $heading = $delivered ? 'Your order has been delivered' : 'We are preparing your order';
+        $line = $delivered
+            ? 'Order <strong>' . $this->e($num) . '</strong> has been delivered. We hope you love it. If anything is wrong, reply to this email or contact us.'
+            : 'Order <strong>' . $this->e($num) . '</strong> is being packed. We will email you the tracking details as soon as it ships.';
+        $html = $this->layout(
+            $heading,
+            '<p style="margin:0 0 12px">Hi ' . $this->e($this->firstName($p)) . ',</p>'
+            . '<p style="margin:0 0 16px">' . $line . '</p>'
+            . $this->itemsTable($p)
+            . '<p style="margin:16px 0 0"><a href="' . $this->e($this->trackUrl($num)) . '" style="color:#111827">See your order</a></p>'
+            . ($delivered ? $this->contactLine() : '')
+        );
+        $text = "Hi {$this->firstName($p)},\n\n"
+            . strip_tags(str_replace(['<strong>', '</strong>'], '', $line)) . "\n\n"
+            . $this->itemsText($p)
+            . "\nSee your order: {$this->trackUrl($num)}\n"
+            . $this->footerText();
         return compact('subject', 'html', 'text');
     }
 

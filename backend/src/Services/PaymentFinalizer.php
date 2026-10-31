@@ -170,6 +170,7 @@ class PaymentFinalizer
                         'reference' => $providerReference,
                         'payment_method' => trim($label . ' ' . ($method ?? '')),
                     ]);
+                    MailService::getInstance()->sendPaymentReceivedToAdmins((string) $mailOrder['order_number'], trim($label . ' ' . ($method ?? '')), (string) $providerReference);
                 });
 
                 return $this->result(self::OUTCOME_PAID, $order, $payment);
