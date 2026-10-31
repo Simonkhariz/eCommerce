@@ -712,6 +712,10 @@ export interface StoreSettings {
     monnify_mode: 'live' | 'sandbox' | 'not_configured';
     mail_mode: 'smtp' | 'resend' | 'log_only';
     payment_methods: Record<PaymentMethodId, PaymentMethodStatus>;
+    /** The gateway the admin chose for the storefront's single "Pay now" button. */
+    primary_gateway: 'monnify' | 'kora';
+    /** The gateway "Pay now" actually uses now (the other one if the chosen one is off). */
+    pay_now_gateway: 'monnify' | 'kora' | null;
     order_payment_window_minutes: number;
     manual_payment_window_hours: number;
   };
@@ -726,7 +730,7 @@ export function adminUpdateSettings(changes: Record<string, string>) {
 }
 
 /** Switch checkout payment methods on or off (at least one must stay available). */
-export function adminUpdatePaymentMethods(changes: Partial<Record<PaymentMethodId, boolean>>) {
+export function adminUpdatePaymentMethods(changes: Partial<Record<PaymentMethodId, boolean>> & { primary_gateway?: 'monnify' | 'kora' }) {
   return send<Record<PaymentMethodId, PaymentMethodStatus>>('/admin/settings/payment-methods', 'PUT', changes);
 }
 

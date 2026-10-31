@@ -342,6 +342,10 @@ class CheckoutController
         Response::cachePublic(30, 120);
         Response::success([
             'methods' => $methods,
+            // The storefront shows one "Pay now" button for this gateway (null: none is on),
+            // plus "Pay via WhatsApp" when that is on.
+            'pay_now_gateway' => PaymentMethods::payNowGateway($this->db),
+            'whatsapp_enabled' => $whatsappEnabled,
             'support_phone' => CheckoutService::supportWhatsAppPhone(),
             // How long an unpaid order holds its items, so the storefront states the real values.
             'payment_window_minutes' => PaymentAttempts::gatewayWindowMinutes(),
@@ -513,10 +517,12 @@ class CheckoutController
             }
 
             // Always report the order's real current state from the database.
-            $fresh = $this->db->fetchOne("SELECT `order_status`, `payment_status`, `expires_at` FROM `orders` WHERE `id` = ?", 'i', [(int) $order['id']]);
+            $fresh = $this->db->fetchOne("SELECT `order_status`, `payment_status`, `expires_at`, `customer_marked_paid_at` FROM `orders` WHERE `id` = ?", 'i', [(int) $order['id']]);
             $result['order_status'] = $fresh['order_status'];
             $result['order_payment_status'] = $fresh['payment_status'];
             $result['expires_at'] = $fresh['expires_at'];
+            // The customer said they sent the transfer: the page waits for the store to confirm.
+            $result['customer_marked_paid'] = !empty($fresh['customer_marked_paid_at']);
 
             Response::success($result, 'Payment status retrieved.');
         } catch (\InvalidArgumentException $e) {

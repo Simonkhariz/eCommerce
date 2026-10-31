@@ -63,10 +63,7 @@ function TrackOrderContent() {
   const [isInitializingPayment, setIsInitializingPayment] = useState<string | null>(null);
   // null until the shopper opens or closes it; "Pay now" links (?pay=1) open it on arrival.
   const [paymentModalChoice, setShowPaymentModal] = useState<boolean | null>(null);
-  const { supportPhone, paymentMethods, loaded: paymentMethodsLoaded, retry: retryPaymentMethods } = useStoreSupport();
-  // The shopper's choice; until they pick, the store's default method.
-  const [chosenGateway, setSelectedGateway] = useState<string>('');
-  const selectedGateway = chosenGateway || (paymentMethods.find((m) => m.is_default) || paymentMethods[0])?.id || '';
+  const { supportPhone, payNowGateway, whatsappEnabled, loaded: paymentMethodsLoaded, retry: retryPaymentMethods } = useStoreSupport();
   const wantsToPay = searchParams.get('pay') === '1';
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [order, setOrder] = useState<ApiOrder | null>(null);
@@ -172,9 +169,9 @@ function TrackOrderContent() {
   };
 
 
-  const handleInitiatePayment = async (gatewayOverride?: string) => {
+  const handleInitiatePayment = async (gatewayOverride: string) => {
     if (!order) return;
-    const gateway = gatewayOverride || selectedGateway;
+    const gateway = gatewayOverride;
 
     setIsInitializingPayment(gateway);
     setPaymentError(null);
@@ -399,20 +396,22 @@ function TrackOrderContent() {
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 {canPay ? (
                   <>
+                    {payNowGateway && (
                     <button
                       type="button"
-                      onClick={() => setShowPaymentModal(true)}
+                      onClick={() => void handleInitiatePayment(payNowGateway)}
                       disabled={Boolean(isInitializingPayment)}
                       className="flex-1 sm:flex-initial bg-black hover:bg-neutral-800 text-white font-bold px-5 py-2.5 rounded-full text-xs transition-all shadow flex items-center justify-center gap-1.5"
                     >
                       <CreditCard className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>{isInitializingPayment ? 'Connecting…' : `Pay now (${formatPrice(order.grand_total)})`}</span>
                     </button>
+                    )}
 
                     {/* The same path as "Continue to WhatsApp": the server opens the WhatsApp
                         attempt (the order is held for the manual-transfer window and shows in
                         the admin's "Awaiting WhatsApp payment") before the invoice opens. */}
-                    {paymentMethods.some((m) => m.id === 'whatsapp') && (
+                    {whatsappEnabled && (
                       <button
                         type="button"
                         onClick={() => handleInitiatePayment('whatsapp')}
@@ -747,16 +746,16 @@ function TrackOrderContent() {
           <Dialog
             open={showPaymentModal}
             onClose={() => setShowPaymentModal(false)}
-            title="Choose a payment method"
+            title="Pay for your order"
             busy={Boolean(isInitializingPayment)}
             backdropClassName="bg-black/60 backdrop-blur-sm"
             panelClassName="w-full max-w-md"
             describedBy="track-pay-summary"
           >
             <div className="relative w-full bg-white rounded-t-3xl sm:rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 animate-rise">
-              <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+              <div className="sticky top-0 z-10 -mx-6 -mt-6 sm:-mx-7 sm:-mt-7 px-6 pt-6 sm:px-7 sm:pt-7 bg-white rounded-t-3xl flex items-center justify-between border-b border-neutral-100 pb-3">
                 <div>
-                  <p className="text-base font-bold text-black" aria-hidden="true">Choose a payment method</p>
+                  <p className="text-base font-bold text-black" aria-hidden="true">Pay for your order</p>
                   <p id="track-pay-summary" className="text-xs text-neutral-600 font-mono">
                     Order #{order.order_number} &bull; Total: {formatPrice(order.grand_total)}
                   </p>
@@ -779,64 +778,47 @@ function TrackOrderContent() {
                 </div>
               )}
 
-              <fieldset className="space-y-3">
-                <legend className="text-xs font-bold uppercase tracking-wider text-neutral-700">Payment method</legend>
-                {paymentMethods.length === 0 && (
-                  <PaymentMethodsNotice loaded={paymentMethodsLoaded} supportPhone={supportPhone} onRetry={retryPaymentMethods} />
+              {/* One "Pay now" for the store's card/transfer gateway, and WhatsApp as the other way. */}
+              {!payNowGateway && !whatsappEnabled && (
+                <PaymentMethodsNotice loaded={paymentMethodsLoaded} supportPhone={supportPhone} onRetry={retryPaymentMethods} />
+              )}
+              <div className="space-y-2.5 pt-1">
+                {payNowGateway && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void handleInitiatePayment(payNowGateway)}
+                      disabled={Boolean(isInitializingPayment)}
+                      className="w-full py-3.5 rounded-full text-white font-bold text-sm transition-all shadow-md flex items-center justify-center gap-2 bg-black hover:bg-neutral-800 disabled:opacity-60"
+                    >
+                      {isInitializingPayment === payNowGateway ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" aria-hidden="true" />
+                          <span>Opening secure payment…</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Pay now ({formatPrice(order.grand_total)})</span>
+                          <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                        </>
+                      )}
+                    </button>
+                    <p className="text-[11px] text-neutral-600 text-center">Card or bank transfer, secured by {payNowGateway === 'kora' ? 'Kora' : 'Monnify'}.</p>
+                  </>
                 )}
-                {paymentMethods.map((m) => (
-                  <label
-                    key={m.id}
-                    className="p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3.5 border-neutral-200 hover:border-neutral-300 has-[:checked]:border-black has-[:checked]:bg-neutral-50"
+                {whatsappEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => void handleInitiatePayment('whatsapp')}
+                    disabled={Boolean(isInitializingPayment)}
+                    className={`w-full py-3.5 rounded-full font-bold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-60 ${
+                      payNowGateway ? 'border border-[#1DA851] text-[#178a43] bg-white hover:bg-emerald-50' : 'text-white shadow-md bg-[#1DA851] hover:bg-[#178a43]'
+                    }`}
                   >
-                    <input
-                      type="radio"
-                      name="track-payment-method"
-                      value={m.id}
-                      className="mt-1 accent-black"
-                      aria-describedby={`track-pm-${m.id}`}
-                      checked={selectedGateway === m.id}
-                      onChange={() => setSelectedGateway(m.id)}
-                    />
-                    <span className="flex-1 min-w-0">
-                      <span className="block font-bold text-sm text-black">{m.name}</span>
-                      <span id={`track-pm-${m.id}`} className="block text-xs text-neutral-700 mt-0.5">{m.description}</span>
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => handleInitiatePayment()}
-                  disabled={Boolean(isInitializingPayment) || !selectedGateway}
-                  className={`w-full py-3.5 rounded-full text-white font-bold text-sm transition-all shadow-md flex items-center justify-center gap-2 ${
-                    selectedGateway === 'kora'
-                      ? 'bg-[#055B5C] hover:bg-[#044748]'
-                      : selectedGateway === 'monnify'
-                      ? 'bg-[#002244] hover:bg-[#001730]'
-                      : 'bg-[#1DA851] hover:bg-[#178a43]'
-                  } disabled:opacity-60`}
-                >
-                  {isInitializingPayment ? (
-                    <>
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" aria-hidden="true" />
-                      <span>Opening secure payment…</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>
-                        {selectedGateway === 'kora'
-                          ? `Pay with Kora (${formatPrice(order.grand_total)})`
-                          : selectedGateway === 'monnify'
-                          ? `Pay with Monnify (${formatPrice(order.grand_total)})`
-                          : `Continue to WhatsApp (${formatPrice(order.grand_total)})`}
-                      </span>
-                      <ArrowRight className="w-4 h-4" aria-hidden="true" />
-                    </>
-                  )}
-                </button>
+                    <WhatsAppIcon className="w-4 h-4" aria-hidden="true" />
+                    <span>{isInitializingPayment === 'whatsapp' ? 'Opening WhatsApp…' : 'Pay via WhatsApp (bank transfer)'}</span>
+                  </button>
+                )}
               </div>
             </div>
           </Dialog>

@@ -880,6 +880,8 @@ class AdminOperationsController
                 'monnify_mode' => self::monnifyMode(),
                 'mail_mode' => self::mailMode(),
                 'payment_methods' => PaymentMethods::status($this->db),
+                'primary_gateway' => PaymentMethods::primaryGateway($this->db),
+                'pay_now_gateway' => PaymentMethods::payNowGateway($this->db),
                 'order_payment_window_minutes' => \App\Services\PaymentAttempts::gatewayWindowMinutes(),
                 'manual_payment_window_hours' => (int) (\App\Services\PaymentAttempts::manualWindowMinutes() / 60),
             ],
@@ -968,6 +970,16 @@ class AdminOperationsController
             }
         }
 
+        // "Pay now" uses this gateway (Monnify or Kora).
+        $primaryBefore = PaymentMethods::primaryGateway($this->db);
+        $primary = $primaryBefore;
+        if (array_key_exists('primary_gateway', $body)) {
+            $primary = (string) $body['primary_gateway'];
+            if (!in_array($primary, PaymentMethods::GATEWAYS, true)) {
+                Response::error('Choose Monnify or Kora for "Pay now".', 422, 'VALIDATION_ERROR', ['primary_gateway' => 'Choose Monnify or Kora.']);
+            }
+        }
+
         $available = array_filter(PaymentMethods::ALL, static fn (string $m): bool => $after[$m] && PaymentMethods::serverAllows($m));
         if (count($available) === 0) {
             Response::error('Keep at least one payment method on, or customers cannot pay for orders.', 422, 'VALIDATION_ERROR');
@@ -984,10 +996,17 @@ class AdminOperationsController
             );
         }
 
-        if ($after !== $before) {
-            AuditService::record($this->adminId(), 'settings.payment_methods', 'store_settings', 'payment_methods', $before, $after);
+        if ($primary !== $primaryBefore) {
+            $this->db->execute(
+                "INSERT INTO `store_settings` (`key_name`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)",
+                'ss',
+                [PaymentMethods::PRIMARY_KEY, $primary]
+            );
         }
-        Response::success(PaymentMethods::status($this->db), 'Payment methods saved.');
+        if ($after !== $before || $primary !== $primaryBefore) {
+            AuditService::record($this->adminId(), 'settings.payment_methods', 'store_settings', 'payment_methods', $before + ['primary_gateway' => $primaryBefore], $after + ['primary_gateway' => $primary]);
+        }
+        Response::success(PaymentMethods::status($this->db) + ['primary_gateway' => $primary, 'pay_now_gateway' => PaymentMethods::payNowGateway($this->db)], 'Payment methods saved.');
     }
 
     public static function koraMode(): string

@@ -94,119 +94,16 @@ function formatCurrency(amount: number): string {
  * Includes complete itemized product list, pricing, subtotal, delivery, and total.
  */
 export function buildWhatsAppInvoiceUrl(order: WhatsAppOrderDetails, supportPhone?: string | null): string {
-  const customerName = order.shipping_address?.full_name || 'Customer';
-  const deliveryCity = [order.shipping_address?.city, order.shipping_address?.state]
-    .filter(Boolean)
-    .join(', ') || 'Nigeria';
-
-  const items = order.items || [];
-  const itemsCount = items.reduce((acc, item) => acc + (item.quantity || 1), 0) || items.length;
-
-  const lines: string[] = [
-    `*SHOP.CO — PROFORMA INVOICE*`,
-    `━━━━━━━━━━━━━━━━━━━━`,
-    `Hello Support! I just placed an order and have my invoice details:`,
-    ``,
-    `• *Invoice Ref:* ${order.order_number}`,
-    `• *Customer:* ${customerName}`,
-  ];
-
-  if (items.length > 0) {
-    lines.push(``);
-    lines.push(`*Items Ordered (${itemsCount}):*`);
-    items.forEach((item) => {
-      const title = item.name || item.product_name || 'Item';
-      const unitPrice = item.price ?? item.unit_price ?? 0;
-      const itemPrice = item.line_total ?? (unitPrice * (item.quantity || 1));
-      const sizeStr = item.size ? ` · Size: ${item.size}` : '';
-      lines.push(``);
-      lines.push(`• *${title}*`);
-      lines.push(`  Qty: ${item.quantity || 1}${sizeStr}`);
-      lines.push(`  ${formatCurrency(itemPrice)}`);
-    });
-  }
-
-  lines.push(``);
-  lines.push(`*Payment Breakdown:*`);
-  if (order.subtotal !== undefined) {
-    lines.push(`• Subtotal: ${formatCurrency(order.subtotal)}`);
-  }
-  if (order.discount_amount && order.discount_amount > 0) {
-    lines.push(`• Discount: -${formatCurrency(order.discount_amount)}`);
-  }
-  if (order.shipping_fee !== undefined) {
-    lines.push(`• Delivery: ${formatCurrency(order.shipping_fee)}`);
-  }
-  lines.push(`• *Amount Due:* ${formatCurrency(order.grand_total)}`);
-  lines.push(`• Deliver To: ${deliveryCity}`);
-  lines.push(`• Payment Status: Awaiting Payment`);
-
-  lines.push(``);
-  lines.push(`I would like to verify payment or complete it via direct bank transfer. Please assist me!`);
-
-  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(lines.join('\n'))}`;
+  // Only the order number: the store looks the order up by it, and the customer can add any
+  // message they like before sending.
+  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(order.order_number)}`;
 }
 
 /**
- * Official Payment Receipt sent AFTER payment is confirmed.
+ * Receipt message after payment: also only the order number (the store has the details).
  */
 export function buildWhatsAppReceiptUrl(order: WhatsAppOrderDetails, supportPhone?: string | null): string {
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  // The guest access key is never put in a chat message; the store tracks orders by number.
-  const trackingUrl = `${origin}/track-order?order=${encodeURIComponent(order.order_number)}`;
-
-  const customerName = order.shipping_address?.full_name || 'Customer';
-  const deliveryCity = [order.shipping_address?.city, order.shipping_address?.state]
-    .filter(Boolean)
-    .join(', ') || 'Nigeria';
-
-  const items = order.items || [];
-  const itemsCount = items.reduce((acc, item) => acc + (item.quantity || 1), 0) || items.length;
-
-  const lines: string[] = [
-    `*SHOP.CO — PAYMENT RECEIPT*`,
-    `━━━━━━━━━━━━━━━━━━━━`,
-    `Hello Support! My payment has been confirmed:`,
-    ``,
-    `• *Order Ref:* ${order.order_number}`,
-    `• *Customer:* ${customerName}`,
-  ];
-
-  if (items.length > 0) {
-    lines.push(``);
-    lines.push(`*Items Ordered (${itemsCount}):*`);
-    items.forEach((item) => {
-      const title = item.name || item.product_name || 'Item';
-      const unitPrice = item.price ?? item.unit_price ?? 0;
-      const itemPrice = item.line_total ?? (unitPrice * (item.quantity || 1));
-      const sizeStr = item.size ? ` · Size: ${item.size}` : '';
-      lines.push(``);
-      lines.push(`• *${title}*`);
-      lines.push(`  Qty: ${item.quantity || 1}${sizeStr}`);
-      lines.push(`  ${formatCurrency(itemPrice)}`);
-    });
-  }
-
-  lines.push(``);
-  lines.push(`*Payment Breakdown:*`);
-  if (order.subtotal !== undefined) {
-    lines.push(`• Subtotal: ${formatCurrency(order.subtotal)}`);
-  }
-  if (order.discount_amount && order.discount_amount > 0) {
-    lines.push(`• Discount: -${formatCurrency(order.discount_amount)}`);
-  }
-  if (order.shipping_fee !== undefined) {
-    lines.push(`• Delivery: ${formatCurrency(order.shipping_fee)}`);
-  }
-  lines.push(`• *Amount Paid:* ${formatCurrency(order.grand_total)}`);
-  lines.push(`• Deliver To: ${deliveryCity}`);
-  lines.push(`• Payment Status: PAID & VERIFIED`);
-  lines.push(`• Tracking Link: ${trackingUrl}`);
-
-  lines.push(``);
-  lines.push(`Please provide packaging and courier dispatch updates. Thank you!`);
-
-  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(lines.join('\n'))}`;
+  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(order.order_number)}`;
 }
 
 /**

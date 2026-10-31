@@ -69,6 +69,19 @@ function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['r
   const mode = (id: PaymentMethodId) =>
     id === 'kora' ? gatewayMode(settings.kora_mode) : id === 'monnify' ? gatewayMode(settings.monnify_mode) : null;
 
+  const choosePrimary = async (gateway: 'monnify' | 'kora') => {
+    setBusy(gateway);
+    try {
+      await adminUpdatePaymentMethods({ primary_gateway: gateway });
+      toast.success(`"Pay now" now uses ${gateway === 'kora' ? 'Kora' : 'Monnify'}.`);
+      onSaved();
+    } catch (err) {
+      if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The change could not be saved.'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const toggle = async (id: PaymentMethodId, on: boolean) => {
     setBusy(id);
     try {
@@ -84,6 +97,33 @@ function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['r
 
   return (
     <Panel title="Payment methods at checkout" bodyClassName="p-0">
+      <div className="border-b border-[#f3f4f6] px-4 py-3">
+        <p id="pm-primary" className="text-sm font-semibold text-[#111827]">&quot;Pay now&quot; uses</p>
+        <p className="mt-0.5 text-xs text-[#6b7280]">
+          Customers see one &quot;Pay now&quot; button (card or bank transfer) plus &quot;Pay via WhatsApp&quot;. If the gateway chosen here is off, the
+          other one is used.
+        </p>
+        <div role="radiogroup" aria-labelledby="pm-primary" className="mt-2 inline-flex rounded-lg border border-[#e5e7eb] p-0.5">
+          {(['monnify', 'kora'] as const).map((g) => (
+            <button
+              key={g}
+              type="button"
+              role="radio"
+              aria-checked={settings.primary_gateway === g}
+              disabled={busy !== null}
+              onClick={() => settings.primary_gateway !== g && void choosePrimary(g)}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-60 ${
+                settings.primary_gateway === g ? 'bg-[#1f2937] text-white' : 'text-[#374151] hover:bg-[#f3f4f6]'
+              }`}
+            >
+              {g === 'kora' ? 'Kora' : 'Monnify'}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-[#6b7280]">
+          Right now: {settings.pay_now_gateway ? (settings.pay_now_gateway === 'kora' ? 'Kora' : 'Monnify') : 'no gateway is on, so customers can only pay via WhatsApp'}.
+        </p>
+      </div>
       <ul className="divide-y divide-[#f3f4f6]">
         {METHODS.map((m) => {
           const s = settings.payment_methods[m.id];

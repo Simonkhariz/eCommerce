@@ -74,4 +74,35 @@ final class PaymentMethods
         }
         return $status;
     }
+
+    /** Store setting naming the gateway "Pay now" uses. */
+    public const PRIMARY_KEY = 'payment_primary_gateway';
+    public const GATEWAYS = ['monnify', 'kora'];
+
+    /** The gateway the admin chose for "Pay now" (Monnify unless set to Kora). */
+    public static function primaryGateway(?Database $db = null): string
+    {
+        $db = $db ?? Database::getInstance();
+        $value = (string) ($db->fetchOne("SELECT `value` FROM `store_settings` WHERE `key_name` = ?", 's', [self::PRIMARY_KEY])['value'] ?? '');
+        return in_array($value, self::GATEWAYS, true) ? $value : 'monnify';
+    }
+
+    /**
+     * The gateway behind the storefront's single "Pay now" button: the admin's choice when it is
+     * on, otherwise the other gateway when that one is on, otherwise none (WhatsApp only).
+     */
+    public static function payNowGateway(?Database $db = null): ?string
+    {
+        $status = self::status($db);
+        $primary = self::primaryGateway($db);
+        if ($status[$primary]['enabled']) {
+            return $primary;
+        }
+        foreach (self::GATEWAYS as $gateway) {
+            if ($status[$gateway]['enabled']) {
+                return $gateway;
+            }
+        }
+        return null;
+    }
 }

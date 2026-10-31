@@ -12,13 +12,28 @@ interface StoreSupport {
   paymentWindows: PaymentWindows;
   /** The payment return page may open the live status stream (SSE_ENABLED on the server). */
   livePaymentStatus: boolean;
+  /** The gateway behind the single "Pay now" button, or null when none is on. */
+  payNowGateway: 'monnify' | 'kora' | null;
+  /** "Pay via WhatsApp" is offered. */
+  whatsappEnabled: boolean;
   loaded: boolean;
 }
 
 let cache: Promise<StoreSupport> | null = null;
 
 function fromResponse(res: PaymentMethodsResponse | null | undefined): StoreSupport {
-  return { supportPhone: res?.support_phone || null, paymentMethods: res?.methods || [], paymentWindows: paymentWindowsFrom(res), livePaymentStatus: res?.live_payment_status === true, loaded: true };
+  const methods = res?.methods || [];
+  // Older answers without the fields: the first gateway in the list, and WhatsApp if listed.
+  const listedGateway = methods.find((m) => m.id === 'monnify' || m.id === 'kora')?.id as 'monnify' | 'kora' | undefined;
+  return {
+    supportPhone: res?.support_phone || null,
+    paymentMethods: methods,
+    paymentWindows: paymentWindowsFrom(res),
+    livePaymentStatus: res?.live_payment_status === true,
+    payNowGateway: res?.pay_now_gateway !== undefined ? res.pay_now_gateway : (listedGateway ?? null),
+    whatsappEnabled: res?.whatsapp_enabled ?? methods.some((m) => m.id === 'whatsapp'),
+    loaded: true,
+  };
 }
 
 function load(): Promise<StoreSupport> {
@@ -27,7 +42,7 @@ function load(): Promise<StoreSupport> {
       .then(fromResponse)
       .catch(() => {
         cache = null; // retry on the next mount
-        return { supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, livePaymentStatus: false, loaded: true };
+        return { supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, livePaymentStatus: false, payNowGateway: null, whatsappEnabled: false, loaded: true };
       });
   }
   return cache;
@@ -41,7 +56,7 @@ function load(): Promise<StoreSupport> {
 export function useStoreSupport(): StoreSupport & { retry: () => void } {
   const seeded = useStoreSeed()?.payments;
   const [state, setState] = useState<StoreSupport>(() =>
-    seeded ? fromResponse(seeded) : { supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, livePaymentStatus: false, loaded: false }
+    seeded ? fromResponse(seeded) : { supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, livePaymentStatus: false, payNowGateway: null, whatsappEnabled: false, loaded: false }
   );
   const [attempt, setAttempt] = useState(0);
 

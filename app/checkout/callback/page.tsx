@@ -43,7 +43,7 @@ function CheckoutCallbackContent() {
   }
 
   const { completePaidOrder } = useCart();
-  const { supportPhone, paymentMethods, livePaymentStatus, loaded: paymentMethodsLoaded, retry: retryPaymentMethods } = useStoreSupport();
+  const { supportPhone, payNowGateway, whatsappEnabled, livePaymentStatus, loaded: paymentMethodsLoaded, retry: retryPaymentMethods } = useStoreSupport();
 
   // Guest access key and "invoice sent", as saved on this device (they update when saved).
   const token = useGuestToken(orderNumber);
@@ -52,10 +52,9 @@ function CheckoutCallbackContent() {
   // before that would ask without it.
   const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false);
   const [keyInput, setKeyInput] = useState('');
-  // The shopper's choice; until they pick, the store's default method.
-  const [chosenRetryMethod, setRetryMethod] = useState<string>('');
-  const retryMethod = chosenRetryMethod || (paymentMethods.find((m) => m.is_default) || paymentMethods[0])?.id || '';
-  const [isRetrying, setIsRetrying] = useState(false);
+  // Which button is starting a payment ("Pay now" gateway or 'whatsapp'), for its label.
+  const [isRetrying, setRetrying] = useState<string | false>(false);
+  const setIsRetrying = (v: false) => setRetrying(v);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [isSavingJpeg, setIsSavingJpeg] = useState(false);
   const [awaitingFlash, setAwaitingFlash] = useState(false);
@@ -82,6 +81,9 @@ function CheckoutCallbackContent() {
     refetchInterval: (query) => {
       const data = query.state.data;
       if (!data || query.state.status === 'error' || paymentViewFor(data) !== 'pending') return false;
+      // The customer said they sent a WhatsApp transfer: watch until the store confirms it, however
+      // long that takes (reading our own database only; the live stream, when on, is quicker).
+      if (data.provider === 'whatsapp' && data.customer_marked_paid) return liveMode ? 30000 : 15000;
       const next = query.state.dataUpdateCount - 1 - pollBase;
       return next >= 0 && next < delays.length ? delays[next] : false;
     },
@@ -92,7 +94,9 @@ function CheckoutCallbackContent() {
   // Answers received so far for this question (the page re-renders after each one).
   const answers = queryClient.getQueryState(statusQuery.queryKey)?.dataUpdateCount ?? 0;
   const pollIndex = Math.max(0, answers - 1 - pollBase);
-  const checkingAutomatically = live === 'open' || pollIndex < delays.length;
+  // Waiting for the store to confirm a WhatsApp transfer the customer reported.
+  const awaitingConfirmation = !!result && paymentViewFor(result) === 'pending' && result.provider === 'whatsapp' && result.customer_marked_paid === true;
+  const checkingAutomatically = awaitingConfirmation || live === 'open' || pollIndex < delays.length;
   const isRefreshing = status.isFetching;
   const view: ViewState = !orderNumber
     ? 'error'
@@ -157,6 +161,7 @@ function CheckoutCallbackContent() {
   const liveFailed = live === 'failed';
   useEffect(() => {
     if (!livePaymentStatus || liveFailed || !hydrated || !orderNumber || !isPending) return;
+    const keepWatching = awaitingConfirmation;
     const controller = new AbortController();
     const key = paymentKeys.status(orderNumber, token ?? null, reference || null);
     let last: LiveState | null = null;
@@ -176,6 +181,10 @@ function CheckoutCallbackContent() {
       for (let drops = 0; ; drops++) {
         const outcome = await openPaymentStream({ baseUrl: API_BASE_URL, orderNumber, token, reference: reference || null, signal: controller.signal, onState });
         if (outcome === 'aborted' || controller.signal.aborted) return;
+        if (outcome === 'time_limit' && keepWatching) {
+          drops = -1; // a planned end, not a drop: open the next stream
+          continue;
+        }
         if (outcome === 'final' || outcome === 'time_limit') {
           setLive('ended');
           return;
@@ -189,7 +198,7 @@ function CheckoutCallbackContent() {
       }
     })();
     return () => controller.abort();
-  }, [livePaymentStatus, liveFailed, hydrated, orderNumber, isPending, token, reference, streamRun, queryClient]);
+  }, [livePaymentStatus, liveFailed, hydrated, orderNumber, isPending, awaitingConfirmation, token, reference, streamRun, queryClient]);
 
   const checkAgain = async () => {
     if (!orderNumber) return null;
@@ -207,9 +216,9 @@ function CheckoutCallbackContent() {
     window.history.replaceState(null, '', `/checkout/callback?order=${encodeURIComponent(orderNumber)}${reference ? `&reference=${encodeURIComponent(reference)}` : ''}`);
   }, [orderNumber, reference, searchParams]);
 
-  const handleRetryPayment = async () => {
-    if (!orderNumber || !retryMethod) return;
-    setIsRetrying(true);
+  const handleRetryPayment = async (retryMethod: string) => {
+    if (!orderNumber) return;
+    setRetrying(retryMethod);
     setRetryError(null);
     const whatsappTab = retryMethod === 'whatsapp' ? window.open('about:blank', '_blank') : null;
     try {
@@ -234,7 +243,7 @@ function CheckoutCallbackContent() {
       window.location.href = res.checkout_url;
     } catch (err) {
       whatsappTab?.close();
-      setRetryError(errorMessage(err, 'We could not start the payment. Please try another method.'));
+      setRetryError(errorMessage(err, 'We could not start the payment. Please try again.'));
       setIsRetrying(false);
     }
   };
@@ -245,8 +254,15 @@ function CheckoutCallbackContent() {
     const answer = await checkAgain();
     const paymentStatus = answer?.isSuccess ? answer.data.status : null;
     if (paymentStatus !== 'successful') {
-      // Not confirmed yet: let the store know the transfer was sent (it alerts the admin).
-      if (paymentStatus === 'pending') await apiMarkPaymentSent(orderNumber, token).catch(() => null);
+      // Not confirmed yet: tell the store the transfer was sent (it emails the admins). The page
+      // then shows "Awaiting confirmation" and opens the receipt once the store confirms.
+      if (paymentStatus === 'pending') {
+        const sent = await apiMarkPaymentSent(orderNumber, token).catch(() => null);
+        if (sent) {
+          void checkAgain();
+          return;
+        }
+      }
       setAwaitingFlash(true);
       setTimeout(() => setAwaitingFlash(false), 3000);
     }
@@ -279,21 +295,22 @@ function CheckoutCallbackContent() {
   const retryPanel = (
     <div className="text-left space-y-2 rounded-2xl border border-neutral-200 p-4">
       <p className="text-sm font-semibold text-black">Try paying again</p>
-      <p className="text-xs text-neutral-700">Your order and items are still reserved. Choose how you&apos;d like to pay.</p>
-      <fieldset className="space-y-1.5">
-        <legend className="sr-only">Payment method</legend>
-        {paymentMethods.length === 0 && (
-          <PaymentMethodsNotice loaded={paymentMethodsLoaded} supportPhone={supportPhone} onRetry={retryPaymentMethods} />
-        )}
-        {paymentMethods.map((m) => (
-          <label key={m.id} className="flex items-center gap-2 rounded-xl border border-neutral-200 px-3 py-2 text-sm cursor-pointer has-[:checked]:border-black">
-            <input type="radio" name="retry-method" value={m.id} className="accent-black" checked={retryMethod === m.id} onChange={() => setRetryMethod(m.id)} />
-            <span>{m.name}</span>
-          </label>
-        ))}
-      </fieldset>
+      <p className="text-xs text-neutral-700">Your order and items are still reserved.</p>
+      {!payNowGateway && !whatsappEnabled && (
+        <PaymentMethodsNotice loaded={paymentMethodsLoaded} supportPhone={supportPhone} onRetry={retryPaymentMethods} />
+      )}
       {retryError && <p role="alert" className="text-sm text-red-700">{retryError}</p>}
-      {retryMethod === 'whatsapp' && invoiceSent ? (
+      {payNowGateway && (
+        <button
+          type="button"
+          onClick={() => void handleRetryPayment(payNowGateway)}
+          disabled={isRetrying !== false}
+          className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm disabled:opacity-50"
+        >
+          {isRetrying === payNowGateway ? 'Opening payment…' : 'Pay now'}
+        </button>
+      )}
+      {whatsappEnabled && (invoiceSent ? (
         <>
           <button
             type="button"
@@ -301,22 +318,22 @@ function CheckoutCallbackContent() {
             disabled={isRefreshing}
             className={`w-full text-white font-semibold py-3 rounded-full text-sm disabled:opacity-60 ${awaitingFlash ? 'bg-amber-600' : 'bg-[#1DA851] hover:bg-[#178a43]'}`}
           >
-            {isRefreshing ? 'Checking…' : awaitingFlash ? 'Awaiting confirmation' : 'Mark as paid'}
+            {isRefreshing ? 'Checking…' : awaitingFlash ? 'Please try again' : "I've sent the transfer"}
           </button>
-          <button type="button" onClick={handleRetryPayment} disabled={isRetrying} className="w-full text-xs text-neutral-700 underline hover:no-underline disabled:opacity-50">
-            Send the invoice again
+          <button type="button" onClick={() => void handleRetryPayment('whatsapp')} disabled={isRetrying !== false} className="w-full text-xs text-neutral-700 underline hover:no-underline disabled:opacity-50">
+            Send the order number on WhatsApp again
           </button>
         </>
       ) : (
         <button
           type="button"
-          onClick={handleRetryPayment}
-          disabled={isRetrying || !retryMethod}
-          className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm disabled:opacity-50"
+          onClick={() => void handleRetryPayment('whatsapp')}
+          disabled={isRetrying !== false}
+          className="w-full border border-[#1DA851] text-[#178a43] bg-white hover:bg-emerald-50 font-semibold py-3 rounded-full text-sm disabled:opacity-50"
         >
-          {isRetrying ? 'Opening payment…' : retryMethod === 'whatsapp' ? 'Send invoice on WhatsApp' : 'Pay now'}
+          {isRetrying === 'whatsapp' ? 'Opening WhatsApp…' : 'Pay via WhatsApp (bank transfer)'}
         </button>
-      )}
+      ))}
     </div>
   );
 
@@ -504,35 +521,44 @@ function CheckoutCallbackContent() {
               <h1 className="text-2xl font-extrabold text-black">
                 {result?.status === 'not_started'
                   ? 'Payment not started yet'
-                  : awaitingWhatsApp
+                  : awaitingConfirmation
                     ? 'Awaiting confirmation'
-                    : 'Waiting for your payment to clear'}
+                    : awaitingWhatsApp
+                      ? 'Waiting for your transfer'
+                      : 'Waiting for your payment to clear'}
               </h1>
               <p className="text-sm text-neutral-700 mt-1">Order <strong className="font-mono text-black">{orderNumber}</strong></p>
             </div>
             <p className="text-sm text-neutral-700 max-w-sm mx-auto">
-              {awaitingWhatsApp
-                ? 'The store confirms WhatsApp transfers by hand. Once they have, tap "Mark as paid" to see your receipt. We will also email you.'
+              {awaitingConfirmation
+                ? 'We have told the store you sent the transfer. Keep this page open: your receipt appears here the moment they confirm it, and we email it to you too.'
+                : awaitingWhatsApp
+                ? 'Pay by bank transfer as agreed on WhatsApp, then tap "I\'ve sent the transfer". Your receipt appears here once the store confirms it.'
                 : message ||
                   (checkingAutomatically
                     ? 'Card payments usually confirm within seconds; bank transfers can take a few minutes. This page updates automatically.'
                     : 'Still processing. Bank transfers can take a few minutes to arrive. You can check again, or come back later: we will email you once it is confirmed.')}
             </p>
-            {checkingAutomatically && (
+            {awaitingConfirmation ? (
+              <div className="flex flex-col items-center gap-2" role="status">
+                <div className="w-10 h-10 border-4 border-amber-200 border-t-amber-600 rounded-full animate-spin" aria-hidden="true" />
+                <p className="text-sm font-semibold text-amber-900">Awaiting confirmation…</p>
+              </div>
+            ) : checkingAutomatically && (
               <p className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-900 rounded-full text-xs font-medium border border-amber-200">
                 <span className={`w-2 h-2 rounded-full bg-amber-600 ${isRefreshing ? 'animate-ping' : ''}`} />
                 Checking automatically…
               </p>
             )}
             <div className="flex flex-col gap-2.5">
-              {awaitingWhatsApp ? (
+              {awaitingConfirmation ? null : awaitingWhatsApp ? (
                 <button
                   type="button"
                   onClick={handleMarkPaid}
                   disabled={isRefreshing}
                   className={`w-full text-white font-semibold py-3 rounded-full text-sm disabled:opacity-60 ${awaitingFlash ? 'bg-amber-600' : 'bg-[#1DA851] hover:bg-[#178a43]'}`}
                 >
-                  {isRefreshing ? 'Checking…' : awaitingFlash ? 'Awaiting confirmation' : 'Mark as paid'}
+                  {isRefreshing ? 'Checking…' : awaitingFlash ? 'Please try again' : "I've sent the transfer"}
                 </button>
               ) : (
                 <button
@@ -544,7 +570,7 @@ function CheckoutCallbackContent() {
                   {isRefreshing ? 'Checking…' : 'Check again'}
                 </button>
               )}
-              {(result?.status === 'not_started' || !checkingAutomatically) && retryPanel}
+              {!awaitingConfirmation && (result?.status === 'not_started' || !checkingAutomatically) && retryPanel}
               <a
                 href={buildWhatsAppMessageUrl(`Hello! I paid for order ${orderNumber} (reference ${result?.provider_reference || reference || 'n/a'}) and it is still pending. Can you check?`, supportPhone)}
                 target="_blank"

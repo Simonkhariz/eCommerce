@@ -134,18 +134,24 @@ function CheckoutSession({
 }) {
   const { items, appliedPromo, settlePendingOrder, removePromoCode } = useCart();
   const { user } = useAuth();
-  const { supportPhone, paymentMethods, paymentWindows, loaded: paymentMethodsLoaded, retry: retryPaymentMethods } = useStoreSupport();
+  const {
+    supportPhone,
+    paymentWindows,
+    payNowGateway,
+    whatsappEnabled,
+    loaded: paymentMethodsLoaded,
+    retry: retryPaymentMethods,
+  } = useStoreSupport();
 
   const [step, setStep] = useState<'details' | 'payment'>('details');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [order, setOrder] = useState<PayableOrder | null>(null);
   const [copiedToken, setCopiedToken] = useState(false);
-  const [isInitializingPayment, setIsInitializingPayment] = useState(false);
+  // Which button is starting a payment ('whatsapp' or the "Pay now" gateway), for its label.
+  const [isInitializingPayment, setInitializingMethod] = useState<PaymentMethodId | false>(false);
+  const setIsInitializingPayment = (v: false) => setInitializingMethod(v);
   const [paymentError, setPaymentError] = useState<string | null>(null);
-  // The shopper's choice; until they pick, the store's default method.
-  const [chosenMethod, setSelectedMethod] = useState<PaymentMethodId | null>(null);
-  const selectedMethod = chosenMethod ?? (((paymentMethods.find((m) => m.is_default) || paymentMethods[0])?.id as PaymentMethodId | undefined) ?? null);
   const [isCheckingPaid, setIsCheckingPaid] = useState(false);
   const [awaitingFlash, setAwaitingFlash] = useState(false);
   const router = useRouter();
@@ -166,7 +172,7 @@ function CheckoutSession({
   const idempotencySignatureRef = useRef<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  const busy = isSubmitting || isInitializingPayment;
+  const busy = isSubmitting || isInitializingPayment !== false;
 
   const handleClose = useCallback(() => {
     if (busy) return;
@@ -369,9 +375,9 @@ function CheckoutSession({
       )
     : '';
 
-  const handlePayOrder = async () => {
-    if (!order || !selectedMethod) return;
-    setIsInitializingPayment(true);
+  const handlePayOrder = async (selectedMethod: PaymentMethodId) => {
+    if (!order) return;
+    setInitializingMethod(selectedMethod);
     setPaymentError(null);
 
     const redirectUrl = `${window.location.origin}/checkout/callback?order=${encodeURIComponent(order.order_number)}`;
@@ -395,12 +401,12 @@ function CheckoutSession({
       }
 
       if (!res.checkout_url) {
-        throw new Error('The payment provider did not return a checkout page. Please try again or choose another payment method.');
+        throw new Error('The payment provider did not return a checkout page. Please try again.');
       }
       window.location.href = res.checkout_url;
     } catch (err) {
       whatsappTab?.close();
-      setPaymentError(errorMessage(err, 'We could not start the payment. Please try again or choose another payment method.'));
+      setPaymentError(errorMessage(err, 'We could not start the payment. Please try again.'));
       setIsInitializingPayment(false);
     }
   };
@@ -419,17 +425,18 @@ function CheckoutSession({
         onClose();
         return;
       }
-      // Not confirmed yet: let the store know the transfer was sent (it alerts the admin).
+      // Not confirmed yet: tell the store the transfer was sent (it emails the admins), then
+      // wait on the payment page, which shows "Awaiting confirmation" and opens the receipt the
+      // moment the store confirms (live, or by checking every few seconds).
       const sent = await apiMarkPaymentSent(order.order_number, order.guest_access_token).catch(() => null);
-      if (sent?.expires_at) setOrder((prev) => (prev ? { ...prev, expires_at: sent.expires_at } : prev));
-      setAwaitingNoteFor({
-        orderNumber: order.order_number,
-        text: sent?.recorded
-          ? 'We have told the store you paid. Once they confirm your transfer, tap "Mark as paid" again to see your receipt.'
-          : 'The store has not confirmed your transfer yet. Once they do, tap "Mark as paid" again to see your receipt.',
-      });
-      setAwaitingFlash(true);
-      setTimeout(() => setAwaitingFlash(false), 3000);
+      if (!sent) {
+        setAwaitingNoteFor({ orderNumber: order.order_number, text: 'We could not reach the store just now. Please tap again in a moment.' });
+        setAwaitingFlash(true);
+        setTimeout(() => setAwaitingFlash(false), 3000);
+        return;
+      }
+      router.push(`/checkout/callback?order=${encodeURIComponent(order.order_number)}`);
+      onClose();
     } catch (err) {
       setPaymentError(errorMessage(err, 'We could not check the payment right now. Please try again.'));
     } finally {
@@ -474,16 +481,19 @@ function CheckoutSession({
         className="bg-white rounded-t-2xl sm:rounded-3xl p-5 sm:p-6 w-full shadow-2xl relative max-h-[92vh] overflow-y-auto"
         aria-busy={busy || undefined}
       >
-        <button
-          type="button"
-          data-close
-          onClick={handleClose}
-          disabled={busy}
-          className="absolute top-4 right-4 p-2 rounded-full text-neutral-600 hover:text-black hover:bg-neutral-100 disabled:opacity-50"
-          aria-label="Close checkout"
-        >
-          <HugeiconsIcon icon={Cancel01Icon} size={18} aria-hidden="true" />
-        </button>
+        {/* Stays in view while the window scrolls (long invoices on small phones). */}
+        <div className="sticky top-0 z-10 -mb-9 flex justify-end pointer-events-none">
+          <button
+            type="button"
+            data-close
+            onClick={handleClose}
+            disabled={busy}
+            className="pointer-events-auto p-2 rounded-full bg-white/95 text-neutral-600 shadow-sm ring-1 ring-neutral-200 hover:text-black hover:bg-neutral-100 disabled:opacity-50"
+            aria-label="Close checkout"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={18} aria-hidden="true" />
+          </button>
+        </div>
 
         {step === 'details' ? (
           <div>
@@ -722,32 +732,10 @@ function CheckoutSession({
               </div>
             )}
 
-            <fieldset className="space-y-2">
-              <legend className="text-xs font-bold uppercase tracking-wider text-neutral-700 mb-1">Payment method</legend>
-              {paymentMethods.length === 0 && (
-                <PaymentMethodsNotice loaded={paymentMethodsLoaded} supportPhone={supportPhone} onRetry={retryPaymentMethods} />
-              )}
-              {paymentMethods.map((m) => (
-                <label
-                  key={m.id}
-                  className="flex items-start gap-3 rounded-2xl border border-neutral-200 p-3 cursor-pointer has-[:checked]:border-black has-[:checked]:bg-neutral-50"
-                >
-                  <input
-                    type="radio"
-                    name="payment-method"
-                    value={m.id}
-                    className="mt-1 accent-black"
-                    aria-describedby={`pm-desc-${m.id}`}
-                    checked={selectedMethod === m.id}
-                    onChange={() => setSelectedMethod(m.id as PaymentMethodId)}
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-black">{m.name}</span>
-                    <span id={`pm-desc-${m.id}`} className="block text-xs text-neutral-600">{m.description}</span>
-                  </span>
-                </label>
-              ))}
-            </fieldset>
+            {/* One "Pay now" for the store's card/transfer gateway, and WhatsApp as the other way. */}
+            {!payNowGateway && !whatsappEnabled && (
+              <PaymentMethodsNotice loaded={paymentMethodsLoaded} supportPhone={supportPhone} onRetry={retryPaymentMethods} />
+            )}
 
             {paymentError && (
               <div role="alert" className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3">
@@ -755,51 +743,63 @@ function CheckoutSession({
               </div>
             )}
 
-            {selectedMethod === 'whatsapp' && invoiceSent ? (
+            {payNowGateway && (
+              <div className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() => void handlePayOrder(payNowGateway)}
+                  disabled={busy || isCheckingPaid}
+                  className="w-full bg-black text-white hover:bg-neutral-800 font-bold py-3.5 rounded-full text-sm transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60"
+                >
+                  {isInitializingPayment === payNowGateway ? (
+                    <span>Opening secure payment…</span>
+                  ) : (
+                    <>
+                      <span>Pay now ({formatPrice(order.grand_total)})</span>
+                      <HugeiconsIcon icon={ArrowRight01Icon} size={15} aria-hidden="true" />
+                    </>
+                  )}
+                </button>
+                <p className="text-[11px] text-neutral-600 text-center">Card or bank transfer, secured by {payNowGateway === 'kora' ? 'Kora' : 'Monnify'}.</p>
+              </div>
+            )}
+
+            {whatsappEnabled && (invoiceSent ? (
               <div className="space-y-2">
                 <button
                   type="button"
                   onClick={handleMarkPaid}
-                  disabled={isCheckingPaid || isInitializingPayment}
+                  disabled={isCheckingPaid || busy}
                   className={`w-full text-white font-bold py-3.5 rounded-full text-sm transition-colors shadow-md disabled:opacity-60 ${
                     awaitingFlash ? 'bg-amber-600' : methodAccent.whatsapp
                   }`}
                 >
-                  {isCheckingPaid ? 'Checking…' : awaitingFlash ? 'Awaiting confirmation' : 'Mark as paid'}
+                  {isCheckingPaid ? 'Checking…' : "I've sent the transfer"}
                 </button>
                 <p className="text-xs text-neutral-700 text-center" role="status" aria-live="polite">
-                  {awaitingNote ?? 'Sent the transfer? Tap "Mark as paid". Your receipt opens once the store confirms it.'}
+                  {awaitingNote ?? 'Sent the transfer? Tap above: we tell the store and show your receipt as soon as they confirm it.'}
                 </p>
                 <button
                   type="button"
-                  onClick={handlePayOrder}
+                  onClick={() => void handlePayOrder('whatsapp')}
                   disabled={busy || isCheckingPaid}
                   className="w-full text-xs text-neutral-700 underline hover:no-underline disabled:opacity-50"
                 >
-                  {isInitializingPayment ? 'Opening WhatsApp…' : 'Send the invoice again'}
+                  {isInitializingPayment === 'whatsapp' ? 'Opening WhatsApp…' : 'Send the order number on WhatsApp again'}
                 </button>
               </div>
             ) : (
               <button
                 type="button"
-                onClick={handlePayOrder}
-                disabled={isInitializingPayment || !selectedMethod}
-                className={`w-full text-white font-bold py-3.5 rounded-full text-sm transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60 ${
-                  selectedMethod ? methodAccent[selectedMethod] : 'bg-black'
+                onClick={() => void handlePayOrder('whatsapp')}
+                disabled={busy || isCheckingPaid}
+                className={`w-full font-bold py-3.5 rounded-full text-sm transition-all flex items-center justify-center gap-1.5 disabled:opacity-60 ${
+                  payNowGateway ? 'border border-[#1DA851] text-[#178a43] bg-white hover:bg-emerald-50' : `text-white shadow-md ${methodAccent.whatsapp}`
                 }`}
               >
-                {isInitializingPayment ? (
-                  <span>Opening secure payment…</span>
-                ) : selectedMethod === 'whatsapp' ? (
-                  <span>Send invoice on WhatsApp ({formatPrice(order.grand_total)})</span>
-                ) : (
-                  <>
-                    <span>Pay {formatPrice(order.grand_total)}</span>
-                    <HugeiconsIcon icon={ArrowRight01Icon} size={15} aria-hidden="true" />
-                  </>
-                )}
+                {isInitializingPayment === 'whatsapp' ? 'Opening WhatsApp…' : 'Pay via WhatsApp (bank transfer)'}
               </button>
-            )}
+            ))}
 
             <div className="flex items-center justify-between gap-2 text-xs">
               <button type="button" onClick={startOver} disabled={busy} className="text-neutral-700 underline hover:no-underline disabled:opacity-50">

@@ -1215,6 +1215,9 @@ export interface PaymentMethodItem {
 
 export interface PaymentMethodsResponse {
   methods: PaymentMethodItem[];
+  /** The gateway behind the single "Pay now" button (null: no card/transfer gateway is on). */
+  pay_now_gateway?: 'monnify' | 'kora' | null;
+  whatsapp_enabled?: boolean;
   support_phone: string;
   /** How long an unpaid order holds its items when paying online / by WhatsApp transfer. */
   payment_window_minutes?: number;
@@ -1313,6 +1316,8 @@ export async function apiMarkPaymentSent(
 }
 
 export interface PaymentVerificationResponse {
+  /** WhatsApp transfers: the customer said they paid; the store has not confirmed yet. */
+  customer_marked_paid?: boolean;
   order_number: string;
   provider_reference: string;
   provider?: string;

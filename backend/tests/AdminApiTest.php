@@ -178,7 +178,7 @@ $t->check('an empty list hides the strip', [], TestKit::get($t->http('GET', '/st
 
 $t->section('Payment method switches');
 $t->cleanup(function () use ($t): void {
-    $t->sql("DELETE FROM `store_settings` WHERE `key_name` IN ('payment_monnify_enabled', 'payment_kora_enabled', 'payment_whatsapp_enabled')");
+    $t->sql("DELETE FROM `store_settings` WHERE `key_name` IN ('payment_monnify_enabled', 'payment_kora_enabled', 'payment_whatsapp_enabled', 'payment_primary_gateway')");
 });
 $methodIds = fn (): array => array_column((array) TestKit::get($t->http('GET', '/checkout/payment-methods'), 'data.methods'), 'id');
 $t->check('switch Kora off', 200, $A('PUT', '/admin/settings/payment-methods', ['json' => ['kora' => false]])['status']);
@@ -187,6 +187,15 @@ $t->ok('settings report Kora as switched off', TestKit::get($A('GET', '/admin/se
 $t->check('switching every method off is refused', 422, $A('PUT', '/admin/settings/payment-methods', ['json' => ['monnify' => false, 'kora' => false, 'whatsapp' => false]])['status']);
 $t->check('switch Kora back on', 200, $A('PUT', '/admin/settings/payment-methods', ['json' => ['kora' => true]])['status']);
 $t->ok('checkout offers Kora again', in_array('kora', $methodIds(), true));
+$payNow = static fn (): ?string => TestKit::get($t->http('GET', '/checkout/payment-methods'), 'data.pay_now_gateway');
+$t->check('"Pay now" uses Monnify by default', 'monnify', $payNow());
+$t->check('an unknown "Pay now" gateway is refused', 422, $A('PUT', '/admin/settings/payment-methods', ['json' => ['primary_gateway' => 'paypal']])['status']);
+$t->check('the admin can choose Kora for "Pay now"', 'kora', TestKit::get($A('PUT', '/admin/settings/payment-methods', ['json' => ['primary_gateway' => 'kora']]), 'data.primary_gateway'));
+$t->check('checkout now uses Kora', 'kora', $payNow());
+$A('PUT', '/admin/settings/payment-methods', ['json' => ['kora' => false]]);
+$t->check('with Kora switched off, "Pay now" falls back to Monnify', 'monnify', $payNow());
+$A('PUT', '/admin/settings/payment-methods', ['json' => ['kora' => true, 'primary_gateway' => 'monnify']]);
+$t->check('settings show the choice', 'monnify', TestKit::get($A('GET', '/admin/settings'), 'data.readonly.primary_gateway'));
 
 // -----------------------------------------------------------------------------
 $t->section('System status');
