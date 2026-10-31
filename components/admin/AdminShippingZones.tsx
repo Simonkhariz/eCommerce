@@ -42,6 +42,8 @@ const EMPTY_ZONE: ShippingZoneInput = {
   description: '',
   states_covered: [],
   fee: 0,
+  items_included: 1,
+  extra_item_fee: 0,
   estimated_days: '',
   is_active: true,
 };
@@ -150,7 +152,14 @@ export function AdminShippingZones() {
                     <span className="block font-semibold text-[#111827]">{z.name}</span>
                     <span className="block text-xs text-[#6b7280]">{z.code}</span>
                   </td>
-                  <td className="whitespace-nowrap text-right tabular-nums">{formatPrice(z.fee)}</td>
+                  <td className="whitespace-nowrap text-right tabular-nums">
+                    {formatPrice(z.fee)}
+                    {Number(z.extra_item_fee) > 0 && (
+                      <span className="block text-xs text-[#6b7280]">
+                        {Number(z.items_included) > 1 ? `covers ${z.items_included} items, ` : ''}+{formatPrice(z.extra_item_fee)} per extra item
+                      </span>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap text-[#4b5563]">{z.estimated_days || '—'}</td>
                   <td>
                     <div className="flex max-w-md flex-wrap gap-1">
@@ -181,6 +190,8 @@ export function AdminShippingZones() {
                               description: z.description ?? '',
                               states_covered: z.states_covered,
                               fee: z.fee,
+                              items_included: z.items_included,
+                              extra_item_fee: z.extra_item_fee,
                               estimated_days: z.estimated_days,
                               is_active: z.is_active,
                             },
@@ -229,6 +240,8 @@ function ZoneModal({
   const toast = useToast();
   const [form, setForm] = useState<ShippingZoneInput>(EMPTY_ZONE);
   const [feeText, setFeeText] = useState('');
+  const [includedText, setIncludedText] = useState('1');
+  const [extraText, setExtraText] = useState('0');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [lastEditing, setLastEditing] = useState<typeof editing>(null);
@@ -239,6 +252,8 @@ function ZoneModal({
     if (editing) {
       setForm(editing.zone);
       setFeeText(editing.id ? String(editing.zone.fee) : '');
+      setIncludedText(String(editing.zone.items_included ?? 1));
+      setExtraText(String(editing.zone.extra_item_fee ?? 0));
       setErrors({});
     }
   }
@@ -257,6 +272,10 @@ function ZoneModal({
     if (!form.name.trim()) local.name = 'Name is required.';
     if (!/^[A-Z0-9_-]{2,30}$/.test(form.code)) local.code = 'Use 2-30 letters, numbers, dashes or underscores.';
     if (feeText.trim() === '' || !Number.isFinite(fee) || fee < 0) local.fee = 'Enter a delivery fee of 0 or more.';
+    const included = Number(includedText);
+    const extra = Number(extraText || '0');
+    if (!Number.isInteger(included) || included < 1) local.items_included = 'Enter how many items the fee covers (1 or more).';
+    if (!Number.isFinite(extra) || extra < 0) local.extra_item_fee = 'Enter 0 or more for each extra item.';
     if (!form.estimated_days.trim()) local.estimated_days = 'Give customers a delivery estimate, e.g. "2-4 business days".';
     if (form.states_covered.length === 0) local.states_covered = 'Pick at least one state.';
     setErrors(local);
@@ -270,6 +289,8 @@ function ZoneModal({
         description: (form.description ?? '').trim(),
         estimated_days: form.estimated_days.trim(),
         fee,
+        items_included: included,
+        extra_item_fee: extra,
       });
       toast.success(editing.id ? 'Delivery zone updated.' : 'Delivery zone created.');
       onSaved();
@@ -311,6 +332,12 @@ function ZoneModal({
         </Field>
         <Field label="Delivery fee (₦)" required error={errors.fee}>
           {(p) => <TextInput {...p} type="number" min={0} step="50" inputMode="decimal" value={feeText} onChange={(e) => setFeeText(e.target.value)} />}
+        </Field>
+        <Field label="Items the fee covers" required error={errors.items_included} hint="The fee above covers this many items in one order.">
+          {(p) => <TextInput {...p} type="number" min={1} step={1} inputMode="numeric" value={includedText} onChange={(e) => setIncludedText(e.target.value)} />}
+        </Field>
+        <Field label="Each extra item (₦)" error={errors.extra_item_fee} hint="Added for every item after that. 0 keeps one fee whatever the quantity.">
+          {(p) => <TextInput {...p} type="number" min={0} step="50" inputMode="decimal" value={extraText} onChange={(e) => setExtraText(e.target.value)} />}
         </Field>
         <Field label="Delivery estimate" required error={errors.estimated_days} hint="Shown at checkout.">
           {(p) => (

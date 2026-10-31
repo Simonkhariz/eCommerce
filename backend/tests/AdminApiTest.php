@@ -75,6 +75,24 @@ $t->check('update zone fee', 3000, TestKit::get($A('PUT', "/admin/shipping-zones
 $t->check('delete zone', 200, $A('DELETE', "/admin/shipping-zones/{$zid}")['status']);
 $t->check('zone actions audited', 3, (int) $t->scalar("SELECT COUNT(*) FROM `admin_audit_logs` WHERE `entity_type` = 'shipping_zone' AND `entity_id` = ?", 's', [(string) $zid]));
 
+// Delivery fee by quantity: N1,000 covers 2 items, then N500 for each extra item.
+$t->check('"items the fee covers" must be 1 or more', 422, $A('POST', '/admin/shipping-zones', ['json' => ['name' => 'Bad', 'code' => 'TBAD', 'fee' => 1000, 'items_included' => 0, 'estimated_days' => '2 days', 'states_covered' => ['Kano']]])['status']);
+$qcode = 'TQ' . strtoupper(bin2hex(random_bytes(3)));
+$qzone = $A('POST', '/admin/shipping-zones', ['json' => ['name' => 'Quantity Zone', 'code' => $qcode, 'fee' => 1000, 'items_included' => 2, 'extra_item_fee' => 500, 'estimated_days' => '3 days', 'states_covered' => ['Kano']]]);
+$t->check('zone saved with its per-item rule', [2, 500.0], [TestKit::get($qzone, 'data.items_included'), (float) TestKit::get($qzone, 'data.extra_item_fee')]);
+$qzid = (int) TestKit::get($qzone, 'data.id');
+$t->cleanup(fn () => $t->sql("DELETE FROM `shipping_zones` WHERE `code` = ?", 's', [$qcode]));
+$qv = $t->variant(5);
+if ($qv !== null) {
+    $quoteFor = static fn (int $qty): float => (float) TestKit::get($t->http('POST', '/checkout/quote', ['json' => [
+        'items' => [['product_id' => (int) $qv['product_id'], 'variant_id' => (int) $qv['variant_id'], 'quantity' => $qty]],
+        'shipping_address' => ['state' => 'Kano', 'country' => 'Nigeria'],
+        'shipping_zone_id' => $qzid,
+    ]]), 'data.shipping_fee');
+    $t->check('1 or 2 items: the zone fee', [1000.0, 1000.0], [$quoteFor(1), $quoteFor(2)]);
+    $t->check('3 items: + N500, 5 items: + N1,500', [1500.0, 2500.0], [$quoteFor(3), $quoteFor(5)]);
+}
+
 // -----------------------------------------------------------------------------
 $t->section('Promotions');
 $pcode = 'TP' . strtoupper(bin2hex(random_bytes(3)));

@@ -611,7 +611,11 @@ export interface ShippingZone {
   code: string;
   description: string | null;
   states_covered: string[];
+  /** Covers the first `items_included` items of an order. */
   fee: number;
+  items_included: number;
+  /** Added for each item after `items_included`. */
+  extra_item_fee: number;
   estimated_days: string;
   is_active: boolean;
 }

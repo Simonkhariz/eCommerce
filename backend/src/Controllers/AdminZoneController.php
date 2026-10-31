@@ -57,10 +57,10 @@ class AdminZoneController
         }
 
         $id = (int) $this->db->insert(
-            "INSERT INTO `shipping_zones` (`name`, `code`, `description`, `states_covered`, `fee`, `estimated_days`, `is_active`)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            'ssssdsi',
-            [$in['name'], $in['code'], $in['description'], json_encode($in['states_covered']), $in['fee'], $in['estimated_days'], $in['is_active']]
+            "INSERT INTO `shipping_zones` (`name`, `code`, `description`, `states_covered`, `fee`, `items_included`, `extra_item_fee`, `estimated_days`, `is_active`)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            'ssssdidsi',
+            [$in['name'], $in['code'], $in['description'], json_encode($in['states_covered']), $in['fee'], $in['items_included'], $in['extra_item_fee'], $in['estimated_days'], $in['is_active']]
         );
 
         $created = $this->present($this->find($id));
@@ -83,10 +83,10 @@ class AdminZoneController
 
         $this->db->execute(
             "UPDATE `shipping_zones`
-             SET `name` = ?, `code` = ?, `description` = ?, `states_covered` = ?, `fee` = ?, `estimated_days` = ?, `is_active` = ?
+             SET `name` = ?, `code` = ?, `description` = ?, `states_covered` = ?, `fee` = ?, `items_included` = ?, `extra_item_fee` = ?, `estimated_days` = ?, `is_active` = ?
              WHERE `id` = ?",
-            'ssssdsii',
-            [$in['name'], $in['code'], $in['description'], json_encode($in['states_covered']), $in['fee'], $in['estimated_days'], $in['is_active'], $id]
+            'ssssdidsii',
+            [$in['name'], $in['code'], $in['description'], json_encode($in['states_covered']), $in['fee'], $in['items_included'], $in['extra_item_fee'], $in['estimated_days'], $in['is_active'], $id]
         );
 
         $updated = $this->present($this->find($id));
@@ -126,6 +126,8 @@ class AdminZoneController
             ? (json_decode($zone['states_covered'], true) ?: [])
             : (array) $zone['states_covered'];
         $zone['fee'] = (float) $zone['fee'];
+        $zone['items_included'] = max(1, (int) ($zone['items_included'] ?? 1));
+        $zone['extra_item_fee'] = (float) ($zone['extra_item_fee'] ?? 0);
         $zone['is_active'] = (bool) $zone['is_active'];
         return $zone;
     }
@@ -146,6 +148,8 @@ class AdminZoneController
         $description = $str('description');
         $estimatedDays = $str('estimated_days', '2-4 business days');
         $feeRaw = array_key_exists('fee', $body) ? $body['fee'] : ($current['fee'] ?? null);
+        $includedRaw = array_key_exists('items_included', $body) ? $body['items_included'] : ($current['items_included'] ?? 1);
+        $extraRaw = array_key_exists('extra_item_fee', $body) ? $body['extra_item_fee'] : ($current['extra_item_fee'] ?? 0);
         $statesRaw = array_key_exists('states_covered', $body) ? $body['states_covered'] : ($current['states_covered'] ?? []);
         $isActive = array_key_exists('is_active', $body) ? (int) (bool) $body['is_active'] : (int) ($current['is_active'] ?? 1);
 
@@ -158,6 +162,12 @@ class AdminZoneController
         }
         if (!is_numeric($feeRaw) || (float) $feeRaw < 0 || (float) $feeRaw > 1000000) {
             $errors['fee'] = 'Enter a delivery fee of 0 or more.';
+        }
+        if (!is_numeric($includedRaw) || (int) $includedRaw < 1 || (int) $includedRaw > 1000 || (float) $includedRaw != (int) $includedRaw) {
+            $errors['items_included'] = 'Enter how many items the fee covers (1 or more).';
+        }
+        if (!is_numeric($extraRaw) || (float) $extraRaw < 0 || (float) $extraRaw > 1000000) {
+            $errors['extra_item_fee'] = 'Enter 0 or more for each extra item.';
         }
         if ($estimatedDays === '') {
             $errors['estimated_days'] = 'Give customers a delivery estimate, e.g. "2-4 business days".';
@@ -197,6 +207,8 @@ class AdminZoneController
             'description' => $description,
             'states_covered' => $states,
             'fee' => round((float) $feeRaw, 2),
+            'items_included' => (int) $includedRaw,
+            'extra_item_fee' => round((float) $extraRaw, 2),
             'estimated_days' => $estimatedDays,
             'is_active' => $isActive,
         ];

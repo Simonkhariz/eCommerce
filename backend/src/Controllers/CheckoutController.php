@@ -167,6 +167,8 @@ class CheckoutController
                 $zone['states_covered'] = json_decode($zone['states_covered'], true) ?: [];
             }
             $zone['fee'] = (float) $zone['fee'];
+            $zone['items_included'] = max(1, (int) ($zone['items_included'] ?? 1));
+            $zone['extra_item_fee'] = (float) ($zone['extra_item_fee'] ?? 0);
             $zone['is_active'] = (bool) $zone['is_active'];
         }
         unset($zone);

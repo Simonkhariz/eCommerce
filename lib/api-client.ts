@@ -957,7 +957,13 @@ export interface ShippingZone {
   name: string;
   code: string;
   description?: string;
+  /** In a checkout quote: the delivery fee for this order's number of items. */
   fee: number;
+  /** The zone's own fee, covering the first `items_included` items. */
+  base_fee?: number;
+  items_included?: number;
+  /** Added for each item after `items_included`. */
+  extra_item_fee?: number;
   estimated_days: string;
   states_covered: string[];
   is_active: boolean;

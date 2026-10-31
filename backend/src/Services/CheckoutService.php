@@ -59,7 +59,10 @@ class CheckoutService
         $shippingFee = 0.0;
 
         if (is_array($shippingAddress) && !empty($shippingAddress['state'])) {
-            $shippingResolution = $this->resolveShippingZone($shippingAddress, $requestedZoneId);
+            $shippingResolution = $this->priceZones(
+                $this->resolveShippingZone($shippingAddress, $requestedZoneId),
+                (int) array_sum(array_column($verifiedItems, 'quantity'))
+            );
             $shippingFee = (float) $shippingResolution['selected_zone']['fee'];
         }
 
@@ -145,7 +148,13 @@ class CheckoutService
 
         // 3. Resolve and revalidate destination shipping zone
         $requestedZoneId = isset($input['shipping_zone_id']) ? (int) $input['shipping_zone_id'] : null;
-        $shippingResolution = $this->resolveShippingZone($shippingAddress, $requestedZoneId);
+        // The fee grows with the number of items (each line is checked again inside the
+        // transaction; a quantity the stock can't cover fails the order there).
+        $totalQuantity = 0;
+        foreach ($items as $line) {
+            $totalQuantity += is_array($line) ? max(0, (int) ($line['quantity'] ?? 0)) : 0;
+        }
+        $shippingResolution = $this->priceZones($this->resolveShippingZone($shippingAddress, $requestedZoneId), $totalQuantity);
         $selectedZone = $shippingResolution['selected_zone'];
         $shippingFee = (float) $selectedZone['fee'];
 
@@ -239,6 +248,9 @@ class CheckoutService
                     'name' => $selectedZone['name'],
                     'code' => $selectedZone['code'],
                     'fee' => (float) $selectedZone['fee'],
+                    'base_fee' => (float) $selectedZone['base_fee'],
+                    'items_included' => (int) $selectedZone['items_included'],
+                    'extra_item_fee' => (float) $selectedZone['extra_item_fee'],
                     'estimated_days' => $selectedZone['estimated_days'],
                     'origin' => $origin,
                 ];
@@ -551,6 +563,40 @@ class CheckoutService
      * @param int|null $requestedZoneId Optional zone identifier picked by customer
      * @return array{selected_zone: array, eligible_zones: array}
      */
+    /**
+     * Delivery fee for this many items: the zone's fee covers the first `items_included` items,
+     * and each item after that adds `extra_item_fee`.
+     *
+     * @param array<string, mixed> $zone
+     */
+    public static function deliveryFee(array $zone, int $quantity): float
+    {
+        $base = (float) ($zone['base_fee'] ?? $zone['fee'] ?? 0);
+        $included = max(1, (int) ($zone['items_included'] ?? 1));
+        $extra = max(0.0, (float) ($zone['extra_item_fee'] ?? 0));
+        return round($base + max(0, $quantity - $included) * $extra, 2);
+    }
+
+    /**
+     * Put this order's delivery fee on the selected and eligible zones (`fee`), keeping the
+     * zone's own fee as `base_fee`.
+     *
+     * @param array{selected_zone: array, eligible_zones: array} $resolution
+     */
+    private function priceZones(array $resolution, int $quantity): array
+    {
+        $price = static function (array $zone) use ($quantity): array {
+            $zone['base_fee'] = (float) ($zone['base_fee'] ?? $zone['fee']);
+            $zone['items_included'] = max(1, (int) ($zone['items_included'] ?? 1));
+            $zone['extra_item_fee'] = (float) ($zone['extra_item_fee'] ?? 0);
+            $zone['fee'] = self::deliveryFee($zone, $quantity);
+            return $zone;
+        };
+        $resolution['selected_zone'] = $price($resolution['selected_zone']);
+        $resolution['eligible_zones'] = array_map($price, $resolution['eligible_zones'] ?? []);
+        return $resolution;
+    }
+
     public function resolveShippingZone(array $address, ?int $requestedZoneId = null): array
     {
         $country = Input::text($address['country'] ?? null);
