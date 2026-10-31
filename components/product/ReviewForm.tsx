@@ -305,8 +305,8 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
           </div>
 
           <p className="text-xs text-neutral-600">
-            Reviews appear after the store has checked them. A &ldquo;verified purchase&rdquo; badge is added only when we find a paid order for
-            this product.
+            Reviews appear after the store has checked them. A &ldquo;verified purchase&rdquo; badge is added only when you are signed in and
+            we find a paid order for this product on your account.
           </p>
 
           <button

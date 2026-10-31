@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Support\Input;
 use App\Database\Database;
 use App\Middleware\JsonBodyMiddleware;
 use App\Repositories\AddressRepository;
@@ -52,8 +53,8 @@ class CustomerController
         }
 
         $body = JsonBodyMiddleware::getBody();
-        $fullName = isset($body['full_name']) ? trim($body['full_name']) : null;
-        $phone = isset($body['phone']) ? trim($body['phone']) : null;
+        $fullName = isset($body['full_name']) ? Input::text($body['full_name'] ?? null) : null;
+        $phone = isset($body['phone']) ? Input::text($body['phone'] ?? null) : null;
 
         $updates = [];
         if ($fullName !== null && $fullName !== '') {
@@ -98,19 +99,19 @@ class CustomerController
         $body = JsonBodyMiddleware::getBody();
 
         $errors = [];
-        if (empty(trim($body['recipient_name'] ?? ''))) {
+        if (empty(Input::text($body['recipient_name'] ?? null))) {
             $errors['recipient_name'] = 'Recipient name is required.';
         }
-        if (empty(trim($body['phone'] ?? ''))) {
+        if (empty(Input::text($body['phone'] ?? null))) {
             $errors['phone'] = 'Phone number is required.';
         }
-        if (empty(trim($body['street_address'] ?? ''))) {
+        if (empty(Input::text($body['street_address'] ?? null))) {
             $errors['street_address'] = 'Street address is required.';
         }
-        if (empty(trim($body['city'] ?? ''))) {
+        if (empty(Input::text($body['city'] ?? null))) {
             $errors['city'] = 'City is required.';
         }
-        if (empty(trim($body['state'] ?? ''))) {
+        if (empty(Input::text($body['state'] ?? null))) {
             $errors['state'] = 'State is required.';
         }
 

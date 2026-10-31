@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Repositories;
 
+use App\Support\Input;
 use App\Database\Database;
 
 /**
@@ -80,8 +81,8 @@ class UserRepository
 
         $email = trim(strtolower($data['email']));
         $passwordHash = $data['password_hash'] ?? null;
-        $fullName = trim($data['full_name']);
-        $phone = isset($data['phone']) ? trim($data['phone']) : null;
+        $fullName = Input::text($data['full_name'] ?? null);
+        $phone = isset($data['phone']) ? Input::text($data['phone'] ?? null) : null;
         $role = $data['role'] ?? 'customer';
         $status = $data['status'] ?? 'active';
         $emailVerifiedAt = $data['email_verified_at'] ?? null;

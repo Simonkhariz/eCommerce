@@ -75,28 +75,42 @@ class ReviewController
         }
 
         $productId = (int) $product['id'];
-        $duplicate = $this->db->fetchOne(
-            "SELECT `id` FROM `reviews` WHERE `product_id` = ? AND LOWER(`author_email`) = ? AND `status` <> 'rejected' LIMIT 1",
-            'is',
-            [$productId, $email]
-        );
+        // One review per account, or per typed email for signed-out reviewers. A signed-out
+        // review that used someone's email never blocks that person once they sign in.
+        $duplicate = $user
+            ? $this->db->fetchOne(
+                "SELECT `id` FROM `reviews` WHERE `product_id` = ? AND `user_id` = ? AND `status` <> 'rejected' LIMIT 1",
+                'ii',
+                [$productId, (int) $user['id']]
+            )
+            : $this->db->fetchOne(
+                "SELECT `id` FROM `reviews` WHERE `product_id` = ? AND `user_id` IS NULL AND LOWER(`author_email`) = ? AND `status` <> 'rejected' LIMIT 1",
+                'is',
+                [$productId, $email]
+            );
         if ($duplicate !== null) {
             Response::error('You have already reviewed this product. Thank you!', 409, 'ALREADY_REVIEWED');
         }
 
-        // Verified purchase: a paid (not refunded) order with this product, for this email or account.
-        $verified = $this->db->fetchOne(
-            "SELECT 1 AS ok
-             FROM `orders` o
-             JOIN `order_items` oi ON oi.order_id = o.id AND oi.product_id = ?
-             LEFT JOIN `users` u ON u.id = o.user_id
-             WHERE o.payment_status IN ('successful', 'partially_refunded')
-               AND o.order_status NOT IN ('cancelled', 'refunded')
-               AND (LOWER(o.guest_email) = ? OR LOWER(u.email) = ?" . ($user ? " OR o.user_id = ?" : '') . ")
-             LIMIT 1",
-            $user ? 'issi' : 'iss',
-            $user ? [$productId, $email, $email, (int) $user['id']] : [$productId, $email, $email]
-        ) !== null;
+        // Verified purchase: a paid (not refunded) order with this product that is provably the
+        // reviewer's: placed on their account, or under their email once that email is confirmed.
+        // A typed email proves nothing (anyone can type a buyer's address), so signed-out reviews
+        // are never marked verified.
+        $verified = false;
+        if ($user) {
+            $confirmedEmail = !empty($user['email_verified_at']) ? strtolower((string) $user['email']) : '';
+            $verified = $this->db->fetchOne(
+                "SELECT 1 AS ok
+                 FROM `orders` o
+                 JOIN `order_items` oi ON oi.order_id = o.id AND oi.product_id = ?
+                 WHERE o.payment_status IN ('successful', 'partially_refunded')
+                   AND o.order_status NOT IN ('cancelled', 'refunded')
+                   AND (o.user_id = ? OR (? <> '' AND LOWER(o.guest_email) = ?))
+                 LIMIT 1",
+                'iiss',
+                [$productId, (int) $user['id'], $confirmedEmail, $confirmedEmail]
+            ) !== null;
+        }
 
         $id = (int) $this->db->insert(
             "INSERT INTO `reviews` (`product_id`, `user_id`, `author_name`, `author_email`, `rating`, `title`, `comment`, `status`, `is_verified_purchase`)

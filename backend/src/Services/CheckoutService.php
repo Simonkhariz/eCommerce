@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\Input;
 use App\Config\Env;
 use App\Database\Database;
 use RuntimeException;
@@ -243,14 +244,14 @@ class CheckoutService
                 ];
 
                 $addressSnapshot = [
-                    'full_name' => trim($shippingAddress['full_name'] ?? ''),
-                    'phone' => trim($shippingAddress['phone'] ?? ''),
-                    'address_line1' => trim($shippingAddress['address_line1'] ?? ''),
-                    'address_line2' => trim($shippingAddress['address_line2'] ?? ''),
-                    'city' => trim($shippingAddress['city'] ?? ''),
-                    'state' => trim($shippingAddress['state'] ?? ''),
-                    'postal_code' => trim($shippingAddress['postal_code'] ?? ''),
-                    'country' => trim($shippingAddress['country'] ?? 'Nigeria'),
+                    'full_name' => Input::text($shippingAddress['full_name'] ?? null),
+                    'phone' => Input::text($shippingAddress['phone'] ?? null),
+                    'address_line1' => Input::text($shippingAddress['address_line1'] ?? null),
+                    'address_line2' => Input::text($shippingAddress['address_line2'] ?? null),
+                    'city' => Input::text($shippingAddress['city'] ?? null),
+                    'state' => Input::text($shippingAddress['state'] ?? null),
+                    'postal_code' => Input::text($shippingAddress['postal_code'] ?? null),
+                    'country' => Input::text($shippingAddress['country'] ?? null, 'Nigeria'),
                 ];
 
                 $notes = isset($input['notes']) ? trim((string) $input['notes']) : null;
@@ -551,8 +552,8 @@ class CheckoutService
      */
     public function resolveShippingZone(array $address, ?int $requestedZoneId = null): array
     {
-        $country = trim($address['country'] ?? '');
-        $state = trim($address['state'] ?? '');
+        $country = Input::text($address['country'] ?? null);
+        $state = Input::text($address['state'] ?? null);
 
         if ($state === '') {
             throw new InvalidArgumentException('Destination state is required to calculate shipping.');
@@ -750,7 +751,8 @@ class CheckoutService
 
         $missing = [];
         foreach ($requiredFields as $field => $label) {
-            if (empty(trim((string) ($address[$field] ?? '')))) {
+            // Input::text: a list here must count as missing, not as the word "Array".
+            if (Input::text($address[$field] ?? null) === '') {
                 $missing[$field] = "{$label} is required.";
             }
         }

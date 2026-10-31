@@ -69,6 +69,9 @@ function TrackOrderContent() {
   const wantsToPay = searchParams.get('pay') === '1';
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [order, setOrder] = useState<ApiOrder | null>(null);
+  // The checkout email the order was found with: lets this device start a payment without the
+  // access key (the order emails link here, so a guest elsewhere only has number and email).
+  const [lookupEmail, setLookupEmail] = useState<string>('');
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [copiedTracking, setCopiedTracking] = useState<boolean>(false);
 
@@ -94,6 +97,7 @@ function TrackOrderContent() {
         (res) => {
           setOrder(res);
           setOrderNumber(cleanNum);
+          setLookupEmail(verificationOpts?.email?.trim().toLowerCase() || '');
         },
         (err) => {
           setOrder(null);
@@ -182,7 +186,7 @@ function TrackOrderContent() {
       const guestToken = readGuestToken(order.order_number);
       const redirectUrl = `${window.location.origin}/checkout/callback?order=${encodeURIComponent(order.order_number)}`;
 
-      const res = await apiInitializePayment(order.order_number, guestToken, redirectUrl, gateway);
+      const res = await apiInitializePayment(order.order_number, guestToken, redirectUrl, gateway, guestToken ? undefined : lookupEmail || undefined);
       if (gateway === 'whatsapp') {
         if (whatsAppInvoiceUrl && whatsappTab) {
           whatsappTab.location.href = whatsAppInvoiceUrl;

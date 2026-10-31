@@ -1234,11 +1234,16 @@ export async function apiInitializePayment(
   orderNumber: string,
   guestAccessToken?: string,
   redirectUrl?: string,
-  gateway?: 'monnify' | 'kora' | string
+  gateway?: 'monnify' | 'kora' | string,
+  /** The checkout email, when the order was looked up with it (no access key on this device). */
+  orderEmail?: string
 ): Promise<PaymentInitializationResponse> {
   const headers: Record<string, string> = {};
   if (guestAccessToken) {
     headers['X-Guest-Access-Token'] = guestAccessToken;
+  }
+  if (orderEmail) {
+    headers['X-Order-Email'] = orderEmail;
   }
 
   return fetchFromApi<PaymentInitializationResponse>(

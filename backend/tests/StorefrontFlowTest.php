@@ -124,6 +124,16 @@ $wa = $t->http('POST', "/checkout/orders/{$onum}/initialize-payment", ['headers'
 $t->check('WhatsApp payment attempt opens', 'whatsapp', TestKit::get($wa, 'data.provider'));
 $hours = (int) $t->scalar("SELECT TIMESTAMPDIFF(HOUR, NOW(), `expires_at`) FROM `orders` WHERE `order_number` = ?", 's', [$onum]);
 $t->ok('WhatsApp attempt reserves the order for about a day', $hours >= 23, "hours={$hours}");
+$t->check('on another device, the checkout email starts a payment (the order emails link to tracking)', 'whatsapp', TestKit::get($t->http('POST', "/checkout/orders/{$onum}/initialize-payment", ['headers' => ["X-Order-Email: " . strtoupper($email)], 'json' => ['gateway' => 'whatsapp']]), 'data.provider'));
+$t->check('a wrong email cannot', 404, $t->http('POST', "/checkout/orders/{$onum}/initialize-payment", ['headers' => ['X-Order-Email: someone@example.test'], 'json' => ['gateway' => 'whatsapp']])['status']);
+$numEmail = $t->uniq('t-store-numbers') . '@example.test';
+$emails[] = $numEmail;
+$numbers = $t->http('POST', '/checkout/orders', ['headers' => ['Idempotency-Key: num' . bin2hex(random_bytes(12))], 'json' => ['email' => $numEmail, 'items' => [['product_id' => $pid, 'variant_id' => $vid, 'quantity' => 1]], 'shipping_address' => ['postal_code' => 100001] + $address('Number Fields', 'FCT', 'Garki')]]);
+$t->check('a number in a text field (postal code 100001) is accepted, not a server error', 201, $numbers['status']);
+$ordersCreated[] = (string) TestKit::get($numbers, 'data.order_number');
+// Give its unit back at once, so the stock counts checked further down are unchanged.
+$t->http('POST', '/checkout/orders/' . TestKit::get($numbers, 'data.order_number') . '/release', ['headers' => ['X-Guest-Access-Token: ' . TestKit::get($numbers, 'data.guest_access_token')], 'json' => []]);
+$t->check('a list where text belongs gets a clear 422, not a server error', 422, $t->http('POST', '/checkout/orders', ['json' => ['email' => $numEmail, 'items' => [['product_id' => $pid, 'variant_id' => $vid, 'quantity' => 1]], 'shipping_address' => ['full_name' => ['x']] + $address('', 'FCT', 'Garki')]])['status']);
 
 $t->section('"Mark as paid" for a WhatsApp transfer alerts the store, never pays the order');
 $t->check('mark as paid without access -> 404', 404, $t->http('POST', "/checkout/orders/{$onum}/payment-sent", ['json' => []])['status']);
@@ -225,8 +235,13 @@ $t->check('review accepted 201', 201, $strangerReview['status']);
 $t->check('review is pending', 'pending', TestKit::get($strangerReview, 'data.status'));
 $t->check('no paid order -> not a verified purchase', false, TestKit::get($strangerReview, 'data.verified_purchase'));
 $t->check('second review from the same email -> 409', 409, $t->http('POST', "/products/{$slug}/reviews", ['json' => ['author_name' => 'Stranger', 'email' => $stranger, 'rating' => 5, 'comment' => 'Trying to review it twice here.']])['status']);
-$buyerReview = $t->http('POST', "/products/{$slug}/reviews", ['json' => ['author_name' => 'Review Buyer', 'email' => strtoupper($buyer), 'rating' => 5, 'comment' => 'Bought it, great quality and fit.']]);
-$t->check('paid order for this product -> verified purchase', true, TestKit::get($buyerReview, 'data.verified_purchase'));
+$typedBuyer = $t->http('POST', "/products/{$slug}/reviews", ['json' => ['author_name' => 'Someone Else', 'email' => strtoupper($buyer), 'rating' => 1, 'comment' => 'Typing a buyer email proves nothing.']]);
+$t->check("signed out, typing a buyer's email -> accepted but not a verified purchase", [201, false], [$typedBuyer['status'], TestKit::get($typedBuyer, 'data.verified_purchase')]);
+$t->http('POST', '/auth/customer/magic-link', ['json' => ['email' => $buyer]]);
+$buyerSession = $t->http('POST', '/auth/customer/verify', ['jar' => 'rvbuyer', 'json' => ['token' => (string) $t->magicLinkToken($buyer)]]);
+$buyerReview = $t->http('POST', "/products/{$slug}/reviews", ['jar' => 'rvbuyer', 'csrf' => (string) TestKit::get($buyerSession, 'data.csrf_token'), 'json' => ['author_name' => 'Review Buyer', 'rating' => 5, 'comment' => 'Bought it, great quality and fit.']]);
+$t->check('the signed-in buyer is not blocked by that review', 201, $buyerReview['status']);
+$t->check('and their paid order for this product -> verified purchase', true, TestKit::get($buyerReview, 'data.verified_purchase'));
 $t->check('client cannot force verified (stored flag)', 0, (int) $t->scalar("SELECT `is_verified_purchase` FROM `reviews` WHERE `author_email` = ?", 's', [$stranger]));
 $pdpAfter = $t->http('GET', "/products/{$slug}");
 $t->check('pending reviews are not shown on the product', 0, count(array_filter((array) TestKit::get($pdpAfter, 'data.reviews'), static fn ($r) => in_array($r['author'] ?? '', ['Stranger', 'Review Buyer'], true))));

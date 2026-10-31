@@ -129,6 +129,8 @@ $t->check('/auth/me with cookie 200', 200, $me['status']);
 $csrf = (string) TestKit::get($me, 'data.csrf_token');
 $t->check('PUT profile without CSRF -> 403', 403, $t->http('PUT', '/customer/profile', ['jar' => 'cust', 'json' => ['phone' => '08000000000']])['status']);
 $t->check('PUT profile with CSRF -> 200', 200, $t->http('PUT', '/customer/profile', ['jar' => 'cust', 'csrf' => $csrf, 'json' => ['phone' => '08000000000']])['status']);
+$t->check('a number as the profile name is not a server error', 200, $t->http('PUT', '/customer/profile', ['jar' => 'cust', 'csrf' => $csrf, 'json' => ['full_name' => 12345]])['status']);
+$t->check('a list as an address name gets a clear 422', 422, $t->http('POST', '/customer/addresses', ['jar' => 'cust', 'csrf' => $csrf, 'json' => ['recipient_name' => [], 'phone' => '08000000000', 'street_address' => '1 Road', 'city' => 'Ikeja', 'state' => 'Lagos']])['status']);
 $t->check('customer cookie on an admin endpoint -> 401', 401, $t->http('GET', '/admin/orders', ['jar' => 'cust'])['status']);
 $raw = (string) ($jar[$customerCookie]['value'] ?? '');
 $t->check('session stored hashed (raw cookie is not a DB id)', 0, (int) $t->scalar("SELECT COUNT(*) FROM `sessions` WHERE `id` = ?", 's', [$raw]));

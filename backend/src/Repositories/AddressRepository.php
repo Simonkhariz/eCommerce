@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Repositories;
 
+use App\Support\Input;
 use App\Database\Database;
 
 /**
@@ -62,14 +63,14 @@ class AddressRepository
             $this->db->execute("UPDATE `addresses` SET `is_default` = 0 WHERE `user_id` = ?", 'i', [$userId]);
         }
 
-        $label = trim($data['label'] ?? 'Home');
-        $recipientName = trim($data['recipient_name']);
-        $phone = trim($data['phone']);
-        $streetAddress = trim($data['street_address']);
-        $city = trim($data['city']);
-        $state = trim($data['state']);
-        $country = trim($data['country'] ?? 'Nigeria');
-        $postalCode = isset($data['postal_code']) ? trim($data['postal_code']) : null;
+        $label = Input::text($data['label'] ?? null, 'Home');
+        $recipientName = Input::text($data['recipient_name'] ?? null);
+        $phone = Input::text($data['phone'] ?? null);
+        $streetAddress = Input::text($data['street_address'] ?? null);
+        $city = Input::text($data['city'] ?? null);
+        $state = Input::text($data['state'] ?? null);
+        $country = Input::text($data['country'] ?? null, 'Nigeria');
+        $postalCode = isset($data['postal_code']) ? Input::text($data['postal_code'] ?? null) : null;
 
         $sql = "INSERT INTO `addresses` (`user_id`, `label`, `recipient_name`, `phone`, `street_address`, `city`, `state`, `country`, `postal_code`, `is_default`)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";

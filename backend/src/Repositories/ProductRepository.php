@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Repositories;
 
+use App\Support\Input;
 use App\Database\Database;
 
 class ProductRepository
@@ -257,17 +258,17 @@ class ProductRepository
                 }
 
                 if (!empty($v['color_name'])) {
-                    $colorKey = strtolower(trim($v['color_name']));
+                    $colorKey = strtolower(Input::text($v['color_name'] ?? null));
                     if (!isset($colorsByProduct[$pid][$colorKey])) {
                         $colorsByProduct[$pid][$colorKey] = [
-                            'name' => trim($v['color_name']),
-                            'hex' => !empty($v['color_hex']) ? trim($v['color_hex']) : '#000000',
+                            'name' => Input::text($v['color_name'] ?? null),
+                            'hex' => !empty($v['color_hex']) ? Input::text($v['color_hex'] ?? null) : '#000000',
                         ];
                     }
                 }
 
                 if (!empty($v['size'])) {
-                    $sizeTrim = trim($v['size']);
+                    $sizeTrim = Input::text($v['size'] ?? null);
                     if (!in_array($sizeTrim, $sizesByProduct[$pid], true)) {
                         $sizesByProduct[$pid][] = $sizeTrim;
                     }
@@ -1098,7 +1099,7 @@ class ProductRepository
         $byOptions = [];
         foreach ($rows as $row) {
             $byId[(int) $row['id']] = $row;
-            $byOptions[strtolower(trim($row['size'])) . '|' . strtolower(trim($row['color_name']))] = $row;
+            $byOptions[strtolower(Input::text($row['size'] ?? null)) . '|' . strtolower(Input::text($row['color_name'] ?? null))] = $row;
         }
 
         $keptIds = [];

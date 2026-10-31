@@ -368,7 +368,11 @@ class CheckoutController
         RateLimiter::attempt('payment_init', RequestContext::clientIp(), 20, 600);
         $body = JsonBodyMiddleware::getBody();
 
-        if (!$this->canViewOrder($order, false, true, (string) ($body['guest_access_token'] ?? ''))) {
+        // The checkout email counts here as it does for looking the order up: the order emails
+        // link to the tracking page, so a guest on another device has only the order number and
+        // email. Starting a payment can't harm the owner (whoever pays, pays for this order) and
+        // can't hold the stock past the order's overall limit.
+        if (!$this->canViewOrder($order, true, true, (string) ($body['guest_access_token'] ?? ''))) {
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
