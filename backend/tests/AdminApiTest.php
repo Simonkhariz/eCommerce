@@ -90,6 +90,29 @@ $t->check('update expiry is saved', '2100-01-15 23:59:59', $t->scalar("SELECT `e
 $t->check('not-yet-started code refused at checkout', false, TestKit::get($t->http('POST', '/checkout/validate-promo', ['json' => ['code' => $pcode, 'subtotal' => 10000]]), 'success'));
 $t->check('unused promotion is deleted', true, TestKit::get($A('DELETE', "/admin/promotions/{$promoId}"), 'data.deleted'));
 
+// Coupon rules: a fixed amount off, a minimum order, a cap on a percentage.
+$fixed = 'TF' . strtoupper(bin2hex(random_bytes(3)));
+$capped = 'TC' . strtoupper(bin2hex(random_bytes(3)));
+$t->cleanup(fn () => $t->sql("DELETE FROM `promotions` WHERE `code` IN (?, ?)", 'ss', [$fixed, $capped]));
+$t->check('a fixed code needs an amount', 422, $A('POST', '/admin/promotions', ['json' => ['code' => $fixed, 'description' => 't', 'discount_type' => 'fixed']])['status']);
+$t->check('a fixed amount above the minimum order is refused', 422, $A('POST', '/admin/promotions', ['json' => ['code' => $fixed, 'description' => 't', 'discount_type' => 'fixed', 'discount_amount' => 25000, 'min_order_amount' => 20000]])['status']);
+$t->check('create "N5,000 off orders of N20,000+"', 201, $A('POST', '/admin/promotions', ['json' => ['code' => $fixed, 'description' => 'Five off', 'discount_type' => 'fixed', 'discount_amount' => 5000, 'min_order_amount' => 20000]])['status']);
+$t->check('create "10% off, at most N1,000"', 201, $A('POST', '/admin/promotions', ['json' => ['code' => $capped, 'description' => 'Ten capped', 'discount_type' => 'percent', 'discount_percent' => 10, 'max_discount_amount' => 1000]])['status']);
+$list = (array) TestKit::get($A('GET', '/admin/promotions?per_page=100'), 'data.items');
+$labels = array_column($list, 'label', 'code');
+$t->check('admin list describes each code', ['₦5,000 off on orders of ₦20,000+', '10% off (up to ₦1,000)'], [$labels[$fixed] ?? null, $labels[$capped] ?? null]);
+$promoCheck = static fn (string $code, float $subtotal): array => $t->http('POST', '/checkout/validate-promo', ['json' => ['code' => $code, 'subtotal' => $subtotal]]);
+$below = $promoCheck($fixed, 15000);
+$t->check('below the minimum: refused, saying how much more to add', [422, true], [$below['status'], str_contains((string) TestKit::get($below, 'error.message'), 'Add ₦5,000.00 more')]);
+$t->check('at the minimum: N5,000 off', 5000.0, (float) TestKit::get($promoCheck($fixed, 20000), 'data.discount_amount'));
+$t->check('10% of N50,000 is capped at N1,000', 1000.0, (float) TestKit::get($promoCheck($capped, 50000), 'data.discount_amount'));
+$t->check('10% of N5,000 is N500 (under the cap)', 500.0, (float) TestKit::get($promoCheck($capped, 5000), 'data.discount_amount'));
+$t->check('a fixed code never takes off more than the items cost', 0, (int) $t->scalar("SELECT COUNT(*) FROM `promotions` WHERE `code` = ? AND `discount_amount` > `min_order_amount`", 's', [$fixed]));
+$fixedId = (int) $t->scalar("SELECT `id` FROM `promotions` WHERE `code` = ?", 's', [$fixed]);
+$A('PUT', "/admin/promotions/{$fixedId}", ['json' => ['min_order_amount' => '']]);
+$t->check('clearing the minimum saves it as none', null, $t->scalar("SELECT `min_order_amount` FROM `promotions` WHERE `id` = ?", 'i', [$fixedId]));
+$t->check('the homepage shows the wording', true, in_array('₦5,000 off', array_column((array) TestKit::get($t->http('GET', '/storefront/homepage'), 'data.promotions'), 'label'), true));
+
 // -----------------------------------------------------------------------------
 $t->section('Banners');
 $t->check('banner with javascript: link refused', 422, $A('POST', '/admin/storefront/banners', ['json' => ['title' => 'x', 'image_url' => '/uploads/x.jpg', 'cta_url' => 'javascript:alert(1)']])['status']);
@@ -225,6 +248,9 @@ if ($variant === null) {
         $t->sql("DELETE FROM `email_outbox` WHERE `recipient_email` = ?", 's', [$email]);
     });
 
+    $outboxKey = static fn (string $key): int => (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `dedup_key` = ?", 's', [$key]);
+    $adminEmail = strtolower($admin['email']);
+    $t->check('admins are emailed about the new order', 1, $outboxKey("admin_new_order:{$onum}:{$adminEmail}"));
     $detail = $A('GET', "/admin/orders/{$onum}");
     $t->check('admin sees the new order', 'pending_payment', TestKit::get($detail, 'data.order_status'));
     $t->check('unpaid order can only be cancelled', ['cancelled'], TestKit::get($detail, 'data.allowed_transitions'));
@@ -233,6 +259,9 @@ if ($variant === null) {
     $t->check('record manual payment', 200, $A('POST', "/admin/orders/{$onum}/confirm-payment", ['json' => ['reference' => 'BANK-' . bin2hex(random_bytes(4))]])['status']);
     $detail = $A('GET', "/admin/orders/{$onum}");
     $t->check('order is paid', 'paid', TestKit::get($detail, 'data.order_status'));
+    $t->check('admins are emailed that the payment was received', 1, $outboxKey("admin_payment_received:{$onum}:{$adminEmail}"));
+    $t->check('paid -> processing', 'processing', TestKit::get($A('PATCH', "/admin/orders/{$onum}/status", ['json' => ['status' => 'processing']]), 'data.order_status'));
+    $t->check('the customer is emailed that the order is being prepared', 1, $outboxKey("order_status_update:{$onum}:processing"));
     $t->ok('paid order can be shipped', in_array('shipped', (array) TestKit::get($detail, 'data.allowed_transitions'), true));
     $t->check('PATCH status paid is refused', 422, $A('PATCH', "/admin/orders/{$onum}/status", ['json' => ['status' => 'paid']])['status']);
 
@@ -242,6 +271,7 @@ if ($variant === null) {
     $t->check('mark delivered', 200, $deliveredRes['status']);
     $t->ok('the answer keeps the activity log, including what was just done', count((array) TestKit::get($deliveredRes, 'data.audit_logs')) >= 1);
     $t->check('order is delivered', 'delivered', TestKit::get($A('GET', "/admin/orders/{$onum}"), 'data.order_status'));
+    $t->check('the customer is emailed that the order was delivered', 1, $outboxKey("order_status_update:{$onum}:delivered"));
     $t->check('attention filter works', 200, $A('GET', '/admin/orders?status=attention')['status']);
     $t->ok('order list includes customer email', TestKit::get($A('GET', '/admin/orders?search=' . urlencode($onum)), 'data.items.0.customer_email') === $email);
 
@@ -280,6 +310,7 @@ if ($variant === null) {
     $t->check('declining it offers "processing" (a label alone is not "sent")', ['processing'], TestKit::get($pending, 'data.allowed_transitions'));
     $t->check('"delivered" is refused for an order that was never sent', 422, $A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'delivered']])['status']);
     $t->check('declined: back to processing', 'processing', TestKit::get($A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'processing', 'comment' => 'Refund declined']]), 'data.order_status'));
+    $t->check('a declined refund moving the order back sends no "being prepared" email', 0, $outboxKey("order_status_update:{$onum2}:processing"));
     $t->check('and it can now be shipped', 200, $A('POST', "/admin/orders/{$onum2}/shipment", ['json' => ['carrier' => 'GIG Logistics', 'tracking_number' => 'TRK' . random_int(1000, 9999), 'status' => 'in_transit']])['status']);
 
     $lowOrOut = $A('GET', '/admin/inventory?filter=low_or_out&per_page=100');

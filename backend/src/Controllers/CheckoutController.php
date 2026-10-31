@@ -561,7 +561,12 @@ class CheckoutController
             Response::success([
                 'valid' => true,
                 'code' => $result['coupon']['code'],
+                'discount_type' => $result['coupon']['discount_type'],
                 'discount_percent' => $result['coupon']['discount_percent'],
+                'discount_value' => $result['coupon']['discount_value'],
+                'min_order_amount' => $result['coupon']['min_order_amount'],
+                'max_discount_amount' => $result['coupon']['max_discount_amount'],
+                'label' => $result['coupon']['label'],
                 'discount_amount' => $result['discount_amount'],
                 'description' => $result['coupon']['description'],
             ], "Promo code {$result['coupon']['code']} is valid!");

@@ -61,7 +61,7 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
 
         {appliedPromo && discountAmount > 0 && (
           <div className="flex items-center justify-between text-neutral-700">
-            <span>Discount (-{appliedPromo.discountPercent}%)</span>
+            <span>Discount ({appliedPromo.code})</span>
             <span className="font-bold text-red-600">-{formatPrice(discountAmount)}</span>
           </div>
         )}
@@ -89,7 +89,7 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
             <div className="flex items-center gap-2 text-green-700 font-semibold">
               <HugeiconsIcon icon={Tick02Icon} size={16} aria-hidden="true" />
               <span>
-                Code <strong className="uppercase">{appliedPromo.code}</strong> applied ({appliedPromo.discountPercent}% OFF)
+                Code <strong className="uppercase">{appliedPromo.code}</strong> applied{appliedPromo.label ? ` (${appliedPromo.label})` : ''}
               </span>
             </div>
             <button

@@ -2,6 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { CartItem, Product, ProductVariant, PromoCode } from '@/types';
+import { couponDiscount, couponRuleFrom } from '@/lib/coupon';
 import {
   ApiSavedCartItem,
   PRODUCT_IMAGE_PLACEHOLDER,
@@ -13,6 +14,7 @@ import {
   ApiError,
   errorMessage,
   getProductDetail,
+  type ValidatePromoResponse,
 } from '@/lib/api-client';
 import { useAuth } from '@/context/AuthContext';
 import { clearPendingOrder, isOrderSettled, markOrderSettled, readGuestToken, readPendingOrder } from '@/lib/pending-order';
@@ -75,6 +77,13 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 const PROMO_STORAGE_KEY = 'shopco_promo_code';
+
+/** The applied code as the cart keeps it, from the server's promo check. */
+function promoFrom(res: ValidatePromoResponse): PromoCode {
+  const rule = couponRuleFrom(res);
+  const fallback = rule.discountType === 'fixed' ? `₦${rule.discountValue.toLocaleString('en-NG')} off` : `${rule.discountPercent}% off`;
+  return { code: res.code, description: res.description || '', label: res.label || fallback, rule };
+}
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -287,7 +296,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const code = readJson<string | null>(PROMO_STORAGE_KEY, null);
     if (code) {
-      setAppliedPromo({ code, discountPercent: 0, description: '' });
+      // Rules unknown until the server check below: no discount is previewed meanwhile.
+      setAppliedPromo({ code, description: '', label: '', rule: couponRuleFrom({ discount_type: 'percent', discount_percent: 0 }) });
     }
   }, []);
 
@@ -302,11 +312,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const res = await apiValidatePromotion(promoCode, subtotal);
         if (res?.valid) {
-          setAppliedPromo({
-            code: res.code,
-            discountPercent: res.discount_percent,
-            description: res.description || `${res.discount_percent}% off`,
-          });
+          setAppliedPromo(promoFrom(res));
         } else {
           throw new ApiError('Coupon is no longer valid.', 422, 'INVALID_PROMOTION');
         }
@@ -600,14 +606,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await apiValidatePromotion(cleanCode, subtotal);
       if (res && res.valid) {
-        setAppliedPromo({
-          code: res.code,
-          discountPercent: res.discount_percent,
-          description: res.description || `${res.discount_percent}% off`,
-        });
+        const promo = promoFrom(res);
+        setAppliedPromo(promo);
         writeStorage(PROMO_STORAGE_KEY, JSON.stringify(res.code));
-        showToast('Coupon applied', `${res.code} · ${res.discount_percent}% off`);
-        return { success: true, message: `Promo code ${res.code} applied! (-${res.discount_percent}%)` };
+        showToast('Coupon applied', `${res.code} · ${promo.label}`);
+        return { success: true, message: `Promo code ${res.code} applied! (${promo.label})` };
       }
       return { success: false, message: 'Coupon code is invalid or deactivated.' };
     } catch (err) {
@@ -620,8 +623,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     writeStorage(PROMO_STORAGE_KEY, null);
   };
 
-  const discountPercent = appliedPromo ? appliedPromo.discountPercent : 0;
-  const discountAmount = subtotal > 0 ? Math.round((subtotal * discountPercent) / 100) : 0;
+  const discountAmount = appliedPromo ? couponDiscount(appliedPromo.rule, subtotal) : 0;
   const total = Math.max(0, subtotal - discountAmount);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
 

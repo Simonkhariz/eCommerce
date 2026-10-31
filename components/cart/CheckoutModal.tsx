@@ -609,7 +609,7 @@ function CheckoutSession({
                     <HugeiconsIcon icon={Ticket02Icon} size={14} className="text-emerald-700" aria-hidden="true" />
                     <span>Coupon <strong>{quote.applied_coupon.code}</strong></span>
                   </div>
-                  <span className="font-bold">-{quote.applied_coupon.discount_percent}%</span>
+                  <span className="font-bold">-{formatPrice(quote.discount_amount)}</span>
                 </div>
               )}
 

@@ -470,6 +470,11 @@ class AdminOperationsController
         foreach ($promotions as &$p) {
             $p['is_active'] = (bool) $p['is_active'];
             $p['discount_percent'] = (int) $p['discount_percent'];
+            $p['discount_type'] = \App\Services\CouponRules::type($p);
+            $p['discount_amount'] = $p['discount_amount'] === null ? null : (float) $p['discount_amount'];
+            $p['min_order_amount'] = $p['min_order_amount'] === null ? null : (float) $p['min_order_amount'];
+            $p['max_discount_amount'] = $p['max_discount_amount'] === null ? null : (float) $p['max_discount_amount'];
+            $p['label'] = \App\Services\CouponRules::label($p);
             $p['max_uses'] = (int) $p['max_uses'];
             $p['used_count'] = (int) $p['used_count'];
         }
@@ -487,7 +492,16 @@ class AdminOperationsController
     {
         $code = array_key_exists('code', $body) ? strtoupper(trim((string) $body['code'])) : ($existing['code'] ?? '');
         $description = array_key_exists('description', $body) ? trim((string) $body['description']) : ($existing['description'] ?? '');
+        $type = array_key_exists('discount_type', $body) ? (string) $body['discount_type'] : (string) ($existing['discount_type'] ?? 'percent');
         $percent = array_key_exists('discount_percent', $body) ? (int) $body['discount_percent'] : (int) ($existing['discount_percent'] ?? 0);
+        // Money fields: empty means "none"; kept from the stored code when left out.
+        $money = static function (array $body, ?array $existing, string $key): ?float {
+            $value = array_key_exists($key, $body) ? $body[$key] : ($existing[$key] ?? null);
+            return $value === null || $value === '' ? null : (is_numeric($value) ? round((float) $value, 2) : -1.0);
+        };
+        $amount = $money($body, $existing, 'discount_amount');
+        $minOrder = $money($body, $existing, 'min_order_amount');
+        $maxDiscount = $money($body, $existing, 'max_discount_amount');
         $maxUses = array_key_exists('max_uses', $body) ? (int) $body['max_uses'] : (int) ($existing['max_uses'] ?? 0);
         $isActive = array_key_exists('is_active', $body) ? (int) (bool) $body['is_active'] : (int) ($existing['is_active'] ?? 1);
 
@@ -505,8 +519,28 @@ class AdminOperationsController
         if (!preg_match('/^[A-Z0-9_-]{3,30}$/', $code)) {
             $errors['code'] = 'Use 3-30 letters, numbers, dashes or underscores.';
         }
-        if ($percent < 1 || $percent > 90) {
-            $errors['discount_percent'] = 'Discount must be between 1% and 90%.';
+        if (!in_array($type, ['percent', 'fixed'], true)) {
+            $errors['discount_type'] = 'Choose a percentage or a fixed amount.';
+        } elseif ($type === 'percent') {
+            if ($percent < 1 || $percent > 90) {
+                $errors['discount_percent'] = 'Discount must be between 1% and 90%.';
+            }
+            $amount = null;
+            if ($maxDiscount !== null && $maxDiscount <= 0) {
+                $errors['max_discount_amount'] = 'Leave empty for no cap, or enter an amount above 0.';
+            }
+        } else {
+            if ($amount === null || $amount <= 0) {
+                $errors['discount_amount'] = 'Enter the amount to take off (above 0).';
+            }
+            $percent = 0;
+            $maxDiscount = null; // a fixed amount is its own cap
+        }
+        if ($minOrder !== null && $minOrder <= 0) {
+            $errors['min_order_amount'] = 'Leave empty for no minimum, or enter an amount above 0.';
+        }
+        if (!isset($errors['discount_amount']) && !isset($errors['min_order_amount']) && $type === 'fixed' && $amount !== null && $minOrder !== null && $amount > $minOrder) {
+            $errors['discount_amount'] = 'The amount off cannot be more than the minimum order.';
         }
         if ($maxUses < 0) {
             $errors['max_uses'] = 'Use 0 for unlimited, or a positive limit.';
@@ -524,7 +558,7 @@ class AdminOperationsController
             Response::error('Please fix the highlighted fields.', 422, 'VALIDATION_ERROR', $errors);
         }
 
-        return compact('code', 'description', 'percent', 'maxUses', 'isActive', 'startsAt', 'expiresAt');
+        return compact('code', 'description', 'type', 'percent', 'amount', 'minOrder', 'maxDiscount', 'maxUses', 'isActive', 'startsAt', 'expiresAt');
     }
 
     public function createPromotion(): void
@@ -536,10 +570,10 @@ class AdminOperationsController
         }
 
         $id = (int) $this->db->insert(
-            "INSERT INTO `promotions` (`code`, `description`, `discount_percent`, `max_uses`, `is_active`, `starts_at`, `expires_at`)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            'ssiiiss',
-            [$in['code'], $in['description'], $in['percent'], $in['maxUses'], $in['isActive'], $in['startsAt'], $in['expiresAt']]
+            "INSERT INTO `promotions` (`code`, `description`, `discount_type`, `discount_percent`, `discount_amount`, `min_order_amount`, `max_discount_amount`, `max_uses`, `is_active`, `starts_at`, `expires_at`)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            'sssidddiiss',
+            [$in['code'], $in['description'], $in['type'], $in['percent'], $in['amount'], $in['minOrder'], $in['maxDiscount'], $in['maxUses'], $in['isActive'], $in['startsAt'], $in['expiresAt']]
         );
 
         AuditService::record($this->adminId(), 'promotion.create', 'promotion', (string) $id, null, $in);
@@ -561,10 +595,11 @@ class AdminOperationsController
 
         $this->db->executeUpdate(
             "UPDATE `promotions`
-             SET `code` = ?, `description` = ?, `discount_percent` = ?, `max_uses` = ?, `is_active` = ?, `starts_at` = ?, `expires_at` = ?
+             SET `code` = ?, `description` = ?, `discount_type` = ?, `discount_percent` = ?, `discount_amount` = ?, `min_order_amount` = ?,
+                 `max_discount_amount` = ?, `max_uses` = ?, `is_active` = ?, `starts_at` = ?, `expires_at` = ?
              WHERE `id` = ?",
-            'ssiiissi',
-            [$in['code'], $in['description'], $in['percent'], $in['maxUses'], $in['isActive'], $in['startsAt'], $in['expiresAt'], $id]
+            'sssidddiissi',
+            [$in['code'], $in['description'], $in['type'], $in['percent'], $in['amount'], $in['minOrder'], $in['maxDiscount'], $in['maxUses'], $in['isActive'], $in['startsAt'], $in['expiresAt'], $id]
         );
 
         AuditService::record($this->adminId(), 'promotion.update', 'promotion', (string) $id, $promo, $in);

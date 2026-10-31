@@ -202,7 +202,7 @@ class CatalogController
         // Active promotions (validated by date and max_uses) and banners
         $db = Database::getInstance();
         $promotions = $db->fetchAll(
-            "SELECT code, description, discount_percent FROM promotions 
+            "SELECT code, description, discount_type, discount_percent, discount_amount, min_order_amount, max_discount_amount FROM promotions 
              WHERE is_active = 1 
                AND (starts_at IS NULL OR starts_at <= NOW()) 
                AND (expires_at IS NULL OR expires_at >= NOW()) 
@@ -254,7 +254,10 @@ class CatalogController
             'new_arrivals' => $newArrivals,
             'top_selling' => $topSelling,
             'categories' => $categories,
-            'promotions' => $promotions,
+            'promotions' => array_map(
+                static fn (array $p): array => ['code' => $p['code'], 'description' => $p['description']] + \App\Services\CouponRules::publicFields($p),
+                $promotions
+            ),
             'banners' => $banners,
             'reviews' => $reviews,
             'brands' => StoreBrands::parse((string) ($brandSetting['value'] ?? '')),

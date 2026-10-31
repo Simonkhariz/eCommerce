@@ -107,6 +107,11 @@ export interface ApiPromotion {
   code: string;
   description: string;
   discount_percent: number;
+  discount_type?: 'percent' | 'fixed';
+  discount_value?: number;
+  min_order_amount?: number | null;
+  max_discount_amount?: number | null;
+  label?: string;
 }
 
 export interface ApiBanner {
@@ -999,7 +1004,7 @@ export interface CheckoutQuoteResponse {
   discount_amount: number;
   shipping_fee: number;
   grand_total: number;
-  applied_coupon: { id: number; code: string; description: string; discount_percent: number } | null;
+  applied_coupon: { id: number; code: string; description: string; discount_percent: number; label?: string } | null;
   shipping_zone: ShippingZone | null;
   eligible_zones: ShippingZone[];
   origin: StoreOrigin;
@@ -1115,6 +1120,11 @@ export interface ValidatePromoResponse {
   discount_percent: number;
   discount_amount: number;
   description: string;
+  discount_type?: 'percent' | 'fixed';
+  discount_value?: number;
+  min_order_amount?: number | null;
+  max_discount_amount?: number | null;
+  label?: string;
 }
 
 /**

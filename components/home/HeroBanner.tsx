@@ -143,7 +143,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
             <p className="mb-[clamp(0.75rem,2.4svh,1.5rem)] inline-flex max-w-full items-center gap-2 rounded-full bg-black px-3.5 py-1.5 text-[11px] font-semibold tracking-wide text-white shadow-sm sm:text-xs">
               <Tag className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" aria-hidden="true" />
               <span className="truncate">
-                Special offer: use code <strong className="text-yellow-400">{activePromo.code}</strong> for {activePromo.discount_percent}% off
+                Special offer: use code <strong className="text-yellow-400">{activePromo.code}</strong> for {activePromo.label || `${activePromo.discount_percent}% off`}
               </span>
             </p>
           )}

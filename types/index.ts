@@ -119,6 +119,9 @@ export interface FilterState {
 
 export interface PromoCode {
   code: string;
-  discountPercent: number;
   description: string;
+  /** Short wording from the server, e.g. "10% off (up to ₦10,000) on orders of ₦20,000+". */
+  label: string;
+  /** The code's rules, to preview the discount in the cart (the server decides at checkout). */
+  rule: import('@/lib/coupon').CouponRule;
 }

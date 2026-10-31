@@ -463,7 +463,16 @@ export interface Promotion {
   id: number;
   code: string;
   description: string;
+  discount_type: 'percent' | 'fixed';
   discount_percent: number;
+  /** Fixed codes: the amount taken off. */
+  discount_amount: number | null;
+  /** The items subtotal must be at least this (null: no minimum). */
+  min_order_amount: number | null;
+  /** Percentage codes: never take off more than this (null: no cap). */
+  max_discount_amount: number | null;
+  /** e.g. "10% off (up to ₦10,000) on orders of ₦20,000+" */
+  label: string;
   max_uses: number;
   used_count: number;
   is_active: boolean;
@@ -475,7 +484,11 @@ export interface Promotion {
 export interface PromotionInput {
   code: string;
   description: string;
+  discount_type: 'percent' | 'fixed';
   discount_percent: number;
+  discount_amount: number | null;
+  min_order_amount: number | null;
+  max_discount_amount: number | null;
   /** 0 = unlimited */
   max_uses: number;
   is_active: boolean;

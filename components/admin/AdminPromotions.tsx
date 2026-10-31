@@ -22,6 +22,7 @@ import {
   PageHeader,
   Pagination,
   Panel,
+  Select,
   StatusPill,
   Table,
   TextInput,
@@ -58,7 +59,11 @@ function dateOnly(value: string | null): string {
 interface FormState {
   code: string;
   description: string;
+  discount_type: 'percent' | 'fixed';
   discount_percent: string;
+  discount_amount: string;
+  min_order_amount: string;
+  max_discount_amount: string;
   max_uses: string;
   starts_at: string;
   expires_at: string;
@@ -68,7 +73,11 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   code: '',
   description: '',
+  discount_type: 'percent',
   discount_percent: '10',
+  discount_amount: '',
+  min_order_amount: '',
+  max_discount_amount: '',
   max_uses: '0',
   starts_at: '',
   expires_at: '',
@@ -89,7 +98,11 @@ export function AdminPromotions() {
   const toInput = (p: Promotion, changes: Partial<PromotionInput> = {}): PromotionInput => ({
     code: p.code,
     description: p.description,
+    discount_type: p.discount_type,
     discount_percent: p.discount_percent,
+    discount_amount: p.discount_amount,
+    min_order_amount: p.min_order_amount,
+    max_discount_amount: p.max_discount_amount,
     max_uses: p.max_uses,
     is_active: p.is_active,
     starts_at: dateOnly(p.starts_at) || null,
@@ -180,7 +193,7 @@ export function AdminPromotions() {
                       <span className="block font-mono text-[13px] font-semibold text-[#111827]">{p.code}</span>
                       {p.description && <span className="block max-w-[280px] truncate text-xs text-[#6b7280]">{p.description}</span>}
                     </td>
-                    <td className="tabular-nums">{p.discount_percent}% off</td>
+                    <td className="tabular-nums">{p.label || `${p.discount_percent}% off`}</td>
                     <td className="whitespace-nowrap tabular-nums">
                       {p.used_count} / {p.max_uses > 0 ? p.max_uses : 'Unlimited'}
                     </td>
@@ -244,7 +257,11 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
           : {
               code: promotion.code,
               description: promotion.description ?? '',
-              discount_percent: String(promotion.discount_percent),
+              discount_type: promotion.discount_type ?? 'percent',
+              discount_percent: String(promotion.discount_percent || 10),
+              discount_amount: promotion.discount_amount != null ? String(promotion.discount_amount) : '',
+              min_order_amount: promotion.min_order_amount != null ? String(promotion.min_order_amount) : '',
+              max_discount_amount: promotion.max_discount_amount != null ? String(promotion.max_discount_amount) : '',
               max_uses: String(promotion.max_uses),
               starts_at: dateOnly(promotion.starts_at),
               expires_at: dateOnly(promotion.expires_at),
@@ -261,9 +278,19 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
     const code = form.code.trim().toUpperCase();
     const percent = parseInt(form.discount_percent, 10);
     const maxUses = parseInt(form.max_uses || '0', 10);
+    // Money fields: empty means "none".
+    const money = (v: string): number | null => (v.trim() === '' ? null : Number(v));
+    const amount = money(form.discount_amount);
+    const minOrder = money(form.min_order_amount);
+    const maxDiscount = money(form.max_discount_amount);
+    const fixed = form.discount_type === 'fixed';
     const local: Record<string, string> = {};
     if (!/^[A-Z0-9_-]{3,30}$/.test(code)) local.code = 'Use 3-30 letters, numbers, dashes or underscores.';
-    if (!Number.isFinite(percent) || percent < 1 || percent > 90) local.discount_percent = 'Discount must be between 1% and 90%.';
+    if (!fixed && (!Number.isFinite(percent) || percent < 1 || percent > 90)) local.discount_percent = 'Discount must be between 1% and 90%.';
+    if (fixed && (amount === null || !Number.isFinite(amount) || amount <= 0)) local.discount_amount = 'Enter the amount to take off (above 0).';
+    if (minOrder !== null && (!Number.isFinite(minOrder) || minOrder <= 0)) local.min_order_amount = 'Leave empty for no minimum, or enter an amount above 0.';
+    if (!fixed && maxDiscount !== null && (!Number.isFinite(maxDiscount) || maxDiscount <= 0)) local.max_discount_amount = 'Leave empty for no cap, or enter an amount above 0.';
+    if (fixed && amount !== null && minOrder !== null && amount > minOrder) local.discount_amount = 'The amount off cannot be more than the minimum order.';
     if (!Number.isFinite(maxUses) || maxUses < 0) local.max_uses = 'Use 0 for unlimited, or a positive limit.';
     if (form.starts_at && form.expires_at && form.expires_at < form.starts_at) local.expires_at = 'The end date must be on or after the start date.';
     setErrors(local);
@@ -274,7 +301,11 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
       await adminSavePromotion(existing?.id ?? null, {
         code,
         description: form.description.trim(),
-        discount_percent: percent,
+        discount_type: form.discount_type,
+        discount_percent: fixed ? 0 : percent,
+        discount_amount: fixed ? amount : null,
+        min_order_amount: minOrder,
+        max_discount_amount: fixed ? null : maxDiscount,
         max_uses: maxUses,
         is_active: form.is_active,
         starts_at: form.starts_at || null,
@@ -323,11 +354,41 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
             />
           )}
         </Field>
-        <Field label="Discount (%)" required error={errors.discount_percent} hint="1% to 90%.">
+        <Field label="Discount type" error={errors.discount_type} hint="A percentage of the items, or a fixed amount off.">
           {(p) => (
-            <TextInput {...p} type="number" min={1} max={90} step={1} value={form.discount_percent} onChange={(e) => set('discount_percent', e.target.value)} />
+            <Select {...p} value={form.discount_type} onChange={(e) => set('discount_type', e.target.value === 'fixed' ? 'fixed' : 'percent')}>
+              <option value="percent">Percentage (%)</option>
+              <option value="fixed">Fixed amount (₦)</option>
+            </Select>
           )}
         </Field>
+        {form.discount_type === 'percent' ? (
+          <Field label="Discount (%)" required error={errors.discount_percent} hint="1% to 90%.">
+            {(p) => (
+              <TextInput {...p} type="number" min={1} max={90} step={1} value={form.discount_percent} onChange={(e) => set('discount_percent', e.target.value)} />
+            )}
+          </Field>
+        ) : (
+          <Field label="Amount off (₦)" required error={errors.discount_amount} hint="Taken off the items total.">
+            {(p) => (
+              <TextInput {...p} type="number" min={1} step="0.01" value={form.discount_amount} onChange={(e) => set('discount_amount', e.target.value)} />
+            )}
+          </Field>
+        )}
+        <Field label="Minimum order (₦)" error={errors.min_order_amount} hint="Items total needed for the code to work. Empty: no minimum.">
+          {(p) => (
+            <TextInput {...p} type="number" min={1} step="0.01" value={form.min_order_amount} onChange={(e) => set('min_order_amount', e.target.value)} />
+          )}
+        </Field>
+        {form.discount_type === 'percent' ? (
+          <Field label="Maximum discount (₦)" error={errors.max_discount_amount} hint="The most the code can take off. Empty: no cap.">
+            {(p) => (
+              <TextInput {...p} type="number" min={1} step="0.01" value={form.max_discount_amount} onChange={(e) => set('max_discount_amount', e.target.value)} />
+            )}
+          </Field>
+        ) : (
+          <div className="hidden sm:block" aria-hidden="true" />
+        )}
         <Field label="Description" error={errors.description} className="sm:col-span-2" hint="Shown to customers when the code is applied.">
           {(p) => <TextInput {...p} value={form.description} onChange={(e) => set('description', e.target.value)} maxLength={255} />}
         </Field>
