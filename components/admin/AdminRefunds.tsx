@@ -477,8 +477,8 @@ function RefundList({
                     {r.reason}
                   </span>
                   {Number(r.restocked) === 1 && <span className="block text-xs text-[#6b7280]">Items returned to stock</span>}
-                  {Number(r.restocked) === 2 && r.status === 'pending' && (
-                    <span className="block text-xs text-[#6b7280]">Items return to stock when completed</span>
+                  {Number(r.restocked) === 2 && r.status !== 'rejected' && (
+                    <span className="block text-xs text-[#6b7280]">Items return to stock once the order is fully refunded</span>
                   )}
                 </td>
                 <td>

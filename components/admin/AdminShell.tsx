@@ -13,8 +13,11 @@ import { bellCountsQuery, storageAlertQuery } from '@/lib/admin-queries';
 
 const THEME_KEY = 'shopco_admin_theme';
 const THEME_EVENT = 'shopco-admin-theme';
+// The choice for this visit when browser storage is blocked (private mode, strict settings).
+let visitTheme: 'light' | 'dark' | null = null;
 
 function readTheme(): 'light' | 'dark' {
+  if (visitTheme) return visitTheme;
   try {
     const saved = localStorage.getItem(THEME_KEY);
     if (saved === 'light' || saved === 'dark') return saved;
@@ -47,10 +50,13 @@ function useAdminTheme(): ['light' | 'dark', () => void] {
     return () => document.documentElement.classList.remove('admin-dark');
   }, [theme]);
   const toggle = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
     try {
-      localStorage.setItem(THEME_KEY, theme === 'dark' ? 'light' : 'dark');
+      localStorage.setItem(THEME_KEY, next);
+      visitTheme = null;
     } catch {
-      // not saved: still switches for this visit
+      // Not saved: still switches for this visit.
+      visitTheme = next;
     }
     window.dispatchEvent(new Event(THEME_EVENT));
   };

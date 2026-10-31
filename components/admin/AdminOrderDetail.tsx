@@ -339,7 +339,9 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
                       <td className="whitespace-nowrap text-right tabular-nums">{formatPrice(num(r.amount))}</td>
                       <td>
                         <StatusPill
-                          label={`${humanize(r.status)}${r.restocked ? ' · restocked' : ''}`}
+                          label={`${humanize(r.status)}${
+                            Number(r.restocked) === 1 ? ' · restocked' : Number(r.restocked) === 2 ? ' · restock once fully refunded' : ''
+                          }`}
                           tone={r.status === 'completed' ? 'green' : r.status === 'rejected' ? 'neutral' : 'amber'}
                         />
                       </td>

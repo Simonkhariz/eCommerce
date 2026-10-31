@@ -28,6 +28,7 @@ use App\Services\KoraService;
 use App\Services\MonnifyService;
 use App\Services\PaymentAttempts;
 use App\Services\PaymentFinalizer;
+use App\Services\PaymentMethods;
 
 Env::load(BASE_PATH . '/.env');
 date_default_timezone_set(Env::get('APP_TIMEZONE', 'Africa/Lagos') ?: 'Africa/Lagos');
@@ -639,6 +640,18 @@ try {
     $fs->resolveRefund($firstId, 'completed', null);
     check('when the order becomes fully refunded the items go back to stock, once', stockOf($variantA) === $stockAfterSale + 2, stockOf($variantA) . " vs {$stockAfterSale}+2");
     check('and exactly one refund is marked as the one that restocked', (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `refunds` WHERE `order_id` = ? AND `restocked` = 1", 'i', [$r5Id])['c'] === 1 && (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `refunds` WHERE `order_id` = ? AND `restocked` = 2", 'i', [$r5Id])['c'] === 0);
+
+    // "Pay now" never points at a gateway without keys (made-up keys here; the real ones are put back).
+    $envVars = new ReflectionProperty(Env::class, 'vars');
+    $envVars->setAccessible(true);
+    $savedEnv = $envVars->getValue();
+    $envVars->setValue(null, ['KORA_SECRET_KEY' => '', 'MONNIFY_API_KEY' => '', 'MONNIFY_CONTRACT_CODE' => ''] + $savedEnv);
+    $noKeys = PaymentMethods::payNowGateway($db);
+    $envVars->setValue(null, ['KORA_SECRET_KEY' => 'sk_test_made_up', 'MONNIFY_API_KEY' => '', 'MONNIFY_CONTRACT_CODE' => ''] + $savedEnv);
+    $koraOnly = PaymentMethods::payNowGateway($db);
+    $envVars->setValue(null, $savedEnv);
+    check('with no gateway keys, "Pay now" is not offered (WhatsApp only)', $noKeys === null, var_export($noKeys, true));
+    check('with only Kora set up, "Pay now" uses Kora even though Monnify is the default', $koraOnly === 'kora', var_export($koraOnly, true));
 
     $flag = new ReflectionMethod(PaymentFinalizer::class, 'flagAttention');
     $flag->setAccessible(true);

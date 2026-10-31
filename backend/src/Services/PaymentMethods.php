@@ -87,19 +87,31 @@ final class PaymentMethods
         return in_array($value, self::GATEWAYS, true) ? $value : 'monnify';
     }
 
+    /** The gateway's keys are set in backend/.env (the same test admin Settings shows). */
+    public static function configured(string $gateway): bool
+    {
+        return match ($gateway) {
+            'kora' => trim((string) Env::get('KORA_SECRET_KEY', '')) !== '',
+            'monnify' => trim((string) Env::get('MONNIFY_API_KEY', '')) !== '' && trim((string) Env::get('MONNIFY_CONTRACT_CODE', '')) !== '',
+            default => true,
+        };
+    }
+
     /**
      * The gateway behind the storefront's single "Pay now" button: the admin's choice when it is
-     * on, otherwise the other gateway when that one is on, otherwise none (WhatsApp only).
+     * on and set up, otherwise the other gateway when that one is, otherwise none (WhatsApp only).
+     * A gateway without keys is never offered: its button could only fail.
      */
     public static function payNowGateway(?Database $db = null): ?string
     {
         $status = self::status($db);
+        $usable = static fn (string $g): bool => $status[$g]['enabled'] && self::configured($g);
         $primary = self::primaryGateway($db);
-        if ($status[$primary]['enabled']) {
+        if ($usable($primary)) {
             return $primary;
         }
         foreach (self::GATEWAYS as $gateway) {
-            if ($status[$gateway]['enabled']) {
+            if ($usable($gateway)) {
                 return $gateway;
             }
         }

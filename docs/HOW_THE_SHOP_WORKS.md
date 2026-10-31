@@ -284,7 +284,7 @@ The shopper sees **two buttons, not a list of gateways**:
 
 | Button | What the shopper does | How it is confirmed |
 |---|---|---|
-| **Pay now** (card or bank transfer) | Taken to the secure payment page of the store's gateway: **Monnify by default, or Kora if the owner chose it** in Settings. If the chosen one is switched off, the other is used | Automatically: the gateway's signed notice, and the shop asks the gateway directly when the shopper returns |
+| **Pay now** (card or bank transfer) | Taken to the secure payment page of the store's gateway: **Monnify by default, or Kora if the owner chose it** in Settings. If the chosen one is switched off or has no keys set up, the other is used; with neither ready, only WhatsApp is offered | Automatically: the gateway's signed notice, and the shop asks the gateway directly when the shopper returns |
 | **Pay via WhatsApp** (bank transfer) | A WhatsApp chat opens with **only the order number** filled in (the shopper writes the rest). They pay by transfer and tap **"I've sent the transfer"** | By the owner, after seeing the money arrive, by entering the bank reference |
 
 After **"I've sent the transfer"** the page shows **"Awaiting confirmation"** with a loader. It
@@ -339,6 +339,9 @@ Customer emails sent along the way:
 
 ### 4.8 Tracking and order history
 
+- **Paying from "Track order":** "Pay now", or WhatsApp followed by **"I've sent the transfer"**,
+  which opens the same "Awaiting confirmation" page. The order number and checkout email are
+  enough, so a customer on another device can pay and report a transfer.
 - **Receipts by order number:** on "Track order", the order number plus the checkout email (or
   the access key) finds the order; a paid order shows **"View receipt"**, which opens the full
   receipt to view, print, save as an image or share. An order number alone never opens a receipt,
@@ -602,7 +605,11 @@ instead of cancelled.
     refunded**.
   - **A refund can never exceed what was paid**, even if two people record refunds at the same
     moment.
-  - Refunds can be pending or completed, and can return the goods to stock.
+  - Refunds can be pending or completed, and can return the goods to stock. "Return to stock" can
+    be ticked on any of an order's refunds; the goods go back once, when the order is fully
+    refunded.
+  - **Declining a refund request** (moving the order back from "Refund pending") also closes any
+    refund still pending for it, so it can't be completed by mistake later.
   - A completed refund updates the order, payment and reports, and emails the customer.
 
 ### 5.9 Growth: promo codes, newsletter, banners and reviews

@@ -164,6 +164,15 @@ $t->check('order still awaiting payment', 'pending_payment', $t->scalar("SELECT 
 $afterClaim = $t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => ["X-Guest-Access-Token: {$token}"]]);
 $t->check('payment still unconfirmed', 'pending', TestKit::get($afterClaim, 'data.status'));
 $t->check('the payment page is told the customer reported paying (it shows "Awaiting confirmation")', true, TestKit::get($afterClaim, 'data.customer_marked_paid'));
+// A card attempt that failed after the transfer was reported must not hide the reported transfer.
+$failedId = (int) $t->db->insert(
+    "INSERT INTO `payments` (`order_id`, `provider`, `provider_reference`, `amount`, `currency`, `status`) SELECT `id`, 'kora', ?, `grand_total`, 'NGN', 'failed' FROM `orders` WHERE `order_number` = ?",
+    'ss',
+    ['KPY-FAILED-' . bin2hex(random_bytes(4)), $onum]
+);
+$afterFailed = $t->http('GET', "/checkout/orders/{$onum}/verify-payment", ['headers' => ["X-Guest-Access-Token: {$token}"]]);
+$t->check('a later failed card attempt does not hide the reported WhatsApp transfer', ['whatsapp', 'pending'], [TestKit::get($afterFailed, 'data.provider'), TestKit::get($afterFailed, 'data.status')]);
+$t->sql("DELETE FROM `payments` WHERE `id` = ?", 'i', [$failedId]);
 $adminEmail = strtolower((string) $t->scalar("SELECT `email` FROM `users` WHERE `id` = ?", 'i', [(int) $admin['id']]));
 $t->check('store admin emailed', 1, (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `template` = 'payment_claimed' AND `recipient_email` = ? AND `dedup_key` LIKE ?", 'ss', [$adminEmail, "payment_claimed:{$onum}:%"]));
 $t->check('history notes the claim', 1, (int) $t->scalar("SELECT COUNT(*) FROM `order_status_history` h JOIN `orders` o ON o.id = h.order_id WHERE o.order_number = ? AND h.comment LIKE 'Customer marked%'", 's', [$onum]));

@@ -53,7 +53,7 @@ export const ABOUT: { intro: string; sections: ContentSection[] } = {
       body: [
         'Browse the catalogue, choose your size and colour, and check out as a guest or with your account. Prices and stock you see are checked again by our server when you place the order.',
         'You can pay by card or bank transfer through our payment partners Kora and Monnify, or arrange a bank transfer with us on WhatsApp.',
-        'Delivery fees depend on the state you are delivering to and are shown before you pay.',
+        'Delivery fees depend on the state you are delivering to (and, for some areas, how many items you order) and are shown before you pay.',
       ],
     },
     {
@@ -72,7 +72,7 @@ export const SHIPPING: { intro: string; sections: ContentSection[] } = {
     {
       heading: 'Delivery fees',
       body: [
-        'The table on this page is live: it shows the delivery zones and fees our checkout uses right now.',
+        'The table on this page is live: it shows the delivery zones and fees our checkout uses right now. Where a fee covers a set number of items, each extra item adds the amount shown.',
         'If your state is not listed, checkout will tell you that we do not deliver there yet.',
       ],
     },

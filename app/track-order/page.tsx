@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Search,
@@ -20,11 +20,11 @@ import {
   X,
 } from 'lucide-react';
 import { formatPrice } from '@/lib/currency';
-import { ApiOrder, apiGetOrder, apiInitializePayment, errorMessage } from '@/lib/api-client';
+import { ApiOrder, apiGetOrder, apiInitializePayment, apiMarkPaymentSent, errorMessage } from '@/lib/api-client';
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, formatSupportPhone, whatsAppOrderFrom } from '@/lib/whatsapp';
-import { readGuestToken, saveGuestToken, saveLookupEmail } from '@/lib/pending-order';
+import { markInvoiceSent, readGuestToken, saveGuestToken, saveLookupEmail } from '@/lib/pending-order';
 import { useStoreSupport } from '@/lib/use-store-support';
-import { useLatestOrderNumber } from '@/lib/use-order-data';
+import { useInvoiceSent, useLatestOrderNumber } from '@/lib/use-order-data';
 import { getOrderStatusDisplay, STATUS_TONE_CLASSES } from '@/lib/order-status';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { Dialog } from '@/components/ui/Dialog';
@@ -189,6 +189,9 @@ function TrackOrderContent() {
 
       const res = await apiInitializePayment(order.order_number, guestToken, redirectUrl, gateway, guestToken ? undefined : lookupEmail || undefined);
       if (gateway === 'whatsapp') {
+        // Remembered on this device: the shopper can now report the transfer ("I've sent the
+        // transfer"), here or in checkout.
+        markInvoiceSent(order.order_number);
         if (whatsAppInvoiceUrl && whatsappTab) {
           whatsappTab.location.href = whatsAppInvoiceUrl;
         } else if (whatsAppInvoiceUrl) {
@@ -213,6 +216,25 @@ function TrackOrderContent() {
   const rawStatus = order?.status || order?.order_status || 'pending_payment';
   const statusDisplay = order ? getOrderStatusDisplay(rawStatus, order.payment_status, order.expires_at) : null;
   const canPay = Boolean(statusDisplay?.canPay);
+  // WhatsApp transfer: once the chat was opened, the shopper reports the transfer here; the store is
+  // told (admins emailed) and the payment page waits for its confirmation, then shows the receipt.
+  const router = useRouter();
+  const invoiceSent = useInvoiceSent(order?.order_number);
+  const [isReporting, setIsReporting] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const reportTransfer = async () => {
+    if (!order) return;
+    setIsReporting(true);
+    setReportError(null);
+    try {
+      const guestToken = readGuestToken(order.order_number);
+      await apiMarkPaymentSent(order.order_number, guestToken, guestToken ? undefined : lookupEmail || undefined);
+      router.push(`/checkout/callback?order=${encodeURIComponent(order.order_number)}`);
+    } catch (err) {
+      setReportError(errorMessage(err, 'We could not reach the store just now. Please try again in a moment.'));
+      setIsReporting(false);
+    }
+  };
   const isPaid = ['successful', 'partially_refunded', 'refunded'].includes(order?.payment_status ?? '');
   const isOffTrack = ['cancelled', 'returned', 'refund_pending', 'refunded'].includes(rawStatus);
 
@@ -396,7 +418,7 @@ function TrackOrderContent() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                 {canPay ? (
                   <>
                     {payNowGateway && (
@@ -414,6 +436,16 @@ function TrackOrderContent() {
                     {/* The same path as "Continue to WhatsApp": the server opens the WhatsApp
                         attempt (the order is held for the manual-transfer window and shows in
                         the admin's "Awaiting WhatsApp payment") before the invoice opens. */}
+                    {whatsappEnabled && invoiceSent && (
+                      <button
+                        type="button"
+                        onClick={() => void reportTransfer()}
+                        disabled={isReporting || Boolean(isInitializingPayment)}
+                        className="flex-1 sm:flex-initial bg-[#1DA851] hover:bg-[#178a43] text-white font-bold px-4 py-2.5 rounded-full text-xs transition-all shadow disabled:opacity-60"
+                      >
+                        {isReporting ? 'Telling the store…' : "I've sent the transfer"}
+                      </button>
+                    )}
                     {whatsappEnabled && (
                       <button
                         type="button"
@@ -427,6 +459,11 @@ function TrackOrderContent() {
                           WhatsApp Invoice
                         </div>
                       </button>
+                    )}
+                    {reportError && (
+                      <p role="alert" className="basis-full text-xs text-red-700">
+                        {reportError}
+                      </p>
                     )}
                   </>
                 ) : (

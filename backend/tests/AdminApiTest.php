@@ -205,14 +205,26 @@ $t->check('switching every method off is refused', 422, $A('PUT', '/admin/settin
 $t->check('switch Kora back on', 200, $A('PUT', '/admin/settings/payment-methods', ['json' => ['kora' => true]])['status']);
 $t->ok('checkout offers Kora again', in_array('kora', $methodIds(), true));
 $payNow = static fn (): ?string => TestKit::get($t->http('GET', '/checkout/payment-methods'), 'data.pay_now_gateway');
-$t->check('"Pay now" uses Monnify by default', 'monnify', $payNow());
+// Which gateways have keys on this server decides the right answer ("Pay now" never points at a
+// gateway that isn't set up: its button could only fail).
+$readonly = (array) TestKit::get($A('GET', '/admin/settings'), 'data.readonly');
+$ready = ['monnify' => ($readonly['monnify_mode'] ?? '') !== 'not_configured', 'kora' => ($readonly['kora_mode'] ?? '') !== 'not_configured'];
+$expect = static function (string $primary) use ($ready): ?string {
+    if ($ready[$primary]) {
+        return $primary;
+    }
+    $other = $primary === 'monnify' ? 'kora' : 'monnify';
+    return $ready[$other] ? $other : null;
+};
+$t->check('"Pay now" uses Monnify by default (when it is set up)', $expect('monnify'), $payNow());
 $t->check('an unknown "Pay now" gateway is refused', 422, $A('PUT', '/admin/settings/payment-methods', ['json' => ['primary_gateway' => 'paypal']])['status']);
 $t->check('the admin can choose Kora for "Pay now"', 'kora', TestKit::get($A('PUT', '/admin/settings/payment-methods', ['json' => ['primary_gateway' => 'kora']]), 'data.primary_gateway'));
-$t->check('checkout now uses Kora', 'kora', $payNow());
+$t->check('checkout now uses Kora (or the other gateway if Kora has no keys)', $expect('kora'), $payNow());
 $A('PUT', '/admin/settings/payment-methods', ['json' => ['kora' => false]]);
-$t->check('with Kora switched off, "Pay now" falls back to Monnify', 'monnify', $payNow());
+$t->check('with Kora switched off, "Pay now" falls back to Monnify (if set up)', $ready['monnify'] ? 'monnify' : null, $payNow());
 $A('PUT', '/admin/settings/payment-methods', ['json' => ['kora' => true, 'primary_gateway' => 'monnify']]);
 $t->check('settings show the choice', 'monnify', TestKit::get($A('GET', '/admin/settings'), 'data.readonly.primary_gateway'));
+$t->check('settings say which gateway "Pay now" really uses', $expect('monnify'), TestKit::get($A('GET', '/admin/settings'), 'data.readonly.pay_now_gateway'));
 
 // -----------------------------------------------------------------------------
 $t->section('System status');
@@ -352,8 +364,11 @@ if ($variant === null) {
     $pending = $A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'refund_pending', 'comment' => 'Customer asked for a refund']]);
     $t->check('an unsent paid order can be marked refund pending', 'refund_pending', TestKit::get($pending, 'data.order_status'));
     $t->check('declining it offers "processing" (a label alone is not "sent")', ['processing'], TestKit::get($pending, 'data.allowed_transitions'));
+    $pendingRefund = $A('POST', '/admin/refunds', ['json' => ['order_number' => $onum2, 'amount' => 100, 'reason' => 'Requested by the customer', 'status' => 'pending', 'restock' => true]]);
+    $t->check('a pending refund can be recorded while the request is open', 201, $pendingRefund['status']);
     $t->check('"delivered" is refused for an order that was never sent', 422, $A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'delivered']])['status']);
     $t->check('declined: back to processing', 'processing', TestKit::get($A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'processing', 'comment' => 'Refund declined']]), 'data.order_status'));
+    $t->check('declining the request also closes the pending refund (it cannot be completed later)', 'rejected', $t->scalar("SELECT `status` FROM `refunds` WHERE `order_id` = ? ORDER BY `id` DESC LIMIT 1", 'i', [$oid2]));
     $t->check('a declined refund moving the order back sends no "being prepared" email', 0, $outboxKey("order_status_update:{$onum2}:processing"));
     $t->check('and it can now be shipped', 200, $A('POST', "/admin/orders/{$onum2}/shipment", ['json' => ['carrier' => 'GIG Logistics', 'tracking_number' => 'TRK' . random_int(1000, 9999), 'status' => 'in_transit']])['status']);
 

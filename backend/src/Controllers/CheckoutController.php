@@ -477,11 +477,19 @@ class CheckoutController
             );
         }
         if ($payment === null) {
+            // A confirmed payment first. Then, once the customer said they sent a WhatsApp transfer,
+            // that open WhatsApp attempt (a card attempt that failed afterwards must not hide it, or
+            // the page would show "didn't go through" instead of waiting for the store). Otherwise
+            // the newest attempt.
+            $claimed = empty($order['customer_marked_paid_at']) ? 0 : 1;
             $payment = $this->db->fetchOne(
                 "SELECT * FROM `payments` WHERE `order_id` = ?
-                 ORDER BY (`status` IN ('successful', 'partially_refunded', 'refunded')) DESC, `id` DESC LIMIT 1",
-                'i',
-                [(int) $order['id']]
+                 ORDER BY (`status` IN ('successful', 'partially_refunded', 'refunded')) DESC,
+                          (? = 1 AND `provider` = 'whatsapp' AND `status` = 'pending') DESC,
+                          `id` DESC
+                 LIMIT 1",
+                'ii',
+                [(int) $order['id'], $claimed]
             );
         }
 

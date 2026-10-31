@@ -633,6 +633,27 @@ class FulfillmentService
         $order['order_status'] = $newStatus;
         $order['payment_status'] = $newPaymentStatus;
 
+        // Declining a refund request (refund_pending -> processing / delivered / completed) also
+        // declines the refunds still pending for it, so none stays open to be completed later
+        // (which would mark a shipping order refunded and could release its stock).
+        if ($currentStatus === 'refund_pending' && in_array($newStatus, ['processing', 'delivered', 'completed'], true)) {
+            $declined = $db->executeUpdate(
+                "UPDATE `refunds` SET `status` = 'rejected', `restocked` = 0, `updated_at` = NOW() WHERE `order_id` = ? AND `status` = 'pending'",
+                'i',
+                [$orderId]
+            );
+            if ($declined > 0) {
+                $db->insert(
+                    "INSERT INTO `order_status_history` (`order_id`, `previous_status`, `new_status`, `comment`, `changed_by_user_id`) VALUES (?, ?, ?, ?, ?)",
+                    'isssi',
+                    [$orderId, $newStatus, $newStatus, "Refund request declined: {$declined} pending refund(s) closed.", $adminId]
+                );
+                if ($audit) {
+                    AuditService::record($adminId, 'refund.decline', 'order', (string) $orderId, ['pending_refunds' => $declined], ['status' => 'rejected']);
+                }
+            }
+        }
+
         // Progress emails only for real progress: paid -> processing, shipped -> delivered (not a
         // declined refund moving the order back).
         $progress = ($newStatus === 'processing' && $currentStatus === 'paid')

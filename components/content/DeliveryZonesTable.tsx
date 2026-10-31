@@ -65,7 +65,16 @@ export function DeliveryZonesTable() {
                 {zone.name}
               </th>
               <td className="px-4 py-3 text-neutral-700">{statesLabel(zone.states_covered ?? [])}</td>
-              <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-black">{formatPrice(Number(zone.fee))}</td>
+              <td className="px-4 py-3 text-right font-semibold text-black">
+                <span className="whitespace-nowrap">{formatPrice(Number(zone.fee))}</span>
+                {/* The fee can grow with the number of items (set per zone by the store). */}
+                {Number(zone.extra_item_fee) > 0 && (
+                  <span className="block text-xs font-normal text-neutral-600">
+                    {Number(zone.items_included) > 1 ? `covers ${zone.items_included} items, then ` : 'for 1 item, then '}+
+                    {formatPrice(Number(zone.extra_item_fee))} each extra item
+                  </span>
+                )}
+              </td>
               <td className="px-4 py-3 text-neutral-700">{zone.estimated_days || '—'}</td>
             </tr>
           ))}
