@@ -106,7 +106,7 @@ reported. Numbers from this PC show where the limits are, not the production max
   - optimiser CPU and time to the first and last image;
   - `/uploads` 304 answers.
 
-**S6. Live payment status (SSE):** built and off by default (Prompt 33). Prompt 35 measures it on staging only: open streams against PHP workers and database connections, memory, CPU, the delay from "paid" recorded to the page, and reconnects (`docs/SSE_CONTRACT.md`).
+**S6. Live payment status (SSE):** built and off by default (Prompt 33). Measured on the isolated rig in Prompt 35 (`docs/LOAD_TEST_RESULTS.md`, S6): 8, 32 and 64 streams opened at once with browsing alongside; workers, database connections, memory, CPU, "paid" delay, closed tabs and a server restart. Re-run on staging at the planned cap before switching it on.
 
 ## 4. What is recorded
 

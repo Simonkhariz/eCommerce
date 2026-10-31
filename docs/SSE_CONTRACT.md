@@ -150,16 +150,16 @@ history.
 | Stream length | 110 s, then `end` (`time_limit`) | The storefront proxy cuts calls at 120 s (`experimental.proxyTimeout`); a payment that hasn't settled in 2 minutes moves to the page's "Check again" state, as today |
 | Streams per order | 2 | Two tabs. A third gets `503`, and that tab polls |
 | Streams per visitor address | 4 | Stops one visitor holding workers |
-| Streams on the whole server | `SSE_MAX_STREAMS`, default 8 | The worker and database guard. Counted with the existing rate-limit table (a row per open stream with a 120-second expiry, so a crashed process frees its slot) |
+| Streams on the whole server | `SSE_MAX_STREAMS`, default 8 | The worker and database guard. Counted with the existing rate-limit table: a row per open stream, renewed by the stream at every heartbeat; a row nobody renews stops counting after 30 s, so a crashed process or a restarted server frees its slots on its own (Prompt 35 changed this from a fixed 120 s) |
 | Opening streams | 20 per 10 minutes per address | Same scale as `payment_init` |
-| Heartbeat | 15 s | Proxies and phone networks close silent connections at 30–60 s |
+| Heartbeat | 5 s (`SSE_HEARTBEAT_SECONDS`; 15 s before Prompt 35) | Proxies and phone networks close silent connections at 30–60 s. PHP learns that a tab closed only when a write fails, at the second write after the close, so a short heartbeat frees a closed tab's worker sooner |
 | Reconnect (`retry`) | 3 s, at most 3 times per page visit, then polling | A dropped mobile connection recovers; a broken server doesn't get hammered |
 
 **PHP settings for the stream request only:**
 - `set_time_limit(130)`;
 - every output buffer flushed and closed (`index.php` starts one), with gzip skipped;
 - `ignore_user_abort(false)`, checking `connection_aborted()` after each heartbeat, so a closed tab
-  frees its worker within 15 s;
+  frees its worker within two heartbeats (measured 7–8 s with the 5 s default);
 - the slow-request log skips this route, since each stream is long by design and would flood it.
 
 **Apache** compresses nothing in `backend/public/.htaccess` today. If a host adds `mod_deflate`,
@@ -198,11 +198,11 @@ API (a new `LiveStatusTest`, run against the test server):
 5. **A change inside an open, uncommitted transaction is not announced;** after the commit it is.
 6. A rolled-back confirmation is never announced.
 7. The payload holds only the three fields (no amount, name, email or address).
-8. A heartbeat arrives within 16 s; the stream ends with `time_limit` at 110 s (a test setting
+8. A heartbeat arrives within 6 s; the stream ends with `time_limit` at 110 s (a test setting
    shortens both).
 9. Caps: the third stream for one order, and stream number `SSE_MAX_STREAMS + 1`, get `503`; a
-   slot frees when a stream ends and after a killed process's 120 s.
-10. A closed connection frees its worker within one heartbeat.
+   slot frees when a stream ends, and a slot nobody renews (a killed process) after 30 s.
+10. A closed connection frees its worker within two heartbeats; a running stream renews its slot.
 11. The slow-request log has no entry for the stream.
 
 Storefront:
@@ -275,6 +275,70 @@ stream with headers, switched off by default, and 8 streams of 110 s.
   - Smoke test 30 of 30, integrity clean.
 
 **Next:** Prompt 34 is covered by this design: the stream reads committed rows, so no separate
-publishing step or Redis is needed on one server. Prompt 35 measures it on staging (open streams
-against PHP workers and database connections, memory, CPU, delay, reconnects) before
-`SSE_ENABLED=true` on the live shop.
+publishing step or Redis is needed on one server. Prompt 35: section 13.
+
+## 13. Prompt 35: measured on the isolated rig (31 October 2026)
+
+The roadmap allows "isolated/staging". No host is chosen yet, so this ran on the isolated rig: a
+temporary Apache on :8150 (Windows, mod_php, 150 threads, OPcache on) with its own database
+`shopco_load`, on the same 4-core PC as MariaDB (151 connections). The owner's servers were not
+touched. Script: `ssemeasure.mjs` in the rig folder; raw results `results/sse35*.json`.
+
+Each step opened the cap's worth of streams **all at the same moment**, plus 4 more, with 4
+shoppers browsing the catalogue flat out alongside. Then it recorded payments for 16 of the
+orders through `PaymentFinalizer` (half in the first 30 s, when streams check every second, half
+after, when they check every 2 s), closed the rest like closed tabs, and timed how long the
+server took to free them. A last step restarted Apache with 8 streams open.
+
+**Final run (with the fix below):**
+
+| Open streams | 0 | 8 | 32 | 64 |
+|---|---|---|---|---|
+| Apache workers busy | 6 | 14 | 38 | 70 |
+| Database connections | 3 | 12 | 35 | 68 |
+| Apache memory | 74 MB | 88 MB | 121 MB | 168 MB |
+| Browsing alongside: p95 / p99, errors | 38 / 56 ms, 0 | 36 / 57 ms, 0 | 42 / 68 ms, 0 | 44 / 69 ms, 0 |
+| First message when all open at once: p95 | | 0.12 s | 0.36 s | 0.88 s |
+| 4 over the cap | | 4 × 503, Retry-After 10 | 4 × 503 | 4 × 503 (within 0.93 s) |
+| "Paid" on the stream after the commit: median / slowest | | 0.33 / 0.92 s (1 s checks), 0.41 / 1.87 s (2 s checks) | 0.35 / 0.95 s, 0.88 / 1.97 s | 0.35 / 0.89 s, 0.66 / 1.75 s |
+| Closed tabs freed after | | | 7.1 s | 8.3 s |
+
+Every paid stream ended `final`; no stream saw "paid" twice; no payment went unannounced.
+Integrity afterwards: no negative stock, no order paid twice, no duplicate emails.
+
+**What it shows:**
+- **Each open stream holds exactly one PHP worker and one database connection**, as designed.
+  Nothing else grows: memory rose about 1.5 MB per stream (a thread in Windows mod_php). On Linux
+  with PHP-FPM or LiteSpeed each stream is a whole PHP process, typically 20–40 MB (not measured
+  here: check on the host).
+- **Database work is small:** two indexed reads a second per stream for the first 30 s, then one,
+  plus one slot renewal per heartbeat.
+- **Browsing was not slowed** by 64 open streams (p95 38 → 44 ms).
+- **Opening many at the same instant** queues briefly on the slot lock (0.9 s for 64 at once). In
+  real life customers arrive spread out.
+- CPU on this PC was set by the browsing load, not the streams (Apache 1.8–2.0 cores in every step).
+
+**Two weaknesses found, fixed and re-measured (commit cb6d907):**
+
+| Problem | Cause | Fix | Before | After |
+|---|---|---|---|---|
+| A closed tab held its worker and slot for half a minute | PHP notices a closed connection only when a write fails, at the second write after the close: two 15 s heartbeats | Heartbeat default 15 → 5 s | 31.4 s (32 streams), 31.6 s (64) | 7.1 s, 8.3 s |
+| After a server restart, live status stayed off for 2 minutes | The killed streams' slots counted for a fixed 120 s | A live stream renews its slot at every heartbeat; a slot nobody renews stops counting after 30 s | 117 s | 34 s, as soon as Apache was back (it took 34 s to restart on this PC) |
+
+In both cases nothing broke before the fix: the payment pages got `503` and checked the usual way.
+
+**Can the host support the target?** The launch target is 30 checkouts at once
+(`docs/LOAD_TEST_PLAN.md`). If all 30 customers then watch the payment page together, that is 30
+streams:
+- **On this PC, yes:** 32 and 64 streams ran with no errors and no slowdown.
+- **On a VPS** (PHP-FPM, own MySQL): size `SSE_MAX_STREAMS` so streams take at most half of
+  `pm.max_children` and of MySQL `max_connections`. 16–32 is realistic on 2 GB of memory.
+- **On shared cPanel** (about 20 "entry processes" and 15–30 database connections per account):
+  30 streams would not fit. Keep `SSE_MAX_STREAMS` at a quarter of the smaller limit, about 4–5.
+  Customers over the cap get the usual checks, which confirm payments just as surely, only a few
+  seconds slower.
+
+**Still to do on the chosen host before `SSE_ENABLED=true`:** run the same script against staging
+for 10 minutes at the planned cap, and read the host's limits (entry processes, database
+connections, PHP memory per process). Check that no proxy or CDN buffers the stream: the first
+message must arrive within 1 s through the real domain.

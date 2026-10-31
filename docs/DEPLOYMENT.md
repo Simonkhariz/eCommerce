@@ -21,7 +21,7 @@ setting was changed.
 | Payments | Kora must reach `APP_URL/api/v1/webhooks/kora` over public HTTPS; Monnify's webhook URL is set in its dashboard; outbound HTTPS to both | System status warns when `APP_URL` is not public HTTPS |
 | Pictures | Server disk (default) or an S3-compatible bucket (Cloudflare R2 chosen, not set up) | `docs/STORAGE.md` |
 | Redis | Optional (`REDIS_URL`): shares the catalogue cache between servers; no PHP extension needed (TCP, TLS or a Unix socket, as many cPanel hosts give it). Without it, or when it is down, the file cache is used | `docs/REDIS.md` |
-| Live payment status (SSE) | Optional, off by default (`SSE_ENABLED`). Each open stream holds one PHP worker and one database connection for up to 110 s, capped by `SSE_MAX_STREAMS`. Never with `php -S`. Measure on the host first (roadmap Prompt 35) | `docs/SSE_CONTRACT.md` |
+| Live payment status (SSE) | Optional, off by default (`SSE_ENABLED`). Each open stream holds one PHP worker and one database connection for up to 110 s, capped by `SSE_MAX_STREAMS` (measured exactly so in Prompt 35). Size it at about half of PHP-FPM `pm.max_children` and MySQL connections on a VPS, and about a quarter of entry processes and database connections on shared cPanel (4–5 on a typical plan). Never with `php -S`. Re-measure on staging before switching it on (`docs/SSE_CONTRACT.md` §13) | `docs/SSE_CONTRACT.md` |
 
 ## Hosting options
 

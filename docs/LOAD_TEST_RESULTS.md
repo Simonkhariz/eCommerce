@@ -156,3 +156,21 @@ over from the Defender measurement were picked up by the API's once-a-minute ret
 new 20,000 were queued, and the queue step then replaced them. These were two different
 newsletters to the same 10 test addresses. Two clean repeats (1,500 and 2,000 emails, four
 workers alongside the API's retry run) delivered every email exactly once.
+
+## S6 Live payment status (Prompt 35, 31 October 2026)
+
+Same rig: temporary Apache :8150, `shopco_load`, OPcache on. Live status switched on in the rig
+only. Full results and the host sizing are in `docs/SSE_CONTRACT.md` §13; raw files
+`results/sse35-before*.json` and `results/sse35*.json`.
+
+| Open streams | 0 | 8 | 32 | 64 |
+|---|---|---|---|---|
+| Apache workers / database connections | 6 / 3 | 14 / 12 | 38 / 35 | 70 / 68 |
+| Apache memory | 74 MB | 88 MB | 121 MB | 168 MB |
+| Browsing p95 alongside, errors | 38 ms, 0 | 36 ms, 0 | 42 ms, 0 | 44 ms, 0 |
+| "Paid" after the commit, slowest | | 1.87 s | 1.97 s | 1.75 s |
+
+**Fixed and re-measured** (commit cb6d907):
+- A closed tab held its slot for 31 s; now 7–8 s, with a 5 s heartbeat instead of 15 s.
+- After a restart, live status stayed off for 117 s; now it is back as soon as Apache is, because
+  slots are renewed by live streams and lapse 30 s after the last renewal.

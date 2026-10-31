@@ -27,7 +27,7 @@ storefront on :3100, and made-up provider keys with local stand-ins. Raw output:
 | Integrity after the live checks | 0 negative stock, 0 orders paid twice, 0 duplicate payment emails, 0 emails sent twice, no deadlocks |
 | Redis (optional, added after the gate, roadmap Prompts 27-28) | `RedisCacheTest` 33 / 33 against a stand-in Redis: shared version and listing pages, hang, outage, recovery without stale pages, restart, wrong password. Not yet run against a real Redis (see `docs/REDIS.md`) |
 | Zustand | Not used (owner decision); nothing to test |
-| Live payment status (SSE, added after the gate, roadmap Prompts 32-33) | Off by default. `LiveStatusTest` 47 / 47, reader tests 6 / 6, rig check 13 / 13 through the production build's proxy and a real browser (first message 32 ms, "Payment confirmed" 571 ms after the payment). Load on real hosting: Prompt 35 |
+| Live payment status (SSE, added after the gate, roadmap Prompts 32-35) | Off by default. `LiveStatusTest` 50 / 50, reader tests 6 / 6, rig check 13 / 13 through the production build's proxy and a real browser (first message 32 ms, "Payment confirmed" 571 ms after the payment). Load on the isolated rig (Prompt 35): 8, 32 and 64 streams, one worker and one database connection each, browsing p95 38 → 44 ms, "paid" within 2 s, closed tabs freed in 7–8 s, back 34 s after a restart. A short re-run on the chosen host is still to do |
 
 Fixed during the gate: `npm run lint` failed because ESLint also read a downloaded copy of
 another site's bundle (`kravio-dashboard.vercel.app`, git-ignored); it is now excluded.
@@ -61,7 +61,8 @@ copy of `node_modules` in the isolated build folder; corrected and re-run.
    backup copies are the owner's step (`docs/BACKUPS.md`).
 8. **OPcache** must be turned on at the host (halved response times in the load test).
 9. **Redis** is optional and tested only against a stand-in so far. **Live payment status (SSE)**
-   is built but off until Prompt 35 measures it on the chosen host.
+   is built and measured on the isolated rig, but stays off until a short re-run on the chosen
+   host (its worker and database-connection limits set `SSE_MAX_STREAMS`).
 10. Hero banners are 1200 px wide (soft on high-resolution screens); re-upload at 1800 px or more.
 11. `AGENTS.md` (written by `next dev`) is untracked; commit it or leave it.
 

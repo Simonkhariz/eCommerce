@@ -159,7 +159,9 @@ the 10-minute job.
 
 1. **Too many workers or database connections:** lower `SSE_MAX_STREAMS` in `backend/.env` (each
    stream holds one of each for up to `SSE_STREAM_SECONDS`), or set `SSE_ENABLED=false`. The
-   change applies to the next stream opened.
+   change applies to the next stream opened. A closed tab frees its worker within about 10 s,
+   and after a crash or restart the old slots stop counting within 30 s; nothing needs clearing
+   by hand.
 2. **Pages don't update at once:** something between the shop and the customer is holding the
    stream back. Check that no proxy or CDN compresses `text/event-stream` (the stream is sent
    `no-transform`), and on nginx that buffering is off for `/api/v1/checkout/orders/*/events`
