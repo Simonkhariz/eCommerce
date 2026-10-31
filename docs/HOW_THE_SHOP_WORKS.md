@@ -189,9 +189,11 @@ crossed out on sale items, a "Sold out" badge, and a heart.
 - Anyone can review, guest or signed in: 1–5 stars, name, email (never published), optional
   title, and the review text (10–2,000 characters).
 - Reviews appear only after the owner approves them.
-- The **"Verified purchase"** badge is added by the server only when it finds a paid order for
-  that product from that email or account.
-- One review per person per product. At most 5 reviews an hour from one connection, to stop
+- The **"Verified purchase"** badge is added by the server only for a signed-in reviewer with a
+  paid order for that product on their account (or under their confirmed email). A typed email
+  proves nothing, so signed-out reviews never get the badge.
+- One review per person per product (per account when signed in; a signed-out review that used
+  someone's email never stops that person reviewing once they sign in). At most 5 reviews an hour from one connection, to stop
   spam.
 
 ### 4.4 Wishlist and cart
@@ -251,7 +253,13 @@ happen at all:**
 
 **Double-click and dropped-connection safety:** every checkout carries a unique key. Pressing
 the button twice, or retrying after the connection dropped, returns **the same order**: never a
-second order, never stock held twice.
+second order, never stock held twice. If the shopper changes the address or the cart before
+retrying, the retry is a new order with the new details (never the earlier one returned with old
+details).
+
+**A promo code that stops working** (expired or used up while the shopper fills in the form) is
+explained in the checkout window with a **"Remove code and continue"** button. A brief network
+error never removes a valid code.
 
 **The cart is not emptied yet.** It is cleared only when the payment is confirmed, so a failed or
 abandoned payment can be retried on the same order. Coming back to checkout with the same cart
@@ -351,6 +359,10 @@ Protection:
 - **Sign-in attempts:** 5 failures per 15 minutes per connection and email, 20 per hour per
   account.
 - **Sign-in link requests:** limited per connection and per email.
+- **Registering someone else's email first gains nothing:** a password chosen before the email is
+  confirmed is removed (and other sessions signed out) when the real owner first signs in with an
+  emailed link, unless they confirm in the same browser that registered. Guest orders join an
+  account only once its email is confirmed.
 - **Sessions:** a secure cookie lasts 30 days. Every action that changes something carries a
   per-session security token (CSRF protection).
 
@@ -466,8 +478,9 @@ stateDiagram-v2
     Completed --> Returned
     Completed --> RefundPending
     Returned --> RefundPending
-    RefundPending --> Delivered: refund declined
-    RefundPending --> Completed: refund declined
+    RefundPending --> Processing: refund declined, never sent
+    RefundPending --> Delivered: refund declined, already sent
+    RefundPending --> Completed: refund declined, already sent
     RefundPending --> Refunded: refund recorded
     Cancelled --> [*]
     Refunded --> [*]
@@ -639,7 +652,9 @@ instead of cancelled.
 - **Deleting needs two checks:** the owner's password, then a 6-digit code emailed to them.
   - The code works once, for 10 minutes, in the same session.
   - The reviewed list must be fresh; if anything changed, the clean-up stops and the list
-    reloads.
+    reloads. Throwaway records that can only drop off the list after review (old counters,
+    expired sessions, abandoned guest carts, used sign-in links) don't stop it; the run removes
+    only those still on the list.
   - All admins are emailed afterwards.
 - **Always kept, whatever the settings:**
   - order totals, payments and refunds (6 years for tax);
@@ -729,6 +744,15 @@ That gate:
   orders list or overview. That clean-up doesn't call the payment providers, so an order with a
   card or transfer payment still open gets **30 extra minutes** for the payment to be confirmed
   before it is released. This avoids refunds for payments that were simply slow to clear.
+- **Only one quick clean-up runs at a time, and checkout never waits for it.** Measured: with
+  1,700 expired orders waiting (the scheduled job not running), 100 buyers at once took 5.6-9.3 s
+  each because they all queued to clean up the same orders. Now one request does a small batch
+  and the others carry on.
+- **Starting the payment again can't hold stock forever:** each new attempt extends the deadline,
+  but never past the order's placing time plus the transfer window and one card-payment window
+  (25 hours by default).
+- Payment attempts and status changes record the "units sold" figures after their database step
+  is saved, so two payments for the same product at the same moment can't block each other.
 
 ### 6.3 Emails: the outbox
 
@@ -1110,3 +1134,4 @@ When something changes, update the matching section in the same commit:
 | 31 Oct 2026 | Live payment status (SSE) designed: `docs/SSE_CONTRACT.md` (roadmap Prompt 32). Not built yet |
 | 31 Oct 2026 | Live payment status built (roadmap Prompt 33): optional, off by default, falls back to the usual checks. 955 backend checks |
 | 31 Oct 2026 | Live payment status load-tested (roadmap Prompt 35) at 8, 32 and 64 watchers; closed tabs and restarts now free their places in seconds. 958 backend checks |
+| 31 Oct 2026 | Full review of shop and admin: 23 defects fixed (payment safety under simultaneous payments, account takeover by registering an email first, slow checkout with many expired orders, endless stock holds, "Pay now" after an email lookup, product edits that didn't save, the data clean-up's second run, declined refunds, review badges, promo and checkout-window fixes). Details in the commit history |
