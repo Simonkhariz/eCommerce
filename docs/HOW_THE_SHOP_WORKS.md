@@ -889,7 +889,7 @@ Problems found by the load test were fixed one at a time and measured again:
 | 1. One server | Launch and growth | A cPanel plan with Node.js support, or a small VPS; OPcache on (it halved response times in the test) | Ready |
 | 2. A bigger server or separate database | Hundreds of shoppers at once | More CPU (storefront page building is the first part to slow), or a managed database | Ready, no code change |
 | 3. Several servers | A large catalogue and heavy traffic | Redis for the shared cache; Cloudflare R2 for pictures; a shared storefront page cache | Redis and R2 **built**; shared page cache **Planned** |
-| 4. Live updates | Instant "paid" on the payment page and an instant admin bell | Server-sent events, after the host is chosen | **Planned** (designed, `docs/REDIS.md`) |
+| 4. Live updates | Instant "paid" on the payment page and an instant admin bell | Server-sent events, after the host is chosen | **Planned.** The first one (payment status) is designed in `docs/SSE_CONTRACT.md`, switched off by default until it is measured on the chosen host |
 | Email at scale | Big newsletters | A higher Resend limit or its batch sending | Higher limit: ready (raise one setting). Batch sending: **Planned** |
 
 **Design choices that keep growth cheap:**
@@ -1036,7 +1036,7 @@ Honest list, so proposals never overclaim:
 
 | Item | Status |
 |---|---|
-| Live updates (instant "paid" on the payment page, instant admin bell) | **Planned.** Today the payment page re-checks automatically for about 2 minutes and the bell refreshes every minute |
+| Live updates (instant "paid" on the payment page, instant admin bell) | **Planned;** the payment-status design is in `docs/SSE_CONTRACT.md`. Today the payment page re-checks automatically for about 2 minutes and the bell refreshes every minute |
 | Pictures on Cloudflare R2 | **Built and tested against a stand-in;** switched on when the R2 account exists |
 | Redis | **Built and optional;** tested against a stand-in Redis, to be confirmed on the chosen host |
 | Real payment sandbox runs (Kora and Monnify) | Waiting for the owner's sandbox keys and a public https address |
@@ -1101,3 +1101,4 @@ When something changes, update the matching section in the same commit:
 |---|---|
 | 30 Oct 2026 | First version: full shopper and admin guide, behind the scenes, safeguards, scalability, video storyboard, proposal material, roadmap. Fixed while writing it: order CSV export with the "Customer says paid" and "Awaiting WhatsApp payment" filters, and tracking-number search; declining a refund request ("Mark delivered" from Refund pending); payment option wording (card and bank transfer only); the product page "-N%" badge; shipping, cancellation, refund and payment emails now saved in the same database step as their change |
 | 30 Oct 2026 | The checkout note, FAQ and Terms now show the payment windows actually set on the server. The WhatsApp icon on Track order now holds the order for the WhatsApp window. "Change delivery details" releases the first order's items when no payment was started. The quick expiry clean-up gives an open card or transfer payment 30 extra minutes. 908 backend checks |
+| 31 Oct 2026 | Live payment status (SSE) designed: `docs/SSE_CONTRACT.md` (roadmap Prompt 32). Not built yet |
