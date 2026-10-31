@@ -292,13 +292,40 @@ foreach (array_merge(array_slice($taken, 1), [$again]) as $slot) {
     $live->releaseSlot((string) $slot);
 }
 $t->sql("INSERT INTO `rate_limits` (`id`, `hits`, `window_start`) VALUES (?, 1, ?), (?, 1, ?)", 'sisi', [
-    'sse:900200:aaaaaaaaaaaaaaaa:0000000000000001', time() - (LiveStatus::streamSeconds() + 11),
-    'sse:900200:aaaaaaaaaaaaaaaa:0000000000000002', time() - (LiveStatus::streamSeconds() + 11),
+    'sse:900200:aaaaaaaaaaaaaaaa:0000000000000001', time() - (LiveStatus::SLOT_TTL_SECONDS + 1),
+    'sse:900200:aaaaaaaaaaaaaaaa:0000000000000002', time() - (LiveStatus::SLOT_TTL_SECONDS + 1),
 ]);
 $fresh = $live->claimSlot(900200, '203.0.113.10');
-$t->ok("a killed process's slots stop counting after the stream length + 10 s", $fresh !== null);
+$t->ok('slots nobody renews (a killed process, a restarted server) stop counting after ' . LiveStatus::SLOT_TTL_SECONDS . ' s, not the stream length', $fresh !== null && LiveStatus::SLOT_TTL_SECONDS < LiveStatus::streamSeconds());
 $t->check('and are removed', 1, $slots(900200));
 $live->releaseSlot((string) $fresh);
+$a = $live->claimSlot(900300, '203.0.113.11');
+$t->sql("UPDATE `rate_limits` SET `window_start` = ? WHERE `id` = ?", 'is', [time() - (LiveStatus::SLOT_TTL_SECONDS - 2), (string) $a]);
+$live->renewSlot((string) $a);
+$b = $live->claimSlot(900300, '203.0.113.12');
+$t->ok('a renewed slot keeps counting (the order limit still holds)', $b !== null && $live->claimSlot(900300, '203.0.113.13') === null);
+$live->releaseSlot((string) $a);
+$live->renewSlot((string) $a);
+$t->check('a late renewal puts a cleared slot back, so a running stream is never left uncounted', 2, $slots(900300));
+$live->releaseSlot((string) $a);
+$live->releaseSlot((string) $b);
+
+// -----------------------------------------------------------------------------
+$t->section('A running stream renews its slot');
+$clearOpenLimit();
+$g = $newOrder();
+$s = $open($ports[0], $g['number'], ["X-Guest-Access-Token: {$g['token']}"]);
+$pump($s, 3, static fn (string $x): bool => $payments($x) !== []);
+$t->sql("UPDATE `rate_limits` SET `window_start` = ? WHERE `id` LIKE ?", 'is', [time() - (LiveStatus::SLOT_TTL_SECONDS - 5), "sse:{$g['id']}:%"]);
+// These APIs beat every 2 s, so the stream renews within 2 s (well inside its 6 s length).
+$pump($s, 3);
+$age = time() - (int) $t->scalar("SELECT MAX(`window_start`) FROM `rate_limits` WHERE `id` LIKE ?", 's', ["sse:{$g['id']}:%"]);
+$t->ok('within one heartbeat the stream marks its slot as live again (' . $age . ' s old)', $age <= 3);
+$close($s);
+$until = microtime(true) + 6;
+while (microtime(true) < $until && $slots($g['id']) > 0) {
+    usleep(250000);
+}
 
 // -----------------------------------------------------------------------------
 $t->section('A closed tab frees its worker');
@@ -313,7 +340,7 @@ while (microtime(true) < $until && !$freed) {
     usleep(250000);
     $freed = $slots($g['id']) === 0;
 }
-$t->ok('slot released within one heartbeat of the tab closing', $freed);
+$t->ok('slot released within two heartbeats of the tab closing (PHP notices at the second write)', $freed);
 $startedAt = microtime(true);
 $health = @file_get_contents($api($ports[0]) . '/health');
 $t->ok('the same server answers other requests again', $health !== false && microtime(true) - $startedAt < 2);

@@ -16,13 +16,17 @@ use App\Database\Database;
  *
  * Each open stream holds one PHP worker and one database connection, so streams are counted in
  * `rate_limits` rows (id "sse:<order>:<visitor>:<random>", window_start = opening time) and
- * capped per order, per visitor and per server. A row counts for the stream's length plus 10 s,
- * so a process that was killed frees its slot on its own.
+ * capped per order, per visitor and per server. A live stream renews its row at every heartbeat
+ * (at most SLOT_RENEW_SECONDS apart); a row nobody renews stops counting after SLOT_TTL_SECONDS, so the slots of a
+ * killed process or a restarted server free themselves within half a minute (measured in
+ * Prompt 35: with the old fixed 120 s expiry, live status stayed off for 117 s after a restart).
  */
 final class LiveStatus
 {
     public const PER_ORDER = 2;
     public const PER_VISITOR = 4;
+    public const SLOT_RENEW_SECONDS = 10;
+    public const SLOT_TTL_SECONDS = 30;
     private const LOCK = 'shopco_sse_slots';
 
     public static function enabled(): bool
@@ -42,9 +46,17 @@ final class LiveStatus
         return min(115, max(3, Env::int('SSE_STREAM_SECONDS', 110)));
     }
 
+    /** How often a live stream renews its slot: every heartbeat, and never less than every 10 s. */
+    public static function renewSeconds(): int
+    {
+        return min(self::SLOT_RENEW_SECONDS, self::heartbeatSeconds());
+    }
+
     public static function heartbeatSeconds(): int
     {
-        return min(30, max(1, Env::int('SSE_HEARTBEAT_SECONDS', 15)));
+        // 5 s: PHP only learns that a tab closed when a write fails, which is the second write
+        // after the close, so a closed tab holds its worker for up to two heartbeats.
+        return min(30, max(1, Env::int('SSE_HEARTBEAT_SECONDS', 5)));
     }
 
     public function __construct(private ?Database $db = null)
@@ -92,7 +104,7 @@ final class LiveStatus
     {
         $visitorKey = substr(hash('sha256', $visitor), 0, 16);
         $now = time();
-        $since = $now - (self::streamSeconds() + 10);
+        $since = $now - self::SLOT_TTL_SECONDS;
 
         $got = $this->db->fetchOne("SELECT GET_LOCK(?, 2) AS got", 's', [self::LOCK]);
         if ((int) ($got['got'] ?? 0) !== 1) {
@@ -119,6 +131,20 @@ final class LiveStatus
         } finally {
             $this->db->fetchOne("SELECT RELEASE_LOCK(?) AS released", 's', [self::LOCK]);
         }
+    }
+
+    /**
+     * Keep a live stream's slot counted. Puts the row back if a late renewal let it lapse and
+     * another opening removed it, so a stream that is still running is never left uncounted.
+     */
+    public function renewSlot(string $slot): void
+    {
+        $this->db->execute(
+            "INSERT INTO `rate_limits` (`id`, `hits`, `window_start`) VALUES (?, 1, ?)
+             ON DUPLICATE KEY UPDATE `window_start` = VALUES(`window_start`)",
+            'si',
+            [$slot, time()]
+        );
     }
 
     public function releaseSlot(string $slot): void

@@ -781,6 +781,7 @@ class CheckoutController
         $started = microtime(true);
         $deadline = $started + LiveStatus::streamSeconds();
         $lastSent = $started;
+        $lastRenewed = $started;
         $reason = 'time_limit';
         while (!$state['final']) {
             $elapsed = microtime(true) - $started;
@@ -788,6 +789,10 @@ class CheckoutController
             usleep($elapsed < 30 ? 1_000_000 : 2_000_000);
             if (microtime(true) >= $deadline || connection_aborted()) {
                 break;
+            }
+            if (microtime(true) - $lastRenewed >= LiveStatus::renewSeconds()) {
+                $live->renewSlot($slot);
+                $lastRenewed = microtime(true);
             }
             $next = $live->snapshot($orderId);
             if ($next['id'] !== $state['id']) {
