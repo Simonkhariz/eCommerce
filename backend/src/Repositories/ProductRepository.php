@@ -939,7 +939,9 @@ class ProductRepository
                     $data['original_price'] ?? null,
                     $data['currency'] ?? 'NGN',
                     $masterSku,
-                    $data['dress_style'] ?? 'Casual',
+                    // The editor's "Not set" sends null: store '' like an edit does. Callers that leave
+                    // the field out get the column's usual 'Casual'.
+                    array_key_exists('dress_style', $data) ? trim((string) ($data['dress_style'] ?? '')) : 'Casual',
                     $data['is_featured'] ?? 0,
                     $data['is_flash_deal'] ?? 0,
                     self::flashEnd($data, null),
@@ -1022,24 +1024,34 @@ class ProductRepository
             }
 
             $sql = "UPDATE products
-                    SET category_id = ?, name = ?, slug = ?, description = ?, status = ?,
+                    SET category_id = ?, name = ?, slug = ?, sku = ?, description = ?, status = ?,
                         product_type = ?, base_price = ?, original_price = ?, dress_style = ?,
                         is_featured = ?, is_flash_deal = ?, flash_deal_ends_at = ?
                     WHERE id = ?";
 
+            // Fields the editor can clear (no "was" price, no category, no style) arrive as null:
+            // null means "clear", only a missing key keeps the stored value.
+            $clearable = static fn (string $key) => array_key_exists($key, $data) ? $data[$key] : ($existing[$key] ?? null);
+            $categoryId = $clearable('category_id');
+            $originalPrice = $clearable('original_price');
+            $dressStyle = $clearable('dress_style');
+            $sku = Input::text($data['sku'] ?? null);
+
             $db->execute(
                 $sql,
-                "isssssddsiisi",
+                "issssssddsiisi",
                 [
-                    $data['category_id'] ?? $existing['category_id'],
+                    $categoryId === null || $categoryId === '' || (int) $categoryId <= 0 ? null : (int) $categoryId,
                     $data['name'] ?? $existing['name'],
                     $data['slug'] ?? $existing['slug'],
+                    $sku !== '' ? $sku : $existing['sku'],
                     $data['description'] ?? $existing['description'],
                     $data['status'] ?? $existing['status'],
                     $data['product_type'] ?? $existing['product_type'],
                     $data['base_price'] ?? $existing['base_price'],
-                    $data['original_price'] ?? $existing['original_price'],
-                    $data['dress_style'] ?? $existing['dress_style'],
+                    $originalPrice === null || $originalPrice === '' ? null : (float) $originalPrice,
+                    // "Not set" is stored as '' (the column is NOT NULL; strict SQL modes reject NULL).
+                    $dressStyle === null ? '' : trim((string) $dressStyle),
                     isset($data['is_featured']) ? (int) $data['is_featured'] : (int) $existing['is_featured'],
                     isset($data['is_flash_deal']) ? (int) $data['is_flash_deal'] : (int) $existing['is_flash_deal'],
                     self::flashEnd($data, $existing),
@@ -1053,8 +1065,8 @@ class ProductRepository
                 $this->syncVariants($db, $id, (string) ($existing['sku'] ?? ''), $variants);
             }
 
-            // Sync images if provided
-            if ($images !== null && is_array($images) && !empty($images)) {
+            // Sync images if provided; an empty list removes every photo (the editor allows it).
+            if ($images !== null && is_array($images)) {
                 $db->execute("DELETE FROM product_images WHERE product_id = ?", "i", [$id]);
                 foreach ($images as $idx => $img) {
                     $db->execute(

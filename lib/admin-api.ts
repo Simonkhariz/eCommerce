@@ -322,7 +322,7 @@ export interface InventoryLog {
   created_at: string;
 }
 
-export function adminGetInventory(params: { filter?: 'all' | 'low_stock' | 'out_of_stock'; search?: string; page?: number; per_page?: number }) {
+export function adminGetInventory(params: { filter?: 'all' | 'low_stock' | 'out_of_stock' | 'low_or_out'; search?: string; page?: number; per_page?: number }) {
   return apiRequest<Paginated<InventoryRow>>(`/admin/inventory${qs(params)}`);
 }
 

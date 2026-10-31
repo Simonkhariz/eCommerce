@@ -555,6 +555,30 @@ try {
     check("PATCH status 'paid' is refused", $toPaid['status'] === 422, (string) $toPaid['status']);
 
     // -----------------------------------------------------------------------
+    echo "== Product editor: clearing fields, SKU, photos, clear duplicate messages
+";
+    $db->execute("UPDATE `products` SET `original_price` = 9999, `dress_style` = 'casual' WHERE `id` = ?", 'i', [$productId]);
+    $put = static fn (array $body): array => http('PUT', "{$api}/admin/products/{$productId}", json_encode($body), $h, $jar);
+    $prodRow = static fn (): array => $db->fetchOne("SELECT `sku`, `original_price`, `category_id`, `dress_style` FROM `products` WHERE `id` = ?", 'i', [$productId]);
+    $cleared = $put(['original_price' => null, 'category_id' => null, 'dress_style' => null]);
+    $row = $prodRow();
+    check('clearing "Was price", category and style saves them as empty', $cleared['status'] === 200 && $row['original_price'] === null && $row['category_id'] === null && $row['dress_style'] === '', json_encode($row) . ' ' . $cleared['status']);
+    $db->execute("UPDATE `products` SET `category_id` = ? WHERE `id` = ?", 'ii', [$categoryId, $productId]);
+    $newSku = "P2E-{$stamp}";
+    $put(['sku' => $newSku]);
+    check('editing the SKU is saved', $prodRow()['sku'] === $newSku, (string) $prodRow()['sku']);
+    $put(['images' => [['image_url' => '/uploads/p2-only.jpg', 'alt_text' => 'only', 'is_primary' => 1]]]);
+    $put(['images' => []]);
+    check('removing every photo is saved', (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `product_images` WHERE `product_id` = ?", 'i', [$productId])['c'] === 0);
+    $otherSlug = "p2-other-{$stamp}";
+    $otherId = (int) $db->insert("INSERT INTO `products` (`uuid`, `category_id`, `name`, `slug`, `sku`, `base_price`, `status`) VALUES (UUID(), ?, 'P2 other', ?, ?, 1000, 'draft')", 'iss', [$categoryId, $otherSlug, "P2O-{$stamp}"]);
+    $dupSlug = $put(['slug' => $otherSlug]);
+    check('a web address another product uses gets its own message', $dupSlug['status'] === 422 && str_contains($dupSlug['text'], 'DUPLICATE_SLUG'), $dupSlug['text']);
+    $dupSku = $put(['sku' => "P2O-{$stamp}"]);
+    check('an SKU another product uses gets its own message', $dupSku['status'] === 422 && str_contains($dupSku['text'], 'DUPLICATE_SKU'), $dupSku['text']);
+    $db->execute("DELETE FROM `products` WHERE `id` = ?", 'i', [$otherId]);
+
+    // -----------------------------------------------------------------------
     echo "== Review fixes: stats after the commit, one expiry sweep at a time, capped holds, no repeated alerts\n";
     $db->execute("UPDATE `product_variants` SET `stock_quantity` = 100 WHERE `id` = ?", 'i', [$variantA]);
     $line = [['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 2]];

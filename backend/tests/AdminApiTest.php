@@ -98,6 +98,7 @@ $res = $A('POST', '/admin/storefront/banners', ['json' => ['title' => 'Test bann
 $t->check('valid banner created', 201, $res['status']);
 $bid = (int) TestKit::get($res, 'data.id');
 $t->cleanup(fn () => $t->sql("DELETE FROM `banners` WHERE `id` = ?", 'i', [$bid]));
+$t->check('deleting a banner that does not exist -> 404, not "deleted"', 404, $A('DELETE', '/admin/storefront/banners/999999999')['status']);
 
 // -----------------------------------------------------------------------------
 $t->section('Settings');
@@ -237,7 +238,9 @@ if ($variant === null) {
 
     $t->check('ship order', 200, $A('POST', "/admin/orders/{$onum}/shipment", ['json' => ['carrier' => 'GIG Logistics', 'tracking_number' => 'TRK' . random_int(1000, 9999), 'tracking_url' => 'https://example.test/track', 'status' => 'in_transit']])['status']);
     $t->check('order is shipped', 'shipped', TestKit::get($A('GET', "/admin/orders/{$onum}"), 'data.order_status'));
-    $t->check('mark delivered', 200, $A('POST', "/admin/orders/{$onum}/delivered", ['json' => ['comment' => 'Signed for']])['status']);
+    $deliveredRes = $A('POST', "/admin/orders/{$onum}/delivered", ['json' => ['comment' => 'Signed for']]);
+    $t->check('mark delivered', 200, $deliveredRes['status']);
+    $t->ok('the answer keeps the activity log, including what was just done', count((array) TestKit::get($deliveredRes, 'data.audit_logs')) >= 1);
     $t->check('order is delivered', 'delivered', TestKit::get($A('GET', "/admin/orders/{$onum}"), 'data.order_status'));
     $t->check('attention filter works', 200, $A('GET', '/admin/orders?status=attention')['status']);
     $t->ok('order list includes customer email', TestKit::get($A('GET', '/admin/orders?search=' . urlencode($onum)), 'data.items.0.customer_email') === $email);
@@ -250,6 +253,37 @@ if ($variant === null) {
     $t->check('payment is partially refunded', 'partially_refunded', $t->scalar("SELECT `payment_status` FROM `orders` WHERE `id` = ?", 'i', [$oid]));
     $t->check('refund over the remaining amount refused', 422, $A('POST', '/admin/refunds', ['json' => ['order_number' => $onum, 'amount' => $total, 'reason' => 'Too much', 'status' => 'completed', 'restock' => false]])['status']);
     $t->check('remaining refundable shrinks', round($total - $partial, 2), round((float) TestKit::get($A('GET', '/admin/refunds/eligibility?order_number=' . urlencode($onum)), 'data.refundable_amount'), 2));
+
+    // A refund request declined on an order that was never sent: back to processing, so it can ship.
+    $email2 = $t->uniq('buyer2') . '@example.test';
+    $res2 = $t->http('POST', '/checkout/orders', [
+        'headers' => ['Idempotency-Key: ' . bin2hex(random_bytes(16))],
+        'json' => [
+            'email' => $email2,
+            'items' => [['product_id' => (int) $variant['product_id'], 'variant_id' => (int) $variant['variant_id'], 'quantity' => 1]],
+            'shipping_address' => ['full_name' => 'Declined Refund', 'phone' => '08000000004', 'address_line1' => '4 Test Close', 'city' => 'Ikeja', 'state' => 'Lagos', 'country' => 'Nigeria'],
+        ],
+    ]);
+    $onum2 = (string) TestKit::get($res2, 'data.order_number');
+    $oid2 = (int) $t->scalar("SELECT `id` FROM `orders` WHERE `order_number` = ?", 's', [$onum2]);
+    $t->cleanup(function () use ($t, $oid2, $email2): void {
+        foreach (['refunds', 'shipments', 'payments', 'order_status_history', 'order_items'] as $table) {
+            $t->sql("DELETE FROM `{$table}` WHERE `order_id` = ?", 'i', [$oid2]);
+        }
+        $t->sql("DELETE FROM `orders` WHERE `id` = ?", 'i', [$oid2]);
+        $t->sql("DELETE FROM `email_outbox` WHERE `recipient_email` = ?", 's', [$email2]);
+    });
+    $A('POST', "/admin/orders/{$onum2}/confirm-payment", ['json' => ['reference' => 'BANK-' . bin2hex(random_bytes(4))]]);
+    $pending = $A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'refund_pending', 'comment' => 'Customer asked for a refund']]);
+    $t->check('an unsent paid order can be marked refund pending', 'refund_pending', TestKit::get($pending, 'data.order_status'));
+    $t->check('declining it offers "processing" (never sent, so not "delivered")', ['processing'], TestKit::get($pending, 'data.allowed_transitions'));
+    $t->check('"delivered" is refused for an order that was never sent', 422, $A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'delivered']])['status']);
+    $t->check('declined: back to processing', 'processing', TestKit::get($A('PATCH', "/admin/orders/{$onum2}/status", ['json' => ['status' => 'processing', 'comment' => 'Refund declined']]), 'data.order_status'));
+    $t->check('and it can now be shipped', 200, $A('POST', "/admin/orders/{$onum2}/shipment", ['json' => ['carrier' => 'GIG Logistics', 'tracking_number' => 'TRK' . random_int(1000, 9999), 'status' => 'in_transit']])['status']);
+
+    $lowOrOut = $A('GET', '/admin/inventory?filter=low_or_out&per_page=100');
+    $rows = (array) TestKit::get($lowOrOut, 'data.items');
+    $t->ok('"low or sold out" lists sold-out and low variants of products on sale, like the overview counts', $lowOrOut['status'] === 200 && array_reduce($rows, static fn (bool $ok, array $r): bool => $ok && (int) $r['stock_quantity'] <= (int) $r['low_stock_threshold'] && $r['product_status'] !== 'archived', true));
 
     foreach (['order_received', 'payment_verified', 'shipment_tracking', 'refund_processed'] as $tpl) {
         $row = $t->db->fetchOne("SELECT `status`, `transport` FROM `email_outbox` WHERE `recipient_email` = ? AND `template` = ? ORDER BY `id` DESC LIMIT 1", 'ss', [$email, $tpl]);

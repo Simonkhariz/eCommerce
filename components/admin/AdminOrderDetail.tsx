@@ -44,7 +44,7 @@ import { ManualPaymentModal } from '@/components/admin/ManualPaymentModal';
 
 /** Simple status changes (no extra details needed), with the explanation shown before confirming. */
 const STATUS_CHANGE_HELP: Partial<Record<OrderStatus, string>> = {
-  processing: 'Use this once you start packing the order. The customer sees "Processing".',
+  processing: 'Use this once you start packing the order. From "Refund pending" it declines the refund request, and the order can then be shipped. The customer sees "Processing".',
   completed: 'Close the order once delivery is settled. No further changes are expected.',
   returned: 'Use this when the parcel comes back to the store. You can then record a refund if one is due.',
   refund_pending: 'Marks the order as awaiting a refund. Record the refund on the Refunds page once the money is returned.',

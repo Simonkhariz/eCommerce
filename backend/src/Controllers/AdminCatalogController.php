@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Support\Input;
 use App\Middleware\JsonBodyMiddleware;
 use App\Repositories\CategoryRepository;
 use App\Repositories\ProductRepository;
@@ -157,6 +158,16 @@ class AdminCatalogController
             Response::error($e->getMessage(), 422, 'VARIANT_CONFLICT');
         } catch (\mysqli_sql_exception $e) {
             if ($e->getCode() === 1062) {
+                // Say which value clashes: the product's web address, its SKU, or a variant.
+                $catalogDb = \App\Database\Database::getInstance();
+                $slugTaken = isset($body['slug']) && $catalogDb->fetchOne("SELECT 1 AS x FROM `products` WHERE `slug` = ? AND `id` <> ?", 'si', [Input::text($body['slug']), $id]) !== null;
+                $skuTaken = isset($body['sku']) && $catalogDb->fetchOne("SELECT 1 AS x FROM `products` WHERE `sku` = ? AND `id` <> ?", 'si', [Input::text($body['sku']), $id]) !== null;
+                if ($slugTaken) {
+                    Response::error('Another product already uses this web address (slug). Choose a different one.', 422, 'DUPLICATE_SLUG', ['slug' => 'Already used by another product.']);
+                }
+                if ($skuTaken) {
+                    Response::error('Another product already uses this SKU.', 422, 'DUPLICATE_SKU', ['sku' => 'Already used by another product.']);
+                }
                 Response::error('Two variants share the same SKU or the same size and colour. Make each variant unique.', 422, 'DUPLICATE_VARIANT');
             }
             throw $e;

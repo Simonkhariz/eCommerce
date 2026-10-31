@@ -137,9 +137,15 @@ class AdminOrderController
         $idOrNumber = trim((string) ($params['idOrNumber'] ?? $params['id'] ?? ''));
         $order = $this->resolveOrder($idOrNumber);
 
-        $orderSnapshot = $this->fulfillmentService->loadOrderSnapshot((int) $order['id']);
+        Response::success($this->withAuditLogs($this->fulfillmentService->loadOrderSnapshot((int) $order['id'])), 'Order fulfillment detail retrieved.');
+    }
 
-        // Attach administrative audit trail
+    /**
+     * The order's admin activity trail, added to every order response so the order page keeps
+     * showing it (with the action just taken) after a status change, shipment or payment.
+     */
+    private function withAuditLogs(array $orderSnapshot): array
+    {
         $auditLogs = $this->db->fetchAll(
             "SELECT a.id, a.admin_id, a.action, a.before_state, a.after_state, a.ip_address, a.created_at, u.full_name as admin_name, u.email as admin_email
              FROM `admin_audit_logs` a
@@ -147,7 +153,7 @@ class AdminOrderController
              WHERE a.entity_type = 'order' AND a.entity_id = ?
              ORDER BY a.id DESC",
             's',
-            [(string) $order['id']]
+            [(string) ($orderSnapshot['id'] ?? 0)]
         );
 
         foreach ($auditLogs as &$log) {
@@ -156,8 +162,7 @@ class AdminOrderController
         }
         unset($log);
         $orderSnapshot['audit_logs'] = $auditLogs;
-
-        Response::success($orderSnapshot, 'Order fulfillment detail retrieved.');
+        return $orderSnapshot;
     }
 
     /**
@@ -182,7 +187,7 @@ class AdminOrderController
 
         try {
             $updated = $this->fulfillmentService->updateOrderStatus((int) $order['id'], $newStatus, $comment, $adminId);
-            Response::success($updated, "Order status successfully transitioned to '{$newStatus}'.");
+            Response::success($this->withAuditLogs($updated), "Order status successfully transitioned to '{$newStatus}'.");
         } catch (InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'INVALID_TRANSITION');
         } catch (\Throwable $e) {
@@ -215,7 +220,7 @@ class AdminOrderController
                 'outcome' => $result['outcome'],
             ]);
             Response::success(
-                $this->fulfillmentService->loadOrderSnapshot((int) $order['id']),
+                $this->withAuditLogs($this->fulfillmentService->loadOrderSnapshot((int) $order['id'])),
                 'Payment recorded and order marked as paid.'
             );
         } catch (InvalidArgumentException $e) {
@@ -247,7 +252,7 @@ class AdminOrderController
 
         try {
             $updated = $this->fulfillmentService->assignShipment((int) $order['id'], $body, $adminId);
-            Response::success($updated, 'Shipment details and carrier tracking updated successfully.');
+            Response::success($this->withAuditLogs($updated), 'Shipment details and carrier tracking updated successfully.');
         } catch (InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'VALIDATION_ERROR');
         } catch (\Throwable $e) {
@@ -273,7 +278,7 @@ class AdminOrderController
 
         try {
             $updated = $this->fulfillmentService->markDelivered((int) $order['id'], $comment, $adminId);
-            Response::success($updated, 'Order delivery confirmed successfully.');
+            Response::success($this->withAuditLogs($updated), 'Order delivery confirmed successfully.');
         } catch (InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'INVALID_TRANSITION');
         } catch (\Throwable $e) {

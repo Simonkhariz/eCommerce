@@ -694,7 +694,7 @@ function buildFeed(data: DashboardOverview): FeedItem[] {
       detail: `${v.product_name} · ${[v.size, v.color_name].filter(Boolean).join(' / ')}`,
       time: null,
       side: stock === 0 ? 'None left' : `${stock} left`,
-      href: '/admin/inventory?filter=low_stock',
+      href: stock === 0 ? '/admin/inventory?filter=out_of_stock' : '/admin/inventory?filter=low_stock',
       icon: stock === 0 ? <PackageX className="size-3.5" aria-hidden="true" /> : <Package className="size-3.5" aria-hidden="true" />,
       tone: stock === 0 ? 'red' : 'amber',
       urgent: true,
@@ -841,7 +841,7 @@ function WorkloadTiles({ data }: { data: DashboardOverview }) {
       icon: <Package className="size-4" aria-hidden="true" />,
       value: lowOrOut,
       hint: `${num(kpis.low_stock_count)} low · ${num(kpis.out_of_stock_count)} sold out`,
-      href: '/admin/inventory?filter=low_stock',
+      href: '/admin/inventory?filter=low_or_out',
       urgent: num(kpis.out_of_stock_count) > 0,
     },
   ];
@@ -992,7 +992,7 @@ function PaymentCell({ status, method }: { status: string; method: string | null
 function LowStock({ data }: { data: DashboardOverview }) {
   const rows = data.critical_stock;
   return (
-    <Shell title="Low stock" iconFirst icon={<Package className="size-4" aria-hidden="true" />} actions={<SurfaceLink href="/admin/inventory?filter=low_stock">Inventory</SurfaceLink>}>
+    <Shell title="Low stock" iconFirst icon={<Package className="size-4" aria-hidden="true" />} actions={<SurfaceLink href="/admin/inventory?filter=low_or_out">Inventory</SurfaceLink>}>
       {rows.length === 0 ? (
         <div className="flex flex-col items-center gap-1 px-4 py-10 text-center">
           <p className="text-[13px] font-medium text-[#1f2937]">Stock levels are healthy</p>

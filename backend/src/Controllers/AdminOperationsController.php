@@ -90,7 +90,8 @@ class AdminOperationsController
     // =========================================================================
 
     /**
-     * GET /api/v1/admin/inventory?filter=all|low_stock|out_of_stock&search=
+     * GET /api/v1/admin/inventory?filter=all|low_stock|out_of_stock|low_or_out&search=
+     * The stock-level filters count like the overview: products on sale only (not archived).
      */
     public function getInventory(): void
     {
@@ -102,9 +103,11 @@ class AdminOperationsController
         $params = [];
 
         if ($filter === 'low_stock') {
-            $where .= " AND v.stock_quantity <= v.low_stock_threshold AND v.stock_quantity > 0";
+            $where .= " AND p.status <> 'archived' AND v.stock_quantity <= v.low_stock_threshold AND v.stock_quantity > 0";
         } elseif ($filter === 'out_of_stock') {
-            $where .= " AND v.stock_quantity = 0";
+            $where .= " AND p.status <> 'archived' AND v.stock_quantity = 0";
+        } elseif ($filter === 'low_or_out') {
+            $where .= " AND p.status <> 'archived' AND v.stock_quantity <= v.low_stock_threshold";
         }
         if ($search !== '') {
             $where .= " AND (p.name LIKE ? OR v.sku LIKE ?)";
@@ -669,6 +672,9 @@ class AdminOperationsController
     {
         $id = (int) ($params['id'] ?? 0);
         $banner = $this->db->fetchOne("SELECT * FROM `banners` WHERE `id` = ?", 'i', [$id]);
+        if ($banner === null) {
+            Response::error('Banner not found.', 404, 'NOT_FOUND');
+        }
         $this->db->executeUpdate("DELETE FROM `banners` WHERE `id` = ?", 'i', [$id]);
         AuditService::record($this->adminId(), 'banner.delete', 'banner', (string) $id, $banner, null);
         Response::success(['id' => $id], 'Banner deleted.');

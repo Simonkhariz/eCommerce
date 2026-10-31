@@ -72,6 +72,16 @@ final class DatabaseCleanup
     /** An order in one of these states still needs the customer's details. */
     private const OPEN_ORDER_STATES = "'pending_payment', 'paid', 'processing', 'shipped', 'refund_pending'";
     private const LAST_RUN_KEY = 'cleanup_last_run';
+
+    /**
+     * Throwaway records whose list, for a fixed review time, can only get shorter: their dates
+     * only ever move forward (a counter's window restarts, a session or guest cart is used
+     * again, a link gets used) and new rows are never old enough to join. They are left out of
+     * the fingerprint, so a visitor (or the clean-up's own code email) touching one between
+     * review and confirmation no longer makes the clean-up refuse; the run removes the rows
+     * still on the list, which are always among those reviewed.
+     */
+    private const SHRINK_ONLY = ['abandoned_guest_carts', 'expired_sessions', 'used_or_expired_sign_in_links', 'old_rate_limit_counters'];
     private const CHUNK = 500;
 
     private Database $db;
@@ -157,7 +167,7 @@ final class DatabaseCleanup
         $sorted = array_map(static function (array $list): array {
             sort($list, SORT_STRING);
             return $list;
-        }, $ordered);
+        }, array_diff_key($ordered, array_flip(self::SHRINK_ONLY)));
 
         return [
             'ids' => $ordered,

@@ -84,7 +84,11 @@ type Filters = { view: string; filter: string; search: string; page: string };
 function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c: Partial<Filters>) => void }) {
   const toast = useToast();
   const page = Number(filters.page) || 1;
-  const stockFilter = (['all', 'low_stock', 'out_of_stock'].includes(filters.filter) ? filters.filter : 'all') as 'all' | 'low_stock' | 'out_of_stock';
+  const stockFilter = (['all', 'low_stock', 'out_of_stock', 'low_or_out'].includes(filters.filter) ? filters.filter : 'all') as
+    | 'all'
+    | 'low_stock'
+    | 'out_of_stock'
+    | 'low_or_out';
 
   const [searchText, setSearchText] = useSearchBox(filters.search, setFilters);
 
@@ -153,6 +157,7 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
           onChange={(v) => setFilters({ filter: v })}
           options={[
             { value: 'all', label: 'All stock levels' },
+            { value: 'low_or_out', label: 'Low or sold out' },
             { value: 'low_stock', label: 'Low stock' },
             { value: 'out_of_stock', label: 'Out of stock' },
           ]}

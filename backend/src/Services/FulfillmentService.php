@@ -30,7 +30,9 @@ class FulfillmentService
         'delivered'       => ['completed', 'returned', 'refund_pending'],
         'completed'       => ['returned', 'refund_pending'],
         'returned'        => ['refund_pending'],
-        'refund_pending'  => ['delivered', 'completed'], // refund request declined
+        // Refund request declined: back to "processing" if nothing was sent yet (so it can still
+        // be shipped), otherwise "delivered" or "completed". allowedFor() picks per order.
+        'refund_pending'  => ['processing', 'delivered', 'completed'],
         'cancelled'       => [],
         'refunded'        => [],
     ];
@@ -59,6 +61,30 @@ class FulfillmentService
         }
 
         return in_array($to, self::ALLOWED_TRANSITIONS[$from] ?? [], true);
+    }
+
+    /**
+     * The next statuses for this particular order. Same as the table, except a declined refund
+     * request: an order that was never sent goes back to "processing", a sent one to
+     * "delivered" or "completed".
+     *
+     * @return string[]
+     */
+    public function allowedFor(array $order): array
+    {
+        $status = strtolower(trim((string) $order['order_status']));
+        $allowed = self::ALLOWED_TRANSITIONS[$status] ?? [];
+        if ($status !== 'refund_pending') {
+            return $allowed;
+        }
+        $sent = $this->db->fetchOne(
+            "SELECT 1 AS x FROM `shipments` WHERE `order_id` = ?
+             UNION SELECT 1 FROM `order_status_history` WHERE `order_id` = ? AND `new_status` IN ('shipped', 'delivered', 'completed', 'returned')
+             LIMIT 1",
+            'ii',
+            [(int) $order['id'], (int) $order['id']]
+        ) !== null;
+        return array_values(array_filter($allowed, static fn (string $s): bool => $sent ? $s !== 'processing' : $s === 'processing'));
     }
 
     /**
@@ -458,7 +484,7 @@ class FulfillmentService
         $order['shipping_fee'] = (float) $order['shipping_fee'];
         $order['grand_total'] = (float) $order['grand_total'];
         $order['requires_attention'] = (bool) $order['requires_attention'];
-        $order['allowed_transitions'] = $this->getAllowedTransitions($order['order_status']);
+        $order['allowed_transitions'] = $this->allowedFor($order);
 
         $order['shipment'] = $this->db->fetchOne(
             "SELECT `id`, `carrier`, `tracking_number`, `tracking_url`, `status`, `shipped_at`, `delivered_at`, `created_at`, `updated_at`
@@ -536,8 +562,9 @@ class FulfillmentService
         $orderId = (int) $order['id'];
         $currentStatus = $order['order_status'];
 
-        if (!$this->canTransition($currentStatus, $newStatus)) {
-            $allowed = implode(', ', $this->getAllowedTransitions($currentStatus));
+        $nextStatuses = $this->allowedFor($order);
+        if ($currentStatus !== $newStatus && !in_array(strtolower(trim($newStatus)), $nextStatuses, true)) {
+            $allowed = implode(', ', $nextStatuses);
             throw new InvalidArgumentException(
                 "Cannot move this order from '{$currentStatus}' to '{$newStatus}'. "
                 . ($allowed !== '' ? "Allowed next statuses: {$allowed}." : "'{$currentStatus}' is a final status.")

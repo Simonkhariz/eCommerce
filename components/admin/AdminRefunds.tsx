@@ -182,6 +182,10 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
     setErrors(local);
     if (Object.keys(local).length) return;
 
+    // The server returns items to stock only when the order ends up fully refunded.
+    const completesRefund = (value: number) =>
+      value + eligibility.refunded_amount + eligibility.pending_refund_amount >= eligibility.paid_amount - 0.01;
+
     const ok = await confirm({
       title: `Record a ${formatPrice(amount)} refund?`,
       message: (
@@ -190,7 +194,11 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
             Order <span className="font-mono font-semibold">{eligibility.order_number}</span> ·{' '}
             {form.status === 'completed' ? 'marked as already paid back to the customer.' : 'recorded as pending until you mark it completed.'}
           </p>
-          {form.restock && eligibility.can_restock && <p>The order’s items will be returned to stock.</p>}
+          {form.restock && eligibility.can_restock && (completesRefund(amount) ? (
+            <p>The order’s items will be returned to stock.</p>
+          ) : (
+            <p>This is a partial refund, so the order’s items stay out of stock. Items go back only with a full refund.</p>
+          ))}
           <p className="text-[#6b7280]">This records the refund. It does not send money.</p>
         </div>
       ),
@@ -205,7 +213,7 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
         amount,
         reason: form.reason.trim(),
         status: form.status,
-        restock: form.restock && eligibility.can_restock,
+        restock: form.restock && eligibility.can_restock && completesRefund(amount),
         provider_refund_reference: form.reference.trim() || undefined,
       });
       toast.success(
@@ -348,7 +356,7 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
                 <div className="sm:col-span-2">
                   <Checkbox
                     label="Return the order’s items to stock"
-                    hint="Only if the items were never shipped, or came back in sellable condition."
+                    hint="Only if the items were never shipped, or came back in sellable condition. Applies to a full refund only: a partial refund keeps the items out of stock."
                     checked={form.restock}
                     onChange={(restock) => setForm((f) => ({ ...f, restock }))}
                   />

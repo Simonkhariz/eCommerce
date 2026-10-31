@@ -360,6 +360,23 @@ $oldNotification(); // a record the admin did not see
 $t->check('records that changed after review are refused', 409, $run(['confirmation_id' => (string) TestKit::get($fourth, 'data.confirmation_id'), 'code' => (string) $t->confirmationCode(strtolower($admin['email']))])['status']);
 $t->ok('and nothing was removed', $evtExists($evt2));
 
+// Throwaway counters touched between review and confirmation: the clean-up's own code email
+// restarts the admin's old "codes sent" counter, and a returning visitor restarts theirs.
+$counterId = static fn (string $bucket, string $key): string => hash('sha256', $bucket . '|' . strtolower(trim($key)));
+$adminCounter = $counterId('cleanup_code_sent', (string) $admin['id']);
+$visitorCounter = $counterId('checkout', '203.0.113.77');
+$idleCounter = $counterId('checkout', '203.0.113.78');
+$t->sql("UPDATE `rate_limits` SET `window_start` = UNIX_TIMESTAMP() - 172800 WHERE `id` = ?", 's', [$adminCounter]);
+$t->sql("INSERT INTO `rate_limits` (`id`, `hits`, `window_start`) VALUES (?, 1, UNIX_TIMESTAMP() - 172800), (?, 1, UNIX_TIMESTAMP() - 172800)
+         ON DUPLICATE KEY UPDATE `window_start` = VALUES(`window_start`)", 'ss', [$visitorCounter, $idleCounter]);
+$fifth = $verify(['password' => $admin['password'], 'as_of' => $now()]);
+$t->sql("UPDATE `rate_limits` SET `window_start` = UNIX_TIMESTAMP() WHERE `id` = ?", 's', [$visitorCounter]);
+$fifthRun = $run(['confirmation_id' => (string) TestKit::get($fifth, 'data.confirmation_id'), 'code' => (string) $t->confirmationCode(strtolower($admin['email']))]);
+$t->check("old counters touched after review (the code email itself, a returning visitor) don't spoil the clean-up", 200, $fifthRun['status']);
+$counterLeft = static fn (string $id): bool => (int) $t->scalar("SELECT COUNT(*) FROM `rate_limits` WHERE `id` = ?", 's', [$id]) === 1;
+$t->ok('the touched counters are kept, the idle old one is removed', $counterLeft($visitorCounter) && $counterLeft($adminCounter) && !$counterLeft($idleCounter));
+$t->ok('and the reviewed records went', !$evtExists($evt2));
+
 // Password lock-out.
 for ($i = 0; $i < 5; $i++) {
     $verify(['password' => 'still-wrong', 'as_of' => $now()]);
