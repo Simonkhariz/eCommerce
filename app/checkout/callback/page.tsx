@@ -10,8 +10,9 @@ import { CheckmarkBadge01Icon, AlertCircleIcon, Clock01Icon, ArrowRight01Icon } 
 import { Printer, Download } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import { formatPrice } from '@/lib/currency';
-import { ApiError, apiInitializePayment, apiMarkPaymentSent, errorMessage } from '@/lib/api-client';
-import { POLL_DELAYS, paymentOrderQuery, paymentStatusQuery, paymentViewFor, type PaymentView } from '@/lib/payment-queries';
+import { API_BASE_URL, ApiError, apiInitializePayment, apiMarkPaymentSent, errorMessage } from '@/lib/api-client';
+import { POLL_DELAYS, paymentKeys, paymentOrderQuery, paymentStatusQuery, paymentViewFor, type PaymentView } from '@/lib/payment-queries';
+import { LIVE_VERIFY_DELAYS, MAX_RECONNECTS, RECONNECT_MS, isNewerState, openPaymentStream, type LiveState } from '@/lib/live-payment';
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptUrl, formatSupportPhone, whatsAppOrderFrom } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useCart } from '@/context/CartContext';
@@ -41,7 +42,7 @@ function CheckoutCallbackContent() {
   }
 
   const { completePaidOrder } = useCart();
-  const { supportPhone, paymentMethods } = useStoreSupport();
+  const { supportPhone, paymentMethods, livePaymentStatus } = useStoreSupport();
 
   // Guest access key and "invoice sent", as saved on this device (they update when saved).
   const token = useGuestToken(orderNumber);
@@ -64,6 +65,14 @@ function CheckoutCallbackContent() {
   // back-off schedule, only while the tab is visible, and once more when the shopper comes
   // back to it. pollBase marks where "Check again" restarted the schedule.
   const [pollBase, setPollBase] = useState(0);
+  // Live status (lib/live-payment.ts, docs/SSE_CONTRACT.md), when the server offers it: the
+  // stream says the moment the payment is recorded, and the page then asks verify-payment for
+  // the full answer. Meanwhile verify-payment (which asks the gateway) runs on a sparser
+  // schedule. "failed" means the stream is not usable here: the usual schedule takes over.
+  const [live, setLive] = useState<'idle' | 'open' | 'ended' | 'failed'>('idle');
+  const [streamRun, setStreamRun] = useState(0);
+  const liveMode = livePaymentStatus && live !== 'failed';
+  const delays = liveMode ? LIVE_VERIFY_DELAYS : POLL_DELAYS;
   const queryClient = useQueryClient();
   const statusQuery = paymentStatusQuery(orderNumber, token ?? null, reference || null);
   const status = useQuery({
@@ -73,7 +82,7 @@ function CheckoutCallbackContent() {
       const data = query.state.data;
       if (!data || query.state.status === 'error' || paymentViewFor(data) !== 'pending') return false;
       const next = query.state.dataUpdateCount - 1 - pollBase;
-      return next >= 0 && next < POLL_DELAYS.length ? POLL_DELAYS[next] : false;
+      return next >= 0 && next < delays.length ? delays[next] : false;
     },
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: (query) => !!query.state.data && paymentViewFor(query.state.data) === 'pending',
@@ -82,6 +91,7 @@ function CheckoutCallbackContent() {
   // Answers received so far for this question (the page re-renders after each one).
   const answers = queryClient.getQueryState(statusQuery.queryKey)?.dataUpdateCount ?? 0;
   const pollIndex = Math.max(0, answers - 1 - pollBase);
+  const checkingAutomatically = live === 'open' || pollIndex < delays.length;
   const isRefreshing = status.isFetching;
   const view: ViewState = !orderNumber
     ? 'error'
@@ -139,9 +149,51 @@ function CheckoutCallbackContent() {
     if (view === 'cancelled') clearPendingOrder(orderNumber);
   }, [view, orderNumber]);
 
+  // The live status stream, while the payment is pending. Each newer state makes the page ask
+  // verify-payment once; a dropped stream reconnects up to MAX_RECONNECTS times, and a refused,
+  // switched-off or silent one hands over to the usual checks for the rest of the visit.
+  const isPending = view === 'pending';
+  const liveFailed = live === 'failed';
+  useEffect(() => {
+    if (!livePaymentStatus || liveFailed || !hydrated || !orderNumber || !isPending) return;
+    const controller = new AbortController();
+    const key = paymentKeys.status(orderNumber, token ?? null, reference || null);
+    let last: LiveState | null = null;
+    const onState = (next: LiveState) => {
+      if (!isNewerState(last, next)) return;
+      const first = last === null;
+      last = next;
+      // The first message is the state the page already shows, unless it changed meanwhile.
+      if (!first || next.status !== 'pending') void queryClient.refetchQueries({ queryKey: key, exact: true });
+    };
+    const wait = (ms: number) => new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      controller.signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+    void (async () => {
+      setLive('open');
+      for (let drops = 0; ; drops++) {
+        const outcome = await openPaymentStream({ baseUrl: API_BASE_URL, orderNumber, token, reference: reference || null, signal: controller.signal, onState });
+        if (outcome === 'aborted' || controller.signal.aborted) return;
+        if (outcome === 'final' || outcome === 'time_limit') {
+          setLive('ended');
+          return;
+        }
+        if (outcome === 'unavailable' || drops >= MAX_RECONNECTS) {
+          setLive('failed');
+          return;
+        }
+        await wait(RECONNECT_MS);
+        if (controller.signal.aborted) return;
+      }
+    })();
+    return () => controller.abort();
+  }, [livePaymentStatus, liveFailed, hydrated, orderNumber, isPending, token, reference, streamRun, queryClient]);
+
   const checkAgain = async () => {
     if (!orderNumber) return null;
     setPollBase(answers);
+    if (live === 'ended') setStreamRun((n) => n + 1);
     return status.refetch();
   };
 
@@ -463,11 +515,11 @@ function CheckoutCallbackContent() {
               {awaitingWhatsApp
                 ? 'The store confirms WhatsApp transfers by hand. Once they have, tap "Mark as paid" to see your receipt. We will also email you.'
                 : message ||
-                  (pollIndex < POLL_DELAYS.length
+                  (checkingAutomatically
                     ? 'Card payments usually confirm within seconds; bank transfers can take a few minutes. This page updates automatically.'
                     : 'Still processing. Bank transfers can take a few minutes to arrive. You can check again, or come back later: we will email you once it is confirmed.')}
             </p>
-            {pollIndex < POLL_DELAYS.length && (
+            {checkingAutomatically && (
               <p className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-900 rounded-full text-xs font-medium border border-amber-200">
                 <span className={`w-2 h-2 rounded-full bg-amber-600 ${isRefreshing ? 'animate-ping' : ''}`} />
                 Checking automatically…
@@ -493,7 +545,7 @@ function CheckoutCallbackContent() {
                   {isRefreshing ? 'Checking…' : 'Check again'}
                 </button>
               )}
-              {(result?.status === 'not_started' || pollIndex >= POLL_DELAYS.length) && retryPanel}
+              {(result?.status === 'not_started' || !checkingAutomatically) && retryPanel}
               <a
                 href={buildWhatsAppMessageUrl(`Hello! I paid for order ${orderNumber} (reference ${result?.provider_reference || reference || 'n/a'}) and it is still pending. Can you check?`, supportPhone)}
                 target="_blank"

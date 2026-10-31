@@ -149,6 +149,7 @@ $router->get('/api/v1/checkout/shipping-zones', [CheckoutController::class, 'shi
 $router->get('/api/v1/checkout/orders/{orderNumber}', [CheckoutController::class, 'show']);
 $router->post('/api/v1/checkout/orders/{orderNumber}/initialize-payment', [CheckoutController::class, 'initializePayment']);
 $router->get('/api/v1/checkout/orders/{orderNumber}/verify-payment', [CheckoutController::class, 'verifyPayment']);
+$router->get('/api/v1/checkout/orders/{orderNumber}/events', [CheckoutController::class, 'paymentEvents']);
 $router->post('/api/v1/checkout/orders/{orderNumber}/payment-sent', [CheckoutController::class, 'markPaymentSent']);
 $router->post('/api/v1/checkout/orders/{orderNumber}/release', [CheckoutController::class, 'releaseOrder']);
 
@@ -276,9 +277,10 @@ if (!in_array($requestMethod, ['GET', 'HEAD', 'OPTIONS'], true) && str_starts_wi
     register_shutdown_function([StorefrontRefresh::class, 'afterAdminChange']);
 }
 
-// Slow page loads and checkout calls are counted for the storage health alert. CSV exports
-// and admin changes (uploads, sending email) are slow by nature and are left out.
-$isExport = str_ends_with($requestPath, '/export');
+// Slow page loads and checkout calls are counted for the storage health alert. CSV exports,
+// live status streams (open for up to SSE_STREAM_SECONDS by design) and admin changes (uploads,
+// sending email) are slow by nature and are left out.
+$isExport = str_ends_with($requestPath, '/export') || str_ends_with($requestPath, '/events');
 if (($requestMethod === 'GET' && !$isExport) || ($requestMethod === 'POST' && str_starts_with($requestPath, '/api/v1/checkout/'))) {
     register_shutdown_function(static function () use ($requestMethod, $requestStartedAt): void {
         SlowRequestLog::record($requestMethod, Router::$matchedRoute, $requestStartedAt);

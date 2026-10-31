@@ -1201,6 +1201,8 @@ export interface PaymentMethodsResponse {
   /** How long an unpaid order holds its items when paying online / by WhatsApp transfer. */
   payment_window_minutes?: number;
   manual_payment_window_hours?: number;
+  /** The payment return page may open the live status stream. */
+  live_payment_status?: boolean;
 }
 
 /**

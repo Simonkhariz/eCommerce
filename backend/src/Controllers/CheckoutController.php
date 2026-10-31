@@ -10,6 +10,7 @@ use App\Middleware\JsonBodyMiddleware;
 use App\Services\CheckoutService;
 use App\Services\FulfillmentService;
 use App\Services\KoraService;
+use App\Services\LiveStatus;
 use App\Services\MailService;
 use App\Services\MonnifyService;
 use App\Services\PaymentAttempts;
@@ -343,6 +344,8 @@ class CheckoutController
             // How long an unpaid order holds its items, so the storefront states the real values.
             'payment_window_minutes' => PaymentAttempts::gatewayWindowMinutes(),
             'manual_payment_window_hours' => intdiv(PaymentAttempts::manualWindowMinutes(), 60),
+            // The payment return page may open the live status stream (docs/SSE_CONTRACT.md).
+            'live_payment_status' => LiveStatus::enabled(),
         ], 'Payment methods retrieved.');
     }
 
@@ -444,29 +447,8 @@ class CheckoutController
 
         RateLimiter::attempt('payment_verify', RequestContext::clientIp(), 240, 600);
 
-        // Query param or header reference provided by the gateway return redirect
-        $customRef = trim(urldecode((string)(
-            $_GET['reference'] ??
-            $_GET['paymentReference'] ??
-            $_GET['payment_reference'] ??
-            $_GET['transactionReference'] ??
-            $_GET['trxref'] ??
-            $_SERVER['HTTP_X_PAYMENT_REFERENCE'] ??
-            ''
-        )));
-
-        // Session owner, guest token, or the exact gateway reference returned on redirect.
-        // This endpoint only reveals payment status, never addresses or contact details.
-        $isAuthorized = $this->canViewOrder($order, false);
-        if (!$isAuthorized && $customRef !== '') {
-            $isAuthorized = $this->db->fetchOne(
-                "SELECT `id` FROM `payments` WHERE `order_id` = ? AND `provider_reference` = ? LIMIT 1",
-                'is',
-                [(int) $order['id'], $customRef]
-            ) !== null;
-        }
-
-        if (!$isAuthorized) {
+        $customRef = $this->returnReference();
+        if (!$this->canSeePaymentStatus($order, $customRef)) {
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
@@ -707,6 +689,121 @@ class CheckoutController
             'customer_marked_paid_at' => $fresh['customer_marked_paid_at'],
             'expires_at' => $fresh['expires_at'],
         ], 'Thanks! The store has been told and will confirm your transfer.');
+    }
+
+    /** The gateway reference from the return redirect (query string) or the page (header). */
+    private function returnReference(): string
+    {
+        return trim(urldecode((string) (
+            $_GET['reference'] ??
+            $_GET['paymentReference'] ??
+            $_GET['payment_reference'] ??
+            $_GET['transactionReference'] ??
+            $_GET['trxref'] ??
+            $_SERVER['HTTP_X_PAYMENT_REFERENCE'] ??
+            ''
+        )));
+    }
+
+    /**
+     * Who may see an order's payment status (verify-payment and the live status stream): the
+     * session owner, the guest access key, or the exact gateway reference returned on redirect.
+     * Status only, never addresses or contact details.
+     */
+    private function canSeePaymentStatus(array $order, string $reference): bool
+    {
+        if ($this->canViewOrder($order, false)) {
+            return true;
+        }
+        return $reference !== '' && $this->db->fetchOne(
+            "SELECT `id` FROM `payments` WHERE `order_id` = ? AND `provider_reference` = ? LIMIT 1",
+            'is',
+            [(int) $order['id'], $reference]
+        ) !== null;
+    }
+
+    /**
+     * GET /api/v1/checkout/orders/{orderNumber}/events  (text/event-stream)
+     *
+     * Live payment status for the payment return page (docs/SSE_CONTRACT.md). The same access
+     * rules as verify-payment. Sends the current state at once, then each change as it is
+     * committed, a comment every SSE_HEARTBEAT_SECONDS, and `end` once the state is final or
+     * after SSE_STREAM_SECONDS. It never asks the gateway, confirms a payment or changes the
+     * order. 404 SSE_DISABLED when off; 503 SSE_BUSY when the order, visitor or server already has
+     * as many streams as allowed (the page then checks the usual way).
+     */
+    public function paymentEvents(array $params): void
+    {
+        if (!LiveStatus::enabled()) {
+            Response::error('Live payment status is not switched on.', 404, 'SSE_DISABLED');
+        }
+        RateLimiter::attempt('sse_open', RequestContext::clientIp(), 20, 600);
+        $orderNumber = trim($params['orderNumber'] ?? '');
+        $order = $orderNumber === '' ? null : $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$orderNumber]);
+        if ($order === null || !$this->canSeePaymentStatus($order, $this->returnReference())) {
+            Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
+        }
+
+        $live = new LiveStatus($this->db);
+        $slot = $live->claimSlot((int) $order['id'], RequestContext::clientIp());
+        if ($slot === null) {
+            header('Retry-After: 10');
+            Response::error('Too many live connections right now. The page will check the usual way.', 503, 'SSE_BUSY');
+        }
+        register_shutdown_function(static fn () => $live->releaseSlot($slot));
+
+        // A plain stream: no buffering, no compression, no time limit shorter than the stream.
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        @ini_set('zlib.output_compression', '0');
+        set_time_limit(LiveStatus::streamSeconds() + 20);
+        ignore_user_abort(false);
+        header('Content-Type: text/event-stream; charset=utf-8');
+        // no-transform: proxies and the storefront's own compression must pass it through as written
+        // (Next.js gzips proxied answers otherwise, which holds messages back for seconds).
+        header('Cache-Control: no-store, no-transform');
+        header('X-Accel-Buffering: no');
+        header('X-Content-Type-Options: nosniff');
+
+        $send = static function (string $text): void {
+            echo $text;
+            flush();
+        };
+        $event = static fn (array $state): string => 'id: ' . $state['id'] . "\nevent: payment\ndata: "
+            . json_encode(['order_number' => $state['order_number'], 'status' => $state['status'], 'order_status' => $state['order_status']], JSON_UNESCAPED_SLASHES)
+            . "\n\n";
+
+        $orderId = (int) $order['id'];
+        $state = $live->snapshot($orderId);
+        $send("retry: 3000\n\n" . $event($state));
+
+        $started = microtime(true);
+        $deadline = $started + LiveStatus::streamSeconds();
+        $lastSent = $started;
+        $reason = 'time_limit';
+        while (!$state['final']) {
+            $elapsed = microtime(true) - $started;
+            // Every second while a payment usually settles, then every two.
+            usleep($elapsed < 30 ? 1_000_000 : 2_000_000);
+            if (microtime(true) >= $deadline || connection_aborted()) {
+                break;
+            }
+            $next = $live->snapshot($orderId);
+            if ($next['id'] !== $state['id']) {
+                $state = $next;
+                $send($event($state));
+                $lastSent = microtime(true);
+            } elseif (microtime(true) - $lastSent >= LiveStatus::heartbeatSeconds()) {
+                $send(": keep-alive\n\n");
+                $lastSent = microtime(true);
+            }
+        }
+        if ($state['final']) {
+            $reason = 'final';
+        }
+        $send("event: end\ndata: " . json_encode(['reason' => $reason]) . "\n\n");
+        exit;
     }
 
     private function canViewOrder(array $order, bool $allowEmailMatch, bool $enforceCsrf = false, string $bodyToken = ''): bool

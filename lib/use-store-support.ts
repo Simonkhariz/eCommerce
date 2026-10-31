@@ -10,13 +10,15 @@ interface StoreSupport {
   paymentMethods: PaymentMethodItem[];
   /** How long an unpaid order holds its items (the backend's defaults until loaded). */
   paymentWindows: PaymentWindows;
+  /** The payment return page may open the live status stream (SSE_ENABLED on the server). */
+  livePaymentStatus: boolean;
   loaded: boolean;
 }
 
 let cache: Promise<StoreSupport> | null = null;
 
 function fromResponse(res: PaymentMethodsResponse | null | undefined): StoreSupport {
-  return { supportPhone: res?.support_phone || null, paymentMethods: res?.methods || [], paymentWindows: paymentWindowsFrom(res), loaded: true };
+  return { supportPhone: res?.support_phone || null, paymentMethods: res?.methods || [], paymentWindows: paymentWindowsFrom(res), livePaymentStatus: res?.live_payment_status === true, loaded: true };
 }
 
 function load(): Promise<StoreSupport> {
@@ -25,7 +27,7 @@ function load(): Promise<StoreSupport> {
       .then(fromResponse)
       .catch(() => {
         cache = null; // retry on the next mount
-        return { supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, loaded: true };
+        return { supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, livePaymentStatus: false, loaded: true };
       });
   }
   return cache;
@@ -39,7 +41,7 @@ function load(): Promise<StoreSupport> {
 export function useStoreSupport(): StoreSupport {
   const seeded = useStoreSeed()?.payments;
   const [state, setState] = useState<StoreSupport>(() =>
-    seeded ? fromResponse(seeded) : { supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, loaded: false }
+    seeded ? fromResponse(seeded) : { supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, livePaymentStatus: false, loaded: false }
   );
 
   useEffect(() => {

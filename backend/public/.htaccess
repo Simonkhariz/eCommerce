@@ -33,6 +33,12 @@ Options -Indexes
     </FilesMatch>
 </IfModule>
 
+# Live payment status streams (/api/v1/checkout/orders/<n>/events) must reach the browser as
+# they are written: never compress them if the host adds mod_deflate.
+<IfModule mod_setenvif.c>
+    SetEnvIf Request_URI "/events$" no-gzip=1 dont-vary=1
+</IfModule>
+
 # Block hidden files (.env, .git)
 <FilesMatch "^\.">
     Require all denied
