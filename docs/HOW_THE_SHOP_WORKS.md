@@ -608,7 +608,9 @@ instead of cancelled.
 ### 5.9 Growth: promo codes, newsletter, banners and reviews
 
 - **Promo codes:**
-  - **A percentage (1–90%) or a fixed amount off** the items, e.g. ₦5,000 off.
+  - **A percentage (1–90%) or a fixed amount off** the items, e.g. ₦5,000 off. A fixed amount
+    needs a minimum order above it, and checkout never accepts an order that would cost ₦0
+    (the payment gateways can't charge nothing).
   - **Minimum order:** the code works only when the items total at least a set amount
     (e.g. ₦20,000); below it the shopper is told how much more to add.
   - **Maximum discount** for percentage codes, e.g. "10% off, at most ₦10,000".
