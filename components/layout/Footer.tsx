@@ -7,6 +7,7 @@ import { apiSubscribeNewsletter } from '@/lib/api-client';
 import { useStoreInfo, useStoreNav, whatsAppLink } from '@/lib/use-store-info';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { PaymentBadges } from '@/components/layout/PaymentBadges';
+import { DEVELOPER } from '@/lib/developer';
 
 const linkClass = 'inline-block py-1 transition-colors hover:text-black hover:underline';
 
@@ -228,9 +229,18 @@ export const Footer: React.FC = () => {
 
         {/* Bottom bar */}
         <div className="flex flex-col items-center justify-between gap-4 pt-8 text-xs text-neutral-700 sm:flex-row">
-          <p>
-            © {new Date().getFullYear()} {origin?.store_name || 'SHOP.CO'}. All rights reserved.
-          </p>
+          <div className="flex flex-col items-center gap-1 sm:items-start">
+            <p>
+              © {new Date().getFullYear()} {origin?.store_name || 'SHOP.CO'}. All rights reserved.
+            </p>
+            <p>
+              Developed by{' '}
+              <a href={DEVELOPER.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-black underline-offset-2 hover:underline">
+                {DEVELOPER.name}
+                <span className="sr-only"> (opens in a new tab)</span>
+              </a>
+            </p>
+          </div>
           <PaymentBadges />
         </div>
       </div>
