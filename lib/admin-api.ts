@@ -72,6 +72,8 @@ export interface AddressSnapshot {
   state?: string;
   country?: string;
   postal_code?: string | null;
+  /** Optional pin the customer shared at checkout ("Use my current location"). */
+  location?: { latitude: number; longitude: number; accuracy_m: number | null };
 }
 
 export interface AdminOrderListItem {

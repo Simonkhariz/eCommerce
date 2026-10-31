@@ -136,6 +136,15 @@ $ordersCreated[] = (string) TestKit::get($numbers, 'data.order_number');
 // Give its unit back at once, so the stock counts checked further down are unchanged.
 $t->http('POST', '/checkout/orders/' . TestKit::get($numbers, 'data.order_number') . '/release', ['headers' => ['X-Guest-Access-Token: ' . TestKit::get($numbers, 'data.guest_access_token')], 'json' => []]);
 $t->check('a list where text belongs gets a clear 422, not a server error', 422, $t->http('POST', '/checkout/orders', ['json' => ['email' => $numEmail, 'items' => [['product_id' => $pid, 'variant_id' => $vid, 'quantity' => 1]], 'shipping_address' => ['full_name' => ['x']] + $address('', 'FCT', 'Garki')]])['status']);
+$pinOrder = static fn (array $location) => $t->http('POST', '/checkout/orders', ['headers' => ['Idempotency-Key: pin' . bin2hex(random_bytes(12))], 'json' => ['email' => $numEmail, 'items' => [['product_id' => $pid, 'variant_id' => $vid, 'quantity' => 1]], 'shipping_address' => ['location' => $location] + $address('Pin Test', 'Lagos', 'Ikeja')]]);
+$pinSnapshot = static function (array $res) use ($t): ?array {
+    $num = (string) TestKit::get($res, 'data.order_number');
+    $t->http('POST', "/checkout/orders/{$num}/release", ['headers' => ['X-Guest-Access-Token: ' . TestKit::get($res, 'data.guest_access_token')], 'json' => []]);
+    $snap = json_decode((string) $t->scalar("SELECT `shipping_address_snapshot` FROM `orders` WHERE `order_number` = ?", 's', [$num]), true);
+    return $snap['location'] ?? null;
+};
+$t->check('a delivery pin shared at checkout is kept with the address', ['latitude' => 6.5244, 'longitude' => 3.3792, 'accuracy_m' => 12], $pinSnapshot($pinOrder(['latitude' => 6.5244, 'longitude' => 3.3792, 'accuracy_m' => 12.4])));
+$t->check('a nonsense pin is dropped (the order still goes through)', null, $pinSnapshot($pinOrder(['latitude' => 'abc', 'longitude' => 999])));
 
 $t->section('"Mark as paid" for a WhatsApp transfer alerts the store, never pays the order');
 $t->check('mark as paid without access -> 404', 404, $t->http('POST', "/checkout/orders/{$onum}/payment-sent", ['json' => []])['status']);

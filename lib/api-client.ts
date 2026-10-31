@@ -950,6 +950,8 @@ export interface ShippingAddressInput {
   state: string;
   postal_code?: string;
   country: string;
+  /** Optional pin the customer shared at checkout ("Use my current location"). */
+  location?: { latitude: number; longitude: number; accuracy_m: number | null };
 }
 
 export interface ShippingZone {

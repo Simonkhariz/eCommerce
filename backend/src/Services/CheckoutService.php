@@ -265,6 +265,12 @@ class CheckoutService
                     'postal_code' => Input::text($shippingAddress['postal_code'] ?? null),
                     'country' => Input::text($shippingAddress['country'] ?? null, 'Nigeria'),
                 ];
+                // Optional delivery pin the customer shared from their phone ("Use my current
+                // location"): kept only when it is a real coordinate, for the rider's map.
+                $pin = self::deliveryPin($shippingAddress['location'] ?? null);
+                if ($pin !== null) {
+                    $addressSnapshot['location'] = $pin;
+                }
 
                 $notes = isset($input['notes']) ? trim((string) $input['notes']) : null;
 
@@ -563,6 +569,26 @@ class CheckoutService
      * @param int|null $requestedZoneId Optional zone identifier picked by customer
      * @return array{selected_zone: array, eligible_zones: array}
      */
+    /**
+     * A delivery pin from the storefront ({latitude, longitude, accuracy_m}) when it is a real
+     * coordinate; anything else is dropped (the address itself is what the order relies on).
+     *
+     * @return array{latitude: float, longitude: float, accuracy_m: int|null}|null
+     */
+    public static function deliveryPin(mixed $location): ?array
+    {
+        if (!is_array($location) || !is_numeric($location['latitude'] ?? null) || !is_numeric($location['longitude'] ?? null)) {
+            return null;
+        }
+        $lat = (float) $location['latitude'];
+        $lng = (float) $location['longitude'];
+        if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 || ($lat == 0.0 && $lng == 0.0)) {
+            return null;
+        }
+        $accuracy = is_numeric($location['accuracy_m'] ?? null) ? max(0, min(100000, (int) round((float) $location['accuracy_m']))) : null;
+        return ['latitude' => round($lat, 6), 'longitude' => round($lng, 6), 'accuracy_m' => $accuracy];
+    }
+
     /**
      * Delivery fee for this many items: the zone's fee covers the first `items_included` items,
      * and each item after that adds `extra_item_fee`.

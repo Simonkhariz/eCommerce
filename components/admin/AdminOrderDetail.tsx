@@ -395,6 +395,25 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
                   value:
                     [addr.address_line1, addr.address_line2, addr.city, addr.state, addr.postal_code, addr.country].filter(Boolean).join(', ') || '—',
                 },
+                ...(addr.location && Number.isFinite(Number(addr.location.latitude)) && Number.isFinite(Number(addr.location.longitude))
+                  ? [
+                      {
+                        label: 'Location pin',
+                        value: (
+                          <a
+                            href={`https://www.google.com/maps/search/?api=1&query=${Number(addr.location.latitude)},${Number(addr.location.longitude)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium text-[#111827] underline"
+                          >
+                            Open in Google Maps
+                            {addr.location.accuracy_m ? ` (±${addr.location.accuracy_m} m)` : ''}
+                            <span className="sr-only"> (opens in a new tab)</span>
+                          </a>
+                        ),
+                      },
+                    ]
+                  : []),
                 { label: 'Delivery zone', value: zone?.name ? `${zone.name}${zone.estimated_days ? ` · ${zone.estimated_days}` : ''}` : '—' },
                 { label: 'Delivery fee', value: formatPrice(num(order.shipping_fee)) },
               ]}

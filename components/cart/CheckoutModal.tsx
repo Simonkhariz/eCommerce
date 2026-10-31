@@ -86,6 +86,8 @@ interface CheckoutForm {
   state: string;
   notes: string;
   selectedZoneId: number | undefined;
+  /** Optional pin shared from the phone ("Use my current location"), for the rider's map. */
+  location?: { latitude: number; longitude: number; accuracy_m: number | null };
 }
 
 const EMPTY_FORM: CheckoutForm = { fullName: '', email: '', phone: '', address: '', city: '', state: '', notes: '', selectedZoneId: undefined };
@@ -298,6 +300,7 @@ function CheckoutSession({
         city: formData.city.trim(),
         state: formData.state,
         country: 'Nigeria',
+        ...(formData.location ? { location: formData.location } : {}),
       },
       shipping_zone_id: quote.shipping_zone.id,
       coupon_code: appliedPromo?.code,
@@ -536,6 +539,10 @@ function CheckoutSession({
                 <label htmlFor="co-address" className={labelClass}>Street address</label>
                 <input id="co-address" type="text" required autoComplete="street-address" placeholder="House number, street, area"
                   value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} className={fieldClass} />
+                <DeliveryPin
+                  value={formData.location}
+                  onChange={(location) => setFormData((f) => ({ ...f, location }))}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
@@ -817,3 +824,55 @@ function CheckoutSession({
     </Dialog>
   );
 };
+
+/**
+ * Optional "Use my current location" for the delivery address: the phone asks the customer for
+ * permission; the pin is saved with the order so the rider can open it on a map. The typed
+ * address stays what the order relies on.
+ */
+function DeliveryPin({
+  value,
+  onChange,
+}: {
+  value: CheckoutForm['location'];
+  onChange: (v: CheckoutForm['location']) => void;
+}) {
+  const [state, setState] = useState<'idle' | 'locating' | 'error'>('idle');
+  const [error, setError] = useState('');
+  const locate = () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setState('error');
+      setError('This browser cannot share a location. The address above is enough.');
+      return;
+    }
+    setState('locating');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        onChange({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy_m: Math.round(pos.coords.accuracy) });
+        setState('idle');
+      },
+      (err) => {
+        setState('error');
+        setError(err.code === err.PERMISSION_DENIED ? 'Location permission was not given. The address above is enough.' : 'Your location could not be found. The address above is enough.');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+    );
+  };
+  return (
+    <div className="mt-1.5 text-xs">
+      {value ? (
+        <p className="text-emerald-800">
+          Location pin added{value.accuracy_m ? ` (within about ${value.accuracy_m} m)` : ''}.{' '}
+          <button type="button" onClick={() => onChange(undefined)} className="font-semibold underline">
+            Remove
+          </button>
+        </p>
+      ) : (
+        <button type="button" onClick={locate} disabled={state === 'locating'} className="font-semibold text-neutral-800 underline disabled:opacity-60">
+          {state === 'locating' ? 'Finding your location…' : 'Use my current location (helps the rider find you)'}
+        </button>
+      )}
+      {state === 'error' && <p role="status" className="mt-1 text-neutral-600">{error}</p>}
+    </div>
+  );
+}

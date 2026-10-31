@@ -66,7 +66,24 @@ export function ContactDetails() {
     });
   }
   if (address) {
-    items.push({ label: 'We ship from', value: address });
+    items.push({
+      label: 'Our location',
+      value: (
+        <span>
+          {address}
+          <br />
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-black underline"
+          >
+            Open in Google Maps
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
+        </span>
+      ),
+    });
   }
 
   if (items.length === 0) {
