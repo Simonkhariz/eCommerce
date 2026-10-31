@@ -53,6 +53,12 @@ count as a failed attempt (5 attempts and the email is marked failed).
   files); entries are read back with `unserialize(…, allowed_classes: false)`, so a tampered
   Redis cannot create PHP objects; every failure falls back to the file cache within
   `REDIS_TIMEOUT_MS`. Tested in `RedisCacheTest`.
+- **Live payment status (added after this review, `docs/SSE_CONTRACT.md`):** off by default; the
+  same access rules as `verify-payment` (owner, access key or exact gateway reference), with the
+  key sent as a header and never in a web address; one order per stream; the message carries
+  the order number and two status words only (no amounts, names, emails or addresses); reads
+  committed rows and never changes an order or confirms a payment; limits per order, visitor and
+  server, plus 20 stream openings per 10 minutes per address. Tested in `LiveStatusTest`.
 
 ## Accepted risks (no change; reasons)
 

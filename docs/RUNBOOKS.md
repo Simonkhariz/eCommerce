@@ -2,7 +2,7 @@
 
 Short, step-by-step answers for the shop's owner or whoever runs it. Each one starts with how
 you notice, then what to do. Admin → **System status** is the first place to look for all of
-them. Live updates (SSE) are not used, so they have no runbook; Redis is optional (runbook 8).
+them. Redis (runbook 8) and live payment status (runbook 9) are optional.
 
 Golden rules: never restore over the live database (restore into a new one, check it, then
 switch); never delete data outside admin → Data & storage (which asks for your password and an
@@ -146,3 +146,24 @@ every `REDIS_RETRY_SECONDS` (30 s). Orders, payments, stock, sign-ins and emails
 2. When it answers again, nothing needs doing: the first request starts the shared cache afresh,
    so nothing from before the outage is shown.
 3. To stop using Redis altogether, empty `REDIS_URL` in `backend/.env`.
+
+## 9. Live payment status misbehaves (only when `SSE_ENABLED=true`)
+
+**You notice:** the shop slows down while many customers are paying; the host reports the
+"entry processes" or database connection limit reached; or customers' payment pages update only
+every few seconds instead of at once.
+
+Nothing about payments depends on it. With live status off or busy, the payment page checks the
+usual way, and every payment is still confirmed by the provider's notice, the page's checks and
+the 10-minute job.
+
+1. **Too many workers or database connections:** lower `SSE_MAX_STREAMS` in `backend/.env` (each
+   stream holds one of each for up to `SSE_STREAM_SECONDS`), or set `SSE_ENABLED=false`. The
+   change applies to the next stream opened.
+2. **Pages don't update at once:** something between the shop and the customer is holding the
+   stream back. Check that no proxy or CDN compresses `text/event-stream` (the stream is sent
+   `no-transform`), and on nginx that buffering is off for `/api/v1/checkout/orders/*/events`
+   (the stream sends `X-Accel-Buffering: no`). The page notices a silent stream after 5 s and
+   checks the usual way meanwhile.
+3. **Never** switch it on for a server run with `php -S`: one stream would block every other
+   request.

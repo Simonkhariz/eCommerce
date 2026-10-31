@@ -1,8 +1,8 @@
 # Live payment status: the first SSE contract (roadmap Prompt 32)
 
-31 October 2026, branch `scalability-phase1`. **Design only:** no code, no migration, nothing
-switched on. Prompt 33 builds exactly this, and only after the owner approves the choices
-marked **Decision** below.
+31 October 2026, branch `scalability-phase1`. Designed in Prompt 32; the owner approved the four
+recommended choices, and **Prompt 33 built it, switched off by default** (`SSE_ENABLED=false`).
+What was built and tested is in section 12.
 
 SSE (server-sent events) keeps one connection open from the browser to the server, so the server
 can push a message the moment something changes. Today the shop asks again and again instead
@@ -227,3 +227,54 @@ Prompt 35 then measures, on staging only:
 3. **Default:** switched off until Prompt 35 measures it on the chosen host (recommended).
 4. **Caps:** 8 streams per server, 110-second streams (recommended defaults; adjustable in
    `backend/.env`).
+
+## 12. Prompt 33: built (31 October 2026)
+
+The owner chose all four recommendations: payment status on the return page, a `fetch()`
+stream with headers, switched off by default, and 8 streams of 110 s.
+
+| Part | Where |
+|---|---|
+| Endpoint | `CheckoutController::paymentEvents`, route `GET /api/v1/checkout/orders/{n}/events`; access shared with `verify-payment` (`canSeePaymentStatus`) |
+| State, slots and settings | `App\Services\LiveStatus` (`snapshot`, `claimSlot`, `releaseSlot`; `SSE_ENABLED`, `SSE_MAX_STREAMS`, `SSE_STREAM_SECONDS`, `SSE_HEARTBEAT_SECONDS` in `backend/.env.example`) |
+| The page knows whether to try | `GET /checkout/payment-methods` returns `live_payment_status` |
+| Stream reader | `lib/live-payment.ts` (parser, forward-only states, 5 s first-message limit, reconnects) |
+| Return page | `app/checkout/callback/page.tsx`: stream while pending, `verify-payment` at about 3, 15, 45 and 90 s, the usual schedule when the stream is off, refused, silent or dropped three times |
+| Apache | `backend/public/.htaccess`: no compression for `/events` if the host adds `mod_deflate` |
+| Slow-request log | Streams left out (`backend/public/index.php`) |
+
+**Changes from the design:**
+- The message `id` is `{payment id}-{status}-{order status}`, so a failed attempt followed by the
+  order closing is also announced.
+- **The stream is sent with `Cache-Control: no-store, no-transform`.** The rig check found that
+  Next.js compresses answers it proxies: through `next start` the stream came back gzipped and
+  held back, and the first message took 5 s. `no-transform` tells it, and other proxies, to pass
+  the stream through as written; the first message then took 32 ms. nginx compresses only
+  `text/html` unless a host adds more types. If a host adds `text/event-stream`, turn gzip off
+  for this route.
+
+**Tests:**
+- `LiveStatusTest`: 47 checks on four extra test APIs with SSE on (short streams, 2 s
+  heartbeat, 3 slots). They cover:
+  - access the same as `verify-payment`;
+  - the state first, then a payment announced within 3 s of its commit;
+  - an open transaction and a rollback never announced;
+  - heartbeat and time limit;
+  - limits per order, per server and per visitor;
+  - slots of killed processes expiring;
+  - a closed tab freeing its worker;
+  - the slow-request log, and the stream never changing the order.
+- `tests/live-payment.test.mjs`: 6 checks of the reader (chunks split anywhere, forward-only
+  states, the key in a header and never in the address, time limit, 404 and 503, dropped,
+  buffered, aborted).
+- **Rig check** (`ssecheck.mjs`, production build behind `next start`, Apache, `shopco_load`):
+  13 of 13.
+  - First message through the proxy in 32 ms; "paid" about 1 s after it was recorded.
+  - In a real browser, "Payment confirmed" 571 ms after the payment was recorded, with 2 calls to
+    `verify-payment` in total.
+  - Smoke test 30 of 30, integrity clean.
+
+**Next:** Prompt 34 is covered by this design: the stream reads committed rows, so no separate
+publishing step or Redis is needed on one server. Prompt 35 measures it on staging (open streams
+against PHP workers and database connections, memory, CPU, delay, reconnects) before
+`SSE_ENABLED=true` on the live shop.

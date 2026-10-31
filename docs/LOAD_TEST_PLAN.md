@@ -106,7 +106,7 @@ reported. Numbers from this PC show where the limits are, not the production max
   - optimiser CPU and time to the first and last image;
   - `/uploads` 304 answers.
 
-**S6. Live updates (SSE):** not implemented (Prompts 32–35 skipped), so there is nothing to test.
+**S6. Live payment status (SSE):** built and off by default (Prompt 33). Prompt 35 measures it on staging only: open streams against PHP workers and database connections, memory, CPU, the delay from "paid" recorded to the page, and reconnects (`docs/SSE_CONTRACT.md`).
 
 ## 4. What is recorded
 
