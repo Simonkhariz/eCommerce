@@ -4,10 +4,12 @@ Uploaded pictures (product photos, banners, category images) are kept by one sto
 (`backend/src/Storage`). The shop always links to `/uploads/<key>`, whichever storage holds the
 file, so moving storage changes settings, not data.
 
-**Current state:** `STORAGE_DRIVER=local` (the server's disk, `backend/public/uploads`). Cloudflare R2
-is the chosen bucket (free tier: 10 GB-month storage, 1 million writes and 10 million reads a
-month, free downloads; see Cloudflare's R2 pricing page). The R2 driver is built and tested; it
-waits for the Cloudflare account.
+**Current state (1 Nov 2026):** `STORAGE_DRIVER=local` (the server's disk, `backend/public/uploads`).
+The owner's Cloudflare R2 bucket `shopco-media` exists and the dev API has its keys (test keys, to
+be replaced before going live). A test batch of 5 pictures was copied and proven: read back
+identical, and an R2-only picture served by the shop with its caching headers and 304 answers.
+The full copy and the switch are the next steps (free tier: 10 GB-month storage, 1 million writes
+and 10 million reads a month, free downloads).
 
 ## How it works with a bucket
 
@@ -63,6 +65,10 @@ php backend/scripts/migrate_uploads.php --apply
 # 3. Check the copies through the shop's own links: start a second API on port 8001 with
 #    STORAGE_DRIVER=s3 (an env file copy), then
 php backend/scripts/migrate_uploads.php --apply --keys=<a key from step 2> --verify-url=http://127.0.0.1:8001
+#    While the originals are still on the disk, the web server may hand out the disk copy before
+#    the shop's code runs: the report then says "link (answered by the disk copy, not the bucket)".
+#    The bucket copy itself is still proven by reading it back (content, size, type, caching).
+#    The shop marks its own answers with the header X-Upload-Source: s3 or local.
 
 # 4. Everything, once the batch looks right; needs a fresh backup that still checks out
 php backend/scripts/backup.php

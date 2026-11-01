@@ -41,6 +41,9 @@ final class MediaServer
         header('X-Content-Type-Options: nosniff');
         header('Cache-Control: ' . StorageKey::cacheControl($key));
         header('ETag: ' . $etag);
+        // Which storage answered (s3 or local): lets checks tell a bucket answer from the web
+        // server handing out a copy that is still on the disk.
+        header('X-Upload-Source: ' . $storage->name());
         if (trim((string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) === $etag) {
             http_response_code(304);
             exit;

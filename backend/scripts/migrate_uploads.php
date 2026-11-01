@@ -240,12 +240,26 @@ function copyOne(ObjectStorage $source, ObjectStorage $target, string $key, ?str
     }
     if ($verifyUrl !== null) {
         $ch = curl_init($verifyUrl . '/uploads/' . $key);
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20, CURLOPT_FOLLOWLOCATION => false]);
+        $source = '';
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 20,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_HEADERFUNCTION => static function ($curl, string $line) use (&$source): int {
+                if (stripos($line, 'X-Upload-Source:') === 0) {
+                    $source = strtolower(trim(substr($line, 16)));
+                }
+                return strlen($line);
+            },
+        ]);
         $served = curl_exec($ch);
         $ok = curl_getinfo($ch, CURLINFO_RESPONSE_CODE) === 200 && is_string($served) && hash('sha256', $served) === $sha
             && str_starts_with((string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE), $type);
         curl_close($ch);
-        $checks['link'] = $ok;
+        // While the original is still on the disk the web server may hand that out before the shop's
+        // code runs; then the link check proves the link, not the bucket (the bucket copy itself was
+        // read back and compared above).
+        $checks[$source === 's3' ? 'link' : 'link (answered by the disk copy, not the bucket)'] = $ok;
     }
     $result = ['status' => $status, 'size' => strlen($bytes), 'sha256' => $sha, 'content_type' => $type, 'checks' => $checks];
     if (in_array(false, $checks, true)) {
