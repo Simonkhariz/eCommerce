@@ -52,8 +52,16 @@ $overrides = [
     'MAIL_SEND_IMMEDIATELY' => 'true',
     'STOREFRONT_REVALIDATE_URL' => "http://127.0.0.1:{$stubPort}/api/revalidate",
     'REVALIDATE_SECRET' => $stubSecret,
-    // Tests upload and clean up pictures in their own folder, never the shop's real uploads.
+    // Tests upload and clean up pictures in their own folder, never the shop's real uploads, and
+    // never a real bucket: .env may switch the shop to Cloudflare R2 (STORAGE_DRIVER=s3 with real
+    // keys), and the upload tests delete "unused" pictures. Storage tests that need a bucket start
+    // their own stand-in (tests/support/fake_s3.php) with their own settings.
     'UPLOAD_DIR' => BASE_PATH . '/storage/test-uploads',
+    'STORAGE_DRIVER' => 'local',
+    'S3_ENDPOINT' => '',
+    'S3_BUCKET' => '',
+    'S3_ACCESS_KEY_ID' => '',
+    'S3_SECRET_ACCESS_KEY' => '',
 ];
 $lines = file_exists(BASE_PATH . '/.env') ? file(BASE_PATH . '/.env', FILE_IGNORE_NEW_LINES) : [];
 $lines = array_values(array_filter($lines, static function (string $line) use ($overrides): bool {
