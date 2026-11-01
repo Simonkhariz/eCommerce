@@ -7,8 +7,12 @@ file, so moving storage changes settings, not data.
 **Current state (1 Nov 2026):** the development shop runs on Cloudflare R2: `STORAGE_DRIVER=s3`,
 bucket `shopco-media` (private), with test keys to be replaced before going live. All 67 pictures
 were copied after a fresh backup (`backend/storage/backups/2026-11-01_014310`) and every copy was
-read back and matched. The originals are still on the disk, so switching back is
-`STORAGE_DRIVER=local`. With `php -S`, start the API with `backend/dev-router.php` so pictures that
+read back and matched. The disk copies were then moved out of the web folder to
+`backend/storage/backups/uploads-disk-copy-2026-11-01` (never served), so every picture is now read
+from R2 and every upload is saved there; all 67 were checked through the shop's links
+(`X-Upload-Source: s3`, identical bytes). To switch back: move that folder's contents back into
+`backend/public/uploads` (or run `migrate_uploads.php --apply --all --backup=<folder> --to=local`)
+and set `STORAGE_DRIVER=local`. With `php -S`, start the API with `backend/dev-router.php` so pictures that
 exist only in the bucket (new uploads) are served (free tier: 10 GB-month storage, 1 million writes
 and 10 million reads a month, free downloads).
 
