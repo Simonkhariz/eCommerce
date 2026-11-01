@@ -4,11 +4,12 @@ Uploaded pictures (product photos, banners, category images) are kept by one sto
 (`backend/src/Storage`). The shop always links to `/uploads/<key>`, whichever storage holds the
 file, so moving storage changes settings, not data.
 
-**Current state (1 Nov 2026):** `STORAGE_DRIVER=local` (the server's disk, `backend/public/uploads`).
-The owner's Cloudflare R2 bucket `shopco-media` exists and the dev API has its keys (test keys, to
-be replaced before going live). A test batch of 5 pictures was copied and proven: read back
-identical, and an R2-only picture served by the shop with its caching headers and 304 answers.
-The full copy and the switch are the next steps (free tier: 10 GB-month storage, 1 million writes
+**Current state (1 Nov 2026):** the development shop runs on Cloudflare R2: `STORAGE_DRIVER=s3`,
+bucket `shopco-media` (private), with test keys to be replaced before going live. All 67 pictures
+were copied after a fresh backup (`backend/storage/backups/2026-11-01_014310`) and every copy was
+read back and matched. The originals are still on the disk, so switching back is
+`STORAGE_DRIVER=local`. With `php -S`, start the API with `backend/dev-router.php` so pictures that
+exist only in the bucket (new uploads) are served (free tier: 10 GB-month storage, 1 million writes
 and 10 million reads a month, free downloads).
 
 ## How it works with a bucket
