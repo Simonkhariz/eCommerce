@@ -29,8 +29,9 @@ Cloudflare R2 bucket. About an hour the first time, most of it waiting.
 ## 1. Oracle account
 
 1. Go to **cloud.oracle.com** → **Sign up** (Free Tier).
-2. **Home region**: pick **South Africa Central (Johannesburg)**, **UK South (London)** or
-   **Germany Central (Frankfurt)**. It cannot be changed later.
+2. **Home region**: pick **Germany Central (Frankfurt)**, or **UK South (London)**. It cannot be
+   changed later. Upstash has a Redis region in each (AWS Frankfurt, AWS London). Both have
+   several availability domains to try if one is out of capacity; Johannesburg has one.
 3. Finish the card check and wait for the "account ready" email.
 
 ## 2. An SSH key (on your PC, once)
