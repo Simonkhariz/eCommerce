@@ -1,0 +1,17 @@
+# The Shop.co storefront (Next.js), kept running by systemd: started at boot, restarted if it
+# stops. deploy/oracle/setup.sh fills in __OWNER__ and __APP__.
+[Unit]
+Description=Shop.co storefront (Next.js)
+After=network.target mariadb.service nginx.service
+
+[Service]
+Type=simple
+User=__OWNER__
+WorkingDirectory=__APP__
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node __APP__/node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

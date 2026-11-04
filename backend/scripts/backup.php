@@ -172,7 +172,10 @@ if ($uploads !== null && is_dir($uploads)) {
             $tar->compress(Phar::GZ);
         }
         unset($tar);
-        Phar::unlinkArchive($tarPath);
+        // An empty uploads folder (a new shop) writes no archive at all: nothing to remove.
+        if (is_file($tarPath)) {
+            Phar::unlinkArchive($tarPath);
+        }
     } catch (Throwable $e) {
         $fail('Could not archive the uploads folder: ' . $e->getMessage());
     }

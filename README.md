@@ -60,13 +60,16 @@ orders list runs. On a quiet store only the schedule keeps that punctual.
 | `php backend/scripts/process_outbox.php --limit=500 --max-seconds=50 --rate=8` | 1 min | Sends queued email (newsletters, retries of failed order emails, anything not sent after the response) for up to 50 s, at most 8 a second (Resend allows 10 a second per account; the rest is left for order emails). Safe alongside the API's own retries: each email is claimed before it is sent. |
 | `php backend/scripts/check_database.php` | daily | Checks the database size, slow requests and data past the keep periods, and emails the admins when something needs attention. It removes nothing: admins review and confirm clean-ups in admin → Data & storage. |
 | `php backend/scripts/backup.php` | daily | Backs up the database and the uploaded pictures into one dated folder (copy it off the server). See [`docs/BACKUPS.md`](docs/BACKUPS.md). |
+| `php backend/scripts/backup_to_bucket.php` | daily, after the backup | Copies the newest backup to the R2 bucket under `backups/` (never shown by the shop; never deletes anything). |
+
+Free always-on hosting for demos (Oracle Cloud): [`deploy/oracle/README.md`](deploy/oracle/README.md).
 
 Linux crontab (`crontab -e`, as the user that runs PHP; adjust the path):
 ```cron
 */10 * * * *  php /var/www/shopco/backend/scripts/expire_pending_orders.php >> /var/log/shopco-jobs.log 2>&1
 * * * * *     php /var/www/shopco/backend/scripts/process_outbox.php --limit=500 --max-seconds=50 --rate=8 >> /var/log/shopco-jobs.log 2>&1
 0 3 * * *     php /var/www/shopco/backend/scripts/check_database.php       >> /var/log/shopco-jobs.log 2>&1
-30 2 * * *    php /var/www/shopco/backend/scripts/backup.php               >> /var/log/shopco-jobs.log 2>&1
+30 2 * * *    php /var/www/shopco/backend/scripts/backup.php               >> /var/log/shopco-jobs.log 2>&1 && php /var/www/shopco/backend/scripts/backup_to_bucket.php >> /var/log/shopco-jobs.log 2>&1
 ```
 Windows: see the `schtasks` lines in `backend/README.md` (use `php-win.exe` for no console window).
 

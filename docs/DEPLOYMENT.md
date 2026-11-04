@@ -77,7 +77,8 @@ Official terms, read on 30 October 2026:
 | Vercel Hobby (free) for the storefront | **No** | "Hobby teams are restricted to non-commercial personal use only." Commercial use includes "Any method of requesting or processing payment from visitors of the site" (vercel.com/docs/limits/fair-use-guidelines). The shop takes payments, so it needs Vercel Pro, and option C's address limit (above) still applies |
 | Free cPanel hosting such as InfinityFree for the API | **No** | Every free account has a browser check that blocks "Webhooks from external services" and "REST APIs" and "can't be turned off for one path" (forum.infinityfree.com, Browser security system). Kora's payment notifications and the storefront's own calls to the API would both be refused |
 | Cloudflare Workers free plan for the storefront | Not realistic | "CPU time per HTTP request: 10 ms" and 100,000 requests a day on the free plan (developers.cloudflare.com/workers/platform/limits); Next.js there runs through vinext, which "is in beta" |
-| Oracle Cloud Always Free (one server for everything, option A) | **Possible, with a catch** | Arm server "equivalent to 2 OCPUs and 12 GB of memory", 200 GB of storage, "10 TB per month of outbound data". But "Idle Always Free compute instances may be reclaimed by Oracle" when CPU, network and memory stay under 20% for 7 days, which describes a quiet small shop. The free-tier FAQ (commercial use, card needed) could not be read; check it before relying on it |
+| Free cPanel hosting **with Node.js**, such as HelioHost or WebHostMost (checked 2 November 2026) | Untested | Both list Node.js on their free plans, so the storefront could run next to the PHP API (option B). Their memory and process limits are not published; the storefront must be built on a PC and uploaded (`output: 'standalone'`, not set up yet), since builds on shared hosts run out of memory. HelioHost is volunteer-run and reportedly suspends accounts not logged into monthly. A fallback if Oracle is not available |
+| Oracle Cloud Always Free (one server for everything, option A) | **Chosen for the demo (2 November 2026)** | Arm server; the free allowance was cut in August 2026 to 2 OCPUs and 12 GB of memory (servers above it were switched off), 200 GB of storage, "10 TB per month of outbound data". "Idle Always Free compute instances may be reclaimed by Oracle" when CPU, network **and** memory stay under 20% for 7 days. A quiet shop uses little CPU and network, so memory decides: an estimated 700–1000 MB (not yet measured on the server) is about 23–33% of a 1 OCPU / 3 GB server, and under 20% of a larger one. Card needed at sign-up. See "Free always-on demo" below |
 
 **Recommendation:** for a shop that takes real payments, the dependable choice is a low-cost
 paid plan that runs both parts in one place: a cPanel plan that includes "Setup Node.js App"
@@ -87,6 +88,30 @@ and a soft launch if you accept the reclaim risk and keep off-server backups (`d
 Whatever you choose, check before paying: PHP 8.2+, Node.js 20.9+ ("Setup Node.js App"),
 cron every minute, SSH (handy, not required: backups and restores work without it), and no
 browser check on API calls.
+
+## Free always-on demo: Oracle Cloud (2 November 2026)
+
+To show the shop to clients at no cost, online even when the owner's PC is off:
+`deploy/oracle/README.md` (step by step) with `deploy/oracle/setup.sh` (one command on a fresh
+Ubuntu 24.04 server). It is option A on one free server:
+
+- **Address without a domain:** `https://<server-ip>.sslip.io` (sslip.io resolves to the IP in the
+  name; Let's Encrypt issues the certificate). Moving to a domain later: point it at the server,
+  then change `APP_URL`, `FRONTEND_URL`, `CORS_ALLOWED_ORIGINS` and the nginx `server_name`.
+- **Security on a public demo:** the API listens on 127.0.0.1 only; nginx replaces
+  `X-Forwarded-For` with the visitor's address (`TRUSTED_PROXIES=127.0.0.1`); `APP_ENV=production`
+  and `APP_DEBUG=false`; the first-run setup page is refused from the internet (on an empty
+  database whoever reached it first would own the shop), so the first administrator is created
+  through an SSH tunnel, or the owner's database is copied in with its admin accounts.
+- **Keeping it:** sized 1 OCPU / 3 GB, not the free maximum, because a database cache only takes
+  memory as data is read (the shop's data is a few MB), so a larger server looks idle. Measure
+  after setup (README step 8) and lower to 2 GB if it is still under 20%. Also a free
+  uptime monitor on `/api/v1/health`; nightly database backup copied to the R2 bucket
+  (`backend/scripts/backup_to_bucket.php`), so a lost server is rebuilt from it in about an hour.
+- **Demo limits:** WhatsApp payment only until gateway keys are added; emails go to the log until
+  Resend is set up; live payment status (SSE) stays off until measured on this server.
+- The PC and the server share the R2 bucket but not the database: removing "unused" pictures on
+  either copy could remove pictures the other uses.
 
 ## Fixed during this audit
 

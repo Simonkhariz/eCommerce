@@ -35,8 +35,19 @@ use the PHP path cPanel shows. Windows: `schtasks /Create /SC DAILY /ST 02:30 /T
 
 ### Keep a copy off the server
 
-A backup on the same disk does not survive the disk. Copy each new folder somewhere else, for
-example a separate MinIO/S3 bucket (`mc mirror`, `aws s3 sync`, `rclone`), another machine, or
+A backup on the same disk does not survive the disk. If the shop has an S3-compatible bucket
+(Cloudflare R2, `docs/STORAGE.md`), run `backend/scripts/backup_to_bucket.php` right after the
+backup:
+
+```cron
+30 2 * * *  php /var/www/shopco/backend/scripts/backup.php >> /var/log/shopco-jobs.log 2>&1 && php /var/www/shopco/backend/scripts/backup_to_bucket.php >> /var/log/shopco-jobs.log 2>&1
+```
+
+It checks the backup against its manifest, copies it to `backups/<folder>/` in the bucket (never
+inside the pictures' folder, so the shop never lists or serves it), checks the sizes there, and
+never deletes anything; re-running it sends nothing twice. Remove old copies in the bucket
+yourself. To restore from it, download the folder and follow "Restoring" below. Otherwise copy
+each new folder somewhere else, for example a separate MinIO/S3 bucket (`mc mirror`, `aws s3 sync`, `rclone`), another machine, or
 your hosting provider's backup storage. Delete old copies there on whatever schedule you choose
 (for example: daily for two weeks, then weekly). Once pictures are stored in MinIO, also turn on
 **bucket versioning** there so a deleted or overwritten picture can be recovered.

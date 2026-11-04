@@ -50,7 +50,11 @@ final class S3Storage implements ObjectStorage
         $this->signer = new S3Signer($accessKey, $secretKey, $region);
     }
 
-    public static function fromEnv(): self
+    /**
+     * The bucket from backend/.env. $prefix replaces S3_PREFIX: scripts/backup_to_bucket.php uses
+     * "backups/" so backups sit beside the pictures but are never listed or served as pictures.
+     */
+    public static function fromEnv(?string $prefix = null): self
     {
         return new self(
             rtrim(trim((string) Env::get('S3_ENDPOINT', '')), '/'),
@@ -58,7 +62,7 @@ final class S3Storage implements ObjectStorage
             trim((string) Env::get('S3_BUCKET', '')),
             trim((string) Env::get('S3_ACCESS_KEY_ID', '')),
             trim((string) Env::get('S3_SECRET_ACCESS_KEY', '')),
-            (string) (Env::get('S3_PREFIX', 'uploads/') ?? 'uploads/'),
+            $prefix ?? (string) (Env::get('S3_PREFIX', 'uploads/') ?? 'uploads/'),
             filter_var(Env::get('S3_PATH_STYLE', 'true'), FILTER_VALIDATE_BOOLEAN),
         );
     }
