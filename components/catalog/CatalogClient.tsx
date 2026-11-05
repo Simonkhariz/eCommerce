@@ -142,6 +142,8 @@ export function CatalogClient({ seed }: { seed: CatalogSeed }) {
           ? `${filters.dressStyle} style`
           : filters.flashDeals
             ? 'Flash deals'
+            : filters.featured
+              ? 'Featured'
             : filters.onSale
               ? 'On sale'
               : filters.sortBy === 'newest'

@@ -137,6 +137,66 @@ $t->ok('pictures at the top of the bucket (S3_PREFIX empty): refused', $r['code'
 $t->check('nothing sent', $before, $puts());
 
 // -----------------------------------------------------------------------------
+$t->section('Pictures in the bucket: a growing copy that survives a mistaken delete');
+$mirrorBackups = "{$fake->dir}/mirror-backups";
+@mkdir($mirrorBackups, 0700, true);
+$s3Env = $fake->envFile('env-s3', array_merge($fake->envLines(), ["BACKUP_DIR={$mirrorBackups}", 'MIGRATION_REPORT_DIR=' . $fake->dir . '/reports']));
+$bucket = new App\Storage\S3Storage($fake->endpoint(), 'auto', $fake->bucket, $fake->access, $fake->secret);
+$source = "{$fake->dir}/source.webp";
+copy(__DIR__ . '/fixtures/meta.webp', $source);
+$pictureA = 'prod_20260101_000001_aaaaaaaa.webp';
+$pictureB = 'catalog/banner-test.webp';
+$bucket->put($pictureA, $source, 'image/webp', App\Storage\StorageKey::cacheControl($pictureA));
+$bucket->put($pictureB, $source, 'image/webp', 'public, max-age=86400');
+$mirrorDir = "{$mirrorBackups}/pictures";
+$newestManifest = static function () use ($mirrorBackups): array {
+    $folders = glob("{$mirrorBackups}/2*", GLOB_ONLYDIR) ?: [];
+    sort($folders);
+    return json_decode((string) file_get_contents(end($folders) . '/manifest.json'), true) ?: [];
+};
+$first = $run('backup.php', [], $s3Env);
+$t->ok('the backup runs with pictures in a bucket', $first['code'] === 0, $first['out']);
+$t->check('both pictures are copied, identical', [file_get_contents($source), file_get_contents($source)], [@file_get_contents("{$mirrorDir}/{$pictureA}"), @file_get_contents("{$mirrorDir}/{$pictureB}")]);
+$t->check('the manifest records it', [2, 2, 0], [$newestManifest()['pictures_mirror']['in_bucket'] ?? null, $newestManifest()['pictures_mirror']['copied'] ?? null, $newestManifest()['pictures_mirror']['failed'] ?? null]);
+$t->ok('and says so', str_contains($first['out'], 'pictures in the bucket: 2'), $first['out']);
+sleep(1);
+$before = $fake->requests();
+$second = $run('backup.php', [], $s3Env);
+$t->check('the next night copies nothing new', 0, $newestManifest()['pictures_mirror']['copied'] ?? null);
+$reads = array_filter(
+    array_map(static fn (string $l) => json_decode($l, true), array_slice(file("{$fake->dir}/requests.log", FILE_IGNORE_NEW_LINES) ?: [], $before)),
+    static fn ($r): bool => is_array($r) && ($r['method'] ?? '') === 'GET' && str_contains((string) ($r['path'] ?? ''), 'prod_')
+);
+$t->check('and downloads no picture again', 0, count($reads));
+$t->check('a new picture is picked up', true, (function () use ($bucket, $source, $run, $s3Env, $mirrorDir): bool {
+    $bucket->put('prod_20260101_000002_bbbbbbbb.webp', $source, 'image/webp', App\Storage\StorageKey::cacheControl('prod_20260101_000002_bbbbbbbb.webp'));
+    $run('backup.php', [], $s3Env);
+    return is_file("{$mirrorDir}/prod_20260101_000002_bbbbbbbb.webp");
+})());
+
+$t->check('a picture deleted from the bucket by mistake', true, $bucket->delete($pictureA));
+$third = $run('backup.php', [], $s3Env);
+$t->ok('stays in the copy', is_file("{$mirrorDir}/{$pictureA}"));
+$t->check('and the report says so', 1, $newestManifest()['pictures_mirror']['only_in_copy'] ?? null);
+$back = $run('migrate_uploads.php', ['--apply', "--from={$mirrorDir}", "--keys={$pictureA}"], $s3Env);
+$t->check('it can be put back', [0, true], [$back['code'], $bucket->exists($pictureA)]);
+$t->check('identical', file_get_contents($source), $bucket->read($pictureA));
+$folders = glob("{$mirrorBackups}/2*", GLOB_ONLYDIR) ?: [];
+sort($folders);
+$all = $run('migrate_uploads.php', ['--apply', '--all', '--backup=' . end($folders), "--from={$mirrorDir}"], $s3Env);
+$t->ok('a whole bucket can be refilled from it, using a backup made with pictures in a bucket', $all['code'] === 0, $all['out']);
+$t->ok('backup_to_bucket ignores the copy and picks the dated backup', str_contains($copy([], $s3Env)['out'], basename((string) end($folders))));
+
+$fake->mode('500');
+$broken = $run('backup.php', [], $s3Env);
+$fake->mode('ok');
+$t->ok('the bucket failing: the database backup still succeeds', $broken['code'] === 0, $broken['out']);
+$t->ok('with a clear warning', str_contains($broken['out'], 'picture copy is incomplete'), $broken['out']);
+$bucket->delete($pictureA);
+$bucket->delete($pictureB);
+$bucket->delete('prod_20260101_000002_bbbbbbbb.webp');
+
+// -----------------------------------------------------------------------------
 $t->section('Bucket problems are clear and never show the keys');
 $r = $copy([], $fake->envFile('env-nos3', ["BACKUP_DIR={$backups}", 'S3_ENDPOINT=', 'S3_BUCKET=', 'S3_ACCESS_KEY_ID=', 'S3_SECRET_ACCESS_KEY=']));
 $t->ok('no bucket settings: says which are needed', $r['code'] === 1 && str_contains($r['out'], 'S3_ENDPOINT') && str_contains($r['out'], 'Nothing was copied'), $r['out']);

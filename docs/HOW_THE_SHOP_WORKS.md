@@ -59,7 +59,7 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **Daily database backups,** copied off the server to cloud storage, with a careful restore that
     works even on hosts without SSH.
 
-The full system has passed 1,158 automated backend checks and a full load test.
+The full system has passed 1,193 automated backend checks and a full load test.
 
 ---
 
@@ -129,11 +129,18 @@ most once a minute, or immediately after the owner changes something. Top to bot
 2. **Brand strip:** a scrolling line of brand names set by the owner (hidden if none).
 3. **Flash sale offers:** up to 4 deal products with a live countdown when the owner set an end
    time. The section disappears when the deal ends.
-4. **New arrivals** and **Top selling** (ranked by units on paid orders).
-5. **Explore by category:** tiles with real product counts.
-6. **Browse by dress style:** Casual, Formal, Party, Gym (only styles that exist).
-7. **What customers say:** the latest approved reviews, with *"Verified purchase"* where the shop
+4. **Featured:** up to 8 products **the owner chose** by ticking "Featured on the home page", newest
+   first, with "View All" listing every ticked product.
+5. **New arrivals:** the 4 newest products.
+6. **Top selling:** the 4 best sellers, ranked by units on paid orders. **Only products that have
+   really sold appear,** so a new shop shows no such row.
+7. **Explore by category:** tiles with real product counts.
+8. **Browse by dress style:** Casual, Formal, Party, Gym (only styles that exist).
+9. **What customers say:** the latest approved reviews, with *"Verified purchase"* where the shop
    found a paid order.
+
+**A product appears only once on the page,** in the first row that has it, in the order above. So a
+featured new arrival shows under Featured, and New arrivals moves on to the next newest.
 
 Empty sections hide themselves. **The shop never shows made-up products, prices or reviews.**
 
@@ -165,7 +172,10 @@ Empty sections hide themselves. **The shop never shows made-up products, prices 
   - "On sale" and "Flash deals".
 - Colours, sizes, styles and prices shown are those that exist in the chosen category; the category
   list is always complete. Choosing another category clears the chosen colours and sizes.
-- Active filters appear as removable chips. 12 products per page.
+- Active filters appear as removable chips. 12 products per page, in a fixed order, so paging never
+  repeats a product.
+- `/category?featured=true` (the Featured row's "View All") lists every featured product, with a
+  "Featured" chip to remove.
 - Every filter lives in the web address: links can be shared and the Back button works.
 - Friendly states throughout: loading placeholders, "No matching products – try removing a
   filter", and a "Try again" button if the connection drops.
@@ -615,8 +625,8 @@ instead of cancelled.
     - name, web address (made automatically), category, dress style, description;
     - price, and an optional "was" price shown crossed out;
     - "Show in flash deals" and a deal end time;
-    - "Featured on the home page": **saved, but the home page has no featured row yet**, so ticking
-      it changes nothing shoppers see;
+    - "Featured on the home page": puts a published product in the home page's Featured row (the 8
+      newest ticked show; all are under "View All"). The product list shows "Featured" beside it;
     - photos (upload several, or paste a picture address; choose the main one);
     - **sizes and colours**: each with its own SKU, optional own price, starting stock and low-stock
       alert level (5 by default). Stock on an existing option is changed in Inventory, so every
@@ -999,7 +1009,7 @@ Shoppers never wait for an order email:
 | Email worker (`process_outbox.php`) | Every minute | Sends queued emails, paced, for up to 50 seconds |
 | Unpaid orders (`expire_pending_orders.php`) | Every 10 minutes | Asks Kora and Monnify for the final status, then releases what wasn't paid |
 | Database check (`check_database.php`) | Daily | Checks size, speed and data past its keep period, and emails the admins, at most once a week per problem level. **Removes nothing** |
-| Backup (`backup.php`) | Daily | The database, plus the pictures when they are on the server's disk, in one dated folder with a checksum |
+| Backup (`backup.php`) | Daily | The database in one dated folder with a checksum, plus the pictures: archived there when on the server's disk, or new and changed ones copied to a growing `pictures` folder when in a bucket |
 | Backup copy (`backup_to_bucket.php`) | Daily, right after the backup | Copies the new backup to the bucket's private `backups/` folder |
 
 On the Oracle server these run as the web user, the backup at 02:30 and the database check at 03:00
@@ -1010,11 +1020,18 @@ visits, and releases expired orders when checkout or the admin runs.
 
 ### 6.7 Backups and restore
 
-- **Daily backup:** the database, with a manifest and checksum. Pictures on the server's disk are
-  included in it.
-  - **Pictures in a bucket are not in the backup.** They already live off the server, but nothing
-    protects them against being deleted from the bucket by mistake. Turn on the provider's own
-    protection (versioning or a second bucket) before relying on them (`docs/BACKUPS.md`).
+- **Daily backup:** the database and the pictures, with a manifest and checksum. Pictures on the
+  server's disk are archived in the dated folder.
+  - **Pictures in a bucket are copied to one growing folder on the server** (`backups/pictures`), not
+    archived again each night: only new or changed ones are downloaded, so it stays small and doesn't
+    multiply the storage. **Nothing is ever removed from it,** even when a picture has gone from the
+    bucket, so one deleted by mistake can be put back with one command (`docs/BACKUPS.md`), and the
+    whole bucket can be refilled from it. The manifest records the counts, including pictures that
+    are in the copy but no longer in the bucket.
+  - If the copy fails, the database backup still succeeds, with a clear warning, and the next night
+    carries on from where it stopped.
+  - **What it can't cover:** the copy is on the server and the originals in the bucket, so losing
+    both at once would lose the pictures. Keep a copy elsewhere too if that matters.
   - It works even on hosts without command-line database tools: a built-in PHP backup takes a
     consistent snapshot.
   - **A copy off the server every night:** each backup is checked against its checksum and
@@ -1145,7 +1162,7 @@ proposal.
 
 **Proof in numbers:**
 
-- **1,158 automated backend checks** in 20 test suites. They run against a throw-away database
+- **1,193 automated backend checks** in 21 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data, buckets and Redis are never touched.
 - Plus 22 storefront unit tests, type checks, lint and a production build. They are run by hand
   before changes are finished; there is no automatic build server yet.
@@ -1268,7 +1285,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive once." |
 | 5 | A clean-up button behind a password field and an emailed code | "No clean-up without your password and an emailed code." |
 | 6 | A calendar with a backup box every night, flying to a cloud | "Daily backups, copied off the server, with a careful restore." |
-| 7 | A counter climbing: 1,158 ✓ | "Over 1,100 automated checks." |
+| 7 | A counter climbing: 1,193 ✓ | "Over 1,100 automated checks." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
@@ -1346,10 +1363,11 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | What if the payment provider sends the same notice several times? | The order is paid once and one receipt is sent. Tested with 990 notices |
 | What if a customer pays and closes the page? | The provider's notice and the scheduled check still confirm it, and the customer is emailed |
 | How are delivery fees set? | Per group of states, by the owner, optionally growing with the number of items. States not covered are refused, never charged a guess |
+| Can I choose which products are on the home page? | Yes. Tick "Featured" on a product and it goes in the Featured row, up to 8 at a time. Flash deals, new arrivals and top sellers fill themselves, and a product never appears twice on the page |
 | Is the cart in the browser safe? | Yes. It only remembers what the shopper picked; every price, stock level, discount and delivery fee is worked out again on the server when the order is placed, so changing the browser copy can't change what anyone pays. Signed-in customers' carts are also saved to their account |
 | Can I run sales? | Yes: promo codes (percentage or fixed amount, minimum order, maximum discount, dates, limits), flash deals with countdowns, "was" prices |
 | Can I see who changed what? | Yes, every admin change is in the audit log with before and after values |
-| What about backups? | The database daily, checked by checksum and copied off the server to cloud storage, with a careful restore into a new database. Pictures in cloud storage aren't in that backup; turn on the provider's versioning or a second bucket |
+| What about backups? | The database daily, checked by checksum and copied off the server to cloud storage, with a careful restore into a new database. Pictures in cloud storage are also copied to the server each night, and a picture deleted by mistake can be put back |
 | Is my customers' data safe? | Secure sessions, protection against cross-site tricks, rate limits, card details never stored, keep periods, and clean-ups only with a password and an emailed code |
 | Has it taken real payments? | Not yet. Payments were tested heavily against stand-ins for Kora and Monnify; a sandbox run comes before launch (section 11) |
 | Will it be fast? | Measured at p95 about 0.1 s with 50 shoppers on a modest PC; a real server does better |
@@ -1366,7 +1384,6 @@ Honest list, so proposals never overclaim:
 |---|---|
 | Live updates (instant "paid" on the payment page, instant admin bell) | Payment status **built and load-tested** (64 watchers at once on the test rig), **switched off** until a short check on the real server (`docs/SSE_CONTRACT.md` §13), then a switch in Tech switches. Admin bell **Planned**; it refreshes every minute today |
 | Pictures on Cloudflare R2 | **Built and in use** on the development shop (all pictures copied and checked), and set by the Oracle setup. The keys in use are test keys and must be replaced before real customers |
-| Backup of the pictures in the bucket | **Planned / to decide.** The nightly backup covers the database only; until this is done, use the provider's versioning or a second bucket |
 | Redis | **Built and optional;** the catalogue cache was tried on a real Upstash database. Speed from a real server, in the same region, is still to be measured |
 | Real payment sandbox runs (Kora and Monnify) | Waiting for the owner's sandbox keys and the server (its sslip.io address is the public https address they need) |
 | Real email delivery | Waiting for the owner's Resend key and a domain (log-only mode until then; without a domain, Resend reaches only the account's own address) |
@@ -1461,3 +1478,4 @@ When something changes, update the matching section in the same commit:
 | 5 Nov 2026 | Optional Redis tried on a real Upstash database: the catalogue cache works on it, and it must be in the same region as the server (`docs/REDIS.md`). The server setup asks for its address. Tests never use a real Redis |
 | 5 Nov 2026 | Dev mode: Data & storage and System status now open only with dev mode on (Store settings, with the admin's password). New Tech switches page turns the scalability technology on or off; live payment status stays off until measured on the server. Database alerts still reach the bell |
 | 5 Nov 2026 | Fixed: pictures disappeared on a PC when the API was started without its router. `npm run api` now starts it correctly, the docs are corrected, and System status warns about it. Guide reviewed against the code, line by line: corrected the backup, email, cache and Redis details; added hosting (6.8) and rate limits (6.9); made the proposal wording match what is proven (payments applied once; clean-ups, not every delete, need a password and code; real payment providers not yet run). Fixed: Email outbox lost its counts and "Send queued now" with dev mode off. Backend checks: see section 7 |
+| 5 Nov 2026 | Home page: new Featured row, chosen by the owner; a product appears only once on the page; Top selling lists only products that have really sold. Catalogue paging has a fixed order. Backups: pictures in a bucket are now copied to a growing folder on the server, and a deleted picture can be put back (`migrate_uploads.php --from`, which also accepts backups made with pictures in a bucket). Removed the old `migrate_to_physical_only.php`, which deleted data with no confirmation |

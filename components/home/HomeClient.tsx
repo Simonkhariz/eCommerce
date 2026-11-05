@@ -52,6 +52,7 @@ export function HomeClient({ initial = null }: { initial?: HomepageData | null }
     };
   }, [initial]);
 
+  const featured: Product[] = homepageData ? homepageData.featured_products.map(mapApiProductToStorefront) : [];
   const newArrivals: Product[] = homepageData ? homepageData.new_arrivals.map(mapApiProductToStorefront) : [];
   const topSelling: Product[] = homepageData ? homepageData.top_selling.map(mapApiProductToStorefront) : [];
   const flashProducts: Product[] = homepageData ? homepageData.flash_deals.map(mapApiProductToStorefront) : [];
@@ -122,21 +123,24 @@ export function HomeClient({ initial = null }: { initial?: HomepageData | null }
           <FlashDeals products={flashProducts} endsAt={homepageData.flash_deals_end_at} onExpired={() => setFlashExpired(true)} />
         )}
 
-        {/* 3. New Arrivals */}
+        {/* 3. Featured: the products the admin ticked (hidden when there are none) */}
+        {homepageData && <ProductSection title="FEATURED" products={featured} viewAllHref="/category?featured=true" limit={8} />}
+
+        {/* 4. New Arrivals */}
         {homepageData && (
           <ProductSection title="NEW ARRIVALS" products={newArrivals} viewAllHref="/category?sort=newest" hasDivider={true} />
         )}
 
-        {/* 4. Top Selling */}
+        {/* 5. Top Selling: only products that have really sold (hidden until something has) */}
         {homepageData && <ProductSection title="TOP SELLING" products={topSelling} viewAllHref="/category" hasDivider={false} />}
 
-        {/* 5. Categories (real counts) */}
+        {/* 6. Categories (real counts) */}
         <CategoryGrid categories={homepageData?.categories} />
 
-        {/* 6. Dress styles that exist in the catalogue */}
+        {/* 7. Dress styles that exist in the catalogue */}
         <BrowseByDressStyle />
 
-        {/* 7. Approved customer reviews (hidden when there are none) */}
+        {/* 8. Approved customer reviews (hidden when there are none) */}
         <CustomerReviews reviews={homepageData?.reviews} />
       </div>
     </div>

@@ -15,7 +15,7 @@ Each run writes one dated folder (default `backend/storage/backups`, or `BACKUP_
 | File | What it is |
 | :--- | :--- |
 | `database.sql.gz` | A consistent snapshot taken without locking the shop (one transaction) |
-| `uploads.tar.gz` | Every file in the uploads folder |
+| `uploads.tar.gz` | Every file in the uploads folder (pictures on the server's disk only) |
 | `manifest.json` | Time, database name, how the dump was written, sizes and SHA-256 checksums, and (PHP dumps) the rows in every table |
 
 The dump is made by `mysqldump` (found on `PATH`, in XAMPP's folder on Windows, or at
@@ -51,6 +51,23 @@ each new folder somewhere else, for example a separate MinIO/S3 bucket (`mc mirr
 your hosting provider's backup storage. Delete old copies there on whatever schedule you choose
 (for example: daily for two weeks, then weekly). Once pictures are stored in MinIO, also turn on
 **bucket versioning** there so a deleted or overwritten picture can be recovered.
+
+### Pictures in a bucket (Cloudflare R2)
+
+With `STORAGE_DRIVER=s3`, `backup.php` copies new and changed pictures to one growing folder,
+`<BACKUP_DIR>/pictures`, instead of archiving them all every night. Nothing is ever removed from it,
+even when a picture has gone from the bucket. `manifest.json` records `pictures_mirror`: pictures in
+the bucket, copied this run, in the copy but no longer in the bucket, and failed. If copying fails,
+the database backup still succeeds, with a warning; the next run carries on.
+
+Put back a picture deleted by mistake, or refill a whole bucket:
+
+```bash
+php backend/scripts/migrate_uploads.php --apply --from=backend/storage/backups/pictures --keys=<picture name>
+php backend/scripts/migrate_uploads.php --apply --all --from=backend/storage/backups/pictures --backup=<backup folder>
+```
+
+The copy is on the server, so it doesn't cover losing the server and the bucket together.
 
 ## Checking a backup
 

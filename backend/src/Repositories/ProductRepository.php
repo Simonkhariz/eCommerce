@@ -172,6 +172,16 @@ class ProductRepository
         if (!empty($filters['is_featured'])) {
             $conditions[] = "p.is_featured = 1";
         }
+        // Home page rows: products with real sales only, and none already shown in a row above.
+        if (!empty($filters['has_sales'])) {
+            $conditions[] = "p.units_sold > 0";
+        }
+        if (!empty($filters['exclude_ids'])) {
+            $excluded = array_map('intval', $filters['exclude_ids']);
+            $conditions[] = 'p.id NOT IN (' . implode(',', array_fill(0, count($excluded), '?')) . ')';
+            $types .= str_repeat('i', count($excluded));
+            array_push($params, ...$excluded);
+        }
 
         $whereSql = implode(' AND ', $conditions);
 
@@ -222,7 +232,7 @@ class ProductRepository
                      FROM products p
                      LEFT JOIN categories c ON c.id = p.category_id
                      WHERE {$whereSql}
-                     ORDER BY {$sortOrder}
+                     ORDER BY {$sortOrder}, p.id DESC
                      LIMIT ? OFFSET ?";
 
         $itemParams = $params;
@@ -414,9 +424,9 @@ class ProductRepository
     /**
      * Get top featured products.
      */
-    public function getFeatured(int $limit = 4): array
+    public function getFeatured(int $limit = 4, array $excludeIds = []): array
     {
-        return $this->listPublished(['is_featured' => 1], 1, $limit)['items'];
+        return $this->listPublished(['is_featured' => 1, 'exclude_ids' => $excludeIds], 1, $limit)['items'];
     }
 
     /**
@@ -448,17 +458,17 @@ class ProductRepository
     /**
      * Get latest new arrival products.
      */
-    public function getNewArrivals(int $limit = 4): array
+    public function getNewArrivals(int $limit = 4, array $excludeIds = []): array
     {
-        return $this->listPublished(['sort' => 'newest'], 1, $limit)['items'];
+        return $this->listPublished(['sort' => 'newest', 'exclude_ids' => $excludeIds], 1, $limit)['items'];
     }
 
     /**
      * Get top selling / popular products.
      */
-    public function getTopSelling(int $limit = 4): array
+    public function getTopSelling(int $limit = 4, array $excludeIds = []): array
     {
-        return $this->listPublished(['sort' => 'best_selling'], 1, $limit)['items'];
+        return $this->listPublished(['sort' => 'best_selling', 'has_sales' => 1, 'exclude_ids' => $excludeIds], 1, $limit)['items'];
     }
 
     /**

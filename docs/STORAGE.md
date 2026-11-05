@@ -104,8 +104,8 @@ The same settings work for Backblaze B2, AWS S3, MinIO AIStor or Garage: set `S3
 
 ## Backups
 
-On disk, `backend/scripts/backup.php` archives the pictures. In a bucket it backs up the database
-only and says so; back up the pictures with the provider's tools (for example a scheduled copy to
-a second bucket). `backend/scripts/backup_to_bucket.php` copies each database backup into the same
+On disk, `backend/scripts/backup.php` archives the pictures. In a bucket it copies new and changed
+pictures to a growing folder on the server, `<BACKUP_DIR>/pictures`, and never removes any from it.
+`backend/scripts/backup_to_bucket.php` copies each database backup into the same
 bucket under `backups/` (outside `uploads/`, so never listed or served as a picture). See
 `docs/BACKUPS.md`.

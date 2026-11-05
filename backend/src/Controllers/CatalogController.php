@@ -18,6 +18,9 @@ use App\Support\StoreBrands;
  */
 class CatalogController
 {
+    /** Products the admin ticked "Featured" that the home page shows (two rows of 4). */
+    private const HOME_FEATURED_LIMIT = 8;
+
     private ProductRepository $productRepo;
     private CategoryRepository $categoryRepo;
 
@@ -193,10 +196,15 @@ class CatalogController
 
     private function homepagePayload(): array
     {
-        $featured = $this->productRepo->getFeatured(4);
+        // A product appears once on the page, in the first row that has it, so the rows don't
+        // repeat each other: the same order the shopper sees them in.
         $flashDeals = $this->productRepo->getFlashDeals(4);
-        $newArrivals = $this->productRepo->getNewArrivals(4);
-        $topSelling = $this->productRepo->getTopSelling(4);
+        $shown = array_column($flashDeals, 'id');
+        $featured = $this->productRepo->getFeatured(self::HOME_FEATURED_LIMIT, $shown);
+        $shown = array_merge($shown, array_column($featured, 'id'));
+        $newArrivals = $this->productRepo->getNewArrivals(4, $shown);
+        $shown = array_merge($shown, array_column($newArrivals, 'id'));
+        $topSelling = $this->productRepo->getTopSelling(4, $shown);
         $categories = $this->categoryRepo->getAllActive();
 
         // Active promotions (validated by date and max_uses) and banners

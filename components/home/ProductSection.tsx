@@ -10,6 +10,8 @@ interface ProductSectionProps {
   products: Product[];
   viewAllHref: string;
   hasDivider?: boolean;
+  /** Most products to show: 4 is one row on desktop. */
+  limit?: number;
 }
 
 export const ProductSection: React.FC<ProductSectionProps> = ({
@@ -17,6 +19,7 @@ export const ProductSection: React.FC<ProductSectionProps> = ({
   products,
   viewAllHref,
   hasDivider = true,
+  limit = 4,
 }) => {
   // Nothing to show: hide the section rather than render an empty heading.
   if (products.length === 0) {
@@ -32,7 +35,7 @@ export const ProductSection: React.FC<ProductSectionProps> = ({
 
         {/* Responsive Grid: 2 columns on phones, 4 columns from tablets up */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
-          {products.slice(0, 4).map((product) => (
+          {products.slice(0, limit).map((product) => (
             <ProductCard key={product.id} product={product} />
           ))}
         </div>

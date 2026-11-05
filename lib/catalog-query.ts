@@ -39,6 +39,7 @@ export function parseCatalogParams(params: URLSearchParams): FilterState {
     sortBy,
     onSale: params.get('onSale') === 'true',
     flashDeals: params.get('flash') === 'true' || params.get('flashDeals') === 'true',
+    featured: params.get('featured') === 'true',
     page: Math.max(1, Math.floor(num(params.get('page')) ?? 1)),
   };
 }
@@ -65,6 +66,7 @@ export function buildCatalogUrl(f: FilterState): string {
   if (f.sortBy !== 'most-popular') params.set('sort', f.sortBy);
   if (f.onSale) params.set('onSale', 'true');
   if (f.flashDeals) params.set('flash', 'true');
+  if (f.featured) params.set('featured', 'true');
   if (f.page > 1) params.set('page', String(f.page));
   const qs = params.toString();
   return qs ? `/category?${qs}` : '/category';
@@ -81,6 +83,7 @@ export const EMPTY_FILTERS: FilterState = {
   searchQuery: '',
   onSale: false,
   flashDeals: false,
+  featured: false,
   page: 1,
 };
 
@@ -112,6 +115,7 @@ export function catalogApiParams(f: FilterState): ProductQueryParams {
     sizes: f.selectedSizes.length ? f.selectedSizes : undefined,
     on_sale: f.onSale || undefined,
     flash_deals: f.flashDeals || undefined,
+    is_featured: f.featured || undefined,
     sort: apiSortFor(f.sortBy),
     page: f.page,
     per_page: PAGE_SIZE,
@@ -156,6 +160,6 @@ export function productListFrom(data: unknown, meta?: Partial<PaginationMeta> | 
 export function hasActiveFilters(f: FilterState): boolean {
   return Boolean(
     f.category || f.dressStyle || f.searchQuery.trim() || f.selectedColors.length || f.selectedSizes.length ||
-      f.minPrice !== null || f.maxPrice !== null || f.onSale || f.flashDeals
+      f.minPrice !== null || f.maxPrice !== null || f.onSale || f.flashDeals || f.featured
   );
 }

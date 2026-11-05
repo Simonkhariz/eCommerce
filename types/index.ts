@@ -114,6 +114,7 @@ export interface FilterState {
   searchQuery: string;
   onSale: boolean;
   flashDeals: boolean;
+  featured: boolean;
   page: number;
 }
 

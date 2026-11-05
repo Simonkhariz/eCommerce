@@ -23,6 +23,9 @@ declare(strict_types=1);
  *   --verify-url=<API address>  also fetch <address>/uploads/<key> from an API running with
  *                               STORAGE_DRIVER=s3 and compare
  *   --to=local                  copy back from the bucket to the disk (rollback after a switch)
+ *   --from=<folder>             take pictures from this folder instead of the uploads folder, such
+ *                               as the backup's copy, to put back a deleted one:
+ *                               --apply --from=backend/storage/backups/pictures --keys=<name>
  *
  * Each copying run writes a report to backend/storage/migrations/ (or MIGRATION_REPORT_DIR).
  * Exit code 1 when anything failed.
@@ -55,7 +58,7 @@ $fail = static function (string $message): never {
     exit(1);
 };
 
-$options = getopt('', ['apply', 'all', 'limit:', 'keys:', 'backup:', 'verify-url:', 'to:']);
+$options = getopt('', ['apply', 'all', 'limit:', 'keys:', 'backup:', 'verify-url:', 'to:', 'from:']);
 $apply = isset($options['apply']);
 $all = isset($options['all']);
 $limit = isset($options['limit']) ? (int) $options['limit'] : 5;
@@ -83,6 +86,10 @@ if ($apply && $all) {
     }
     foreach (['database_dump', 'uploads_archive'] as $part) {
         $entry = $manifest[$part] ?? null;
+        // A backup made while pictures were in a bucket has no pictures archive, by design.
+        if ($part === 'uploads_archive' && $entry === null && ($manifest['uploads_storage'] ?? 'local') !== 'local') {
+            continue;
+        }
         $path = is_array($entry) ? "{$backup}/" . basename((string) $entry['file']) : '';
         if ($path === '' || !is_file($path) || hash_file('sha256', $path) !== ($entry['sha256'] ?? '')) {
             $fail("The backup's {$part} is missing or does not match its manifest; make a new backup first.");
@@ -92,7 +99,11 @@ if ($apply && $all) {
 }
 
 try {
-    $local = new LocalStorage(Storage::localRoot());
+    $from = isset($options['from']) ? rtrim((string) $options['from'], '/\\') : null;
+    if ($from !== null && !is_dir($from)) {
+        $fail("--from: no such folder: {$from}");
+    }
+    $local = new LocalStorage($from ?? Storage::localRoot());
     $bucket = S3Storage::fromEnv();
 } catch (Throwable $e) {
     $fail($e->getMessage());

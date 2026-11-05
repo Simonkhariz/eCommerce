@@ -136,6 +136,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           {filters.maxPrice !== null && <Chip label={`Up to ${formatPrice(filters.maxPrice)}`} onRemove={() => onFilterChange({ maxPrice: null })} />}
           {filters.onSale && <Chip label="On sale" onRemove={() => onFilterChange({ onSale: false })} />}
           {filters.flashDeals && <Chip label="Flash deals" onRemove={() => onFilterChange({ flashDeals: false })} />}
+          {filters.featured && <Chip label="Featured" onRemove={() => onFilterChange({ featured: false })} />}
           {filters.searchQuery.trim() && <Chip label={`“${filters.searchQuery}”`} onRemove={() => onFilterChange({ searchQuery: '' })} />}
           <button type="button" onClick={onReset} className="text-xs text-red-700 hover:text-red-800 font-bold underline ml-1">
             Clear all

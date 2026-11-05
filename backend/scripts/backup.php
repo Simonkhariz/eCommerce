@@ -8,6 +8,11 @@ declare(strict_types=1);
  *   <BACKUP_DIR>/<YYYY-mm-dd_His>/database.sql.gz   (mysqldump, one consistent snapshot)
  *   <BACKUP_DIR>/<YYYY-mm-dd_His>/uploads.tar.gz    (everything in the uploads folder)
  *   <BACKUP_DIR>/<YYYY-mm-dd_His>/manifest.json     (sizes and SHA-256 of both files)
+ *   <BACKUP_DIR>/pictures/                          (pictures in a bucket: a growing copy, below)
+ *
+ * Pictures in an S3-compatible bucket are not archived each night: only new or changed ones are
+ * copied into one growing folder, and nothing is ever removed from it, so a picture deleted from
+ * the bucket by mistake can be put back (migrate_uploads.php --from=<that folder> --keys=<name>).
  *
  * BACKUP_DIR defaults to backend/storage/backups. Old backups are never deleted by this script:
  * copy them off the server (another machine, or a separate MinIO/S3 bucket) and remove old ones
@@ -36,6 +41,8 @@ require_once BASE_PATH . '/src/autoload.php';
 
 use App\Config\Env;
 use App\Storage\LocalStorage;
+use App\Storage\ObjectStorage;
+use App\Storage\PictureMirror;
 use App\Storage\Storage;
 use App\Support\SqlDump;
 
@@ -150,8 +157,9 @@ if ($method === 'php') {
 }
 
 // 2. Uploaded pictures ----------------------------------------------------------------------
-// On the server's disk they are archived here; in an S3-compatible bucket they are backed up
-// with the bucket's own tools (versioning, replication or a mirror to a second bucket).
+// On the server's disk they are archived here; from an S3-compatible bucket, new and changed
+// ones are copied to <BACKUP_DIR>/pictures. A problem there is reported but never costs the
+// database backup, which is written by now.
 $storage = Storage::uploads();
 $uploads = $storage instanceof LocalStorage ? $storage->root() : null;
 $uploadsFile = "{$target}/uploads.tar.gz";
@@ -181,6 +189,12 @@ if ($uploads !== null && is_dir($uploads)) {
     }
 }
 
+$mirror = null;
+if ($uploads === null && $storage instanceof ObjectStorage) {
+    $mirror = PictureMirror::sync($storage, "{$root}/pictures");
+    $mirror['failed_count'] = count($mirror['failed']);
+}
+
 // 3. Manifest -------------------------------------------------------------------------------
 $entry = static fn (string $path): ?array => is_file($path)
     ? ['file' => basename($path), 'bytes' => filesize($path), 'sha256' => hash_file('sha256', $path)]
@@ -194,6 +208,13 @@ $manifest = [
     'uploads_archive' => $entry($uploadsFile),
     'upload_files' => $files,
     'uploads_storage' => $storage->name(),
+    'pictures_mirror' => $mirror === null ? null : [
+        'folder' => 'pictures',
+        'in_bucket' => $mirror['in_bucket'],
+        'copied' => $mirror['copied'],
+        'only_in_copy' => $mirror['only_here'],
+        'failed' => $mirror['failed_count'],
+    ],
 ];
 file_put_contents("{$target}/manifest.json", json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
 
@@ -207,6 +228,16 @@ printf(
     $files,
     is_file($uploadsFile) ? filesize($uploadsFile) / 1024 : 0
 );
-if ($uploads === null) {
-    printf("[backup] pictures are in %s storage: back them up with the bucket's own tools (not included here)\n", $storage->name());
+if ($mirror !== null) {
+    printf(
+        "[backup] pictures in the bucket: %d, of which %d new or changed copied to %s/pictures%s\n",
+        $mirror['in_bucket'],
+        $mirror['copied'],
+        $root,
+        $mirror['only_here'] > 0 ? "; {$mirror['only_here']} in the copy are no longer in the bucket (kept)" : ''
+    );
+    if ($mirror['error'] !== null || $mirror['failed'] !== []) {
+        $detail = $mirror['error'] ?? ($mirror['failed_count'] . ' could not be copied: ' . implode(', ', array_slice($mirror['failed'], 0, 5)));
+        fwrite(STDERR, "[backup] WARNING: the picture copy is incomplete (the database backup is fine; the next run tries again). {$detail}\n");
+    }
 }
