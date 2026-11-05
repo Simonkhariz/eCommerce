@@ -62,6 +62,8 @@ $overrides = [
     'S3_BUCKET' => '',
     'S3_ACCESS_KEY_ID' => '',
     'S3_SECRET_ACCESS_KEY' => '',
+    // Never a real Redis either (.env may point at Upstash): RedisCacheTest starts its own stand-in.
+    'REDIS_URL' => '',
 ];
 $lines = file_exists(BASE_PATH . '/.env') ? file(BASE_PATH . '/.env', FILE_IGNORE_NEW_LINES) : [];
 $lines = array_values(array_filter($lines, static function (string $line) use ($overrides): bool {

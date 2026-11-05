@@ -133,7 +133,14 @@ if [ ! -f "$ENV" ]; then
   read -r -p "  Access Key ID: " S3_ACCESS_KEY_ID
   read -r -s -p "  Secret Access Key (hidden): " S3_SECRET_ACCESS_KEY; echo
   read -r -p "  Shop WhatsApp number for payments, e.g. 2348012345678: " WHATSAPP
-  for kv in "APP_ENV=production" "APP_DEBUG=false" "APP_URL=https://${HOST}" "FRONTEND_URL=https://${HOST}" \
+  echo "Upstash Redis (optional): the TCP address, in the same region as this server. Enter to skip."
+  read -r -s -p "  rediss://... (hidden): " REDIS_ADDRESS; echo
+  case "$REDIS_ADDRESS" in
+    ""|rediss://*) ;;
+    *) echo "  That is not a rediss:// address, so Redis stays off. The REST (https) address cannot be used."; REDIS_ADDRESS="" ;;
+  esac
+  for kv in "REDIS_URL=${REDIS_ADDRESS}" \
+ "APP_ENV=production" "APP_DEBUG=false" "APP_URL=https://${HOST}" "FRONTEND_URL=https://${HOST}" \
             "CORS_ALLOWED_ORIGINS=https://${HOST}" "TRUSTED_PROXIES=127.0.0.1,::1" \
             "DB_HOST=127.0.0.1" "DB_PORT=3306" "DB_DATABASE=shopco" "DB_USERNAME=shopco" "DB_PASSWORD=${DB_PASSWORD}" \
             "STORE_WHATSAPP_PHONE=${WHATSAPP}" "PAYMENT_WHATSAPP_ENABLED=true" \

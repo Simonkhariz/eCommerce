@@ -14,7 +14,7 @@ It is written for three uses:
 > **Keep this file current.** Any change to what shoppers or admins see, to a safeguard, a limit
 > or a measured number updates this file in the same commit (changelog at the end).
 
-**Last updated:** 2 November 2026, branch `scalability-phase1`.
+**Last updated:** 5 November 2026, branch `scalability-phase1`.
 
 ---
 
@@ -1193,3 +1193,4 @@ When something changes, update the matching section in the same commit:
 | 31 Oct 2026 | Full review of shop and admin: 23 defects fixed (payment safety under simultaneous payments, account takeover by registering an email first, slow checkout with many expired orders, endless stock holds, "Pay now" after an email lookup, product edits that didn't save, the data clean-up's second run, declined refunds, review badges, promo and checkout-window fixes). Details in the commit history |
 | 31 Oct 2026 | Owner requests: admin emails for new orders and payments; customer emails for "being prepared" and "delivered"; fixed-amount coupons, minimum order and maximum discount; delivery fee by quantity; one "Pay now" button (Monnify default) plus WhatsApp; "Awaiting confirmation" until the store confirms; WhatsApp messages carry only the order number; receipts from Track order with order number + email; optional delivery pin and store location; admin dark mode; developer credit |
 | 2 Nov 2026 | Free always-on demo hosting on Oracle Cloud (`deploy/oracle/`: one-command server setup, https without a domain, uptime alerts). Nightly backups are now also copied to the R2 bucket (`backup_to_bucket.php`). Fixed: a backup on a new shop with no pictures yet stopped with an error |
+| 5 Nov 2026 | Optional Redis tried on a real Upstash database: the catalogue cache works on it, and it must be in the same region as the server (`docs/REDIS.md`). The server setup asks for its address. Tests never use a real Redis |

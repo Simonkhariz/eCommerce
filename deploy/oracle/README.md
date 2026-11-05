@@ -30,8 +30,9 @@ Cloudflare R2 bucket. About an hour the first time, most of it waiting.
 
 1. Go to **cloud.oracle.com** → **Sign up** (Free Tier).
 2. **Home region**: pick **Germany Central (Frankfurt)**, or **UK South (London)**. It cannot be
-   changed later. Upstash has a Redis region in each (AWS Frankfurt, AWS London). Both have
-   several availability domains to try if one is out of capacity; Johannesburg has one.
+   changed later. If you use Upstash Redis, its database must be in the same city (AWS Frankfurt,
+   AWS London): `docs/REDIS.md`. Both have several availability domains to try if one is out of
+   capacity; Johannesburg has one.
 3. Finish the card check and wait for the "account ready" email.
 
 ## 2. An SSH key (on your PC, once)
@@ -114,7 +115,9 @@ Type `yes` if SSH asks to trust the server. Partway through it asks for:
 - the R2 endpoint (`https://<account id>.r2.cloudflarestorage.com`, as on your PC);
 - the bucket name (Enter for `shopco-media`);
 - the `shopco-server` Access Key ID and Secret (the secret is hidden as you type);
-- the shop's WhatsApp number for payments (for example `2348012345678`).
+- the shop's WhatsApp number for payments (for example `2348012345678`);
+- optionally, the Upstash **TCP** address (`rediss://default:...`, hidden as you type). Enter skips
+  it; the shop then uses its file cache, which is fine on one server.
 
 At the end it prints the shop's address, for example **https://129-151-10-20.sslip.io**, and the
 memory in use. Open it on your phone using mobile data.

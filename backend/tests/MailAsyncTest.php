@@ -206,6 +206,9 @@ if ($parked !== []) {
     $t->sql('UPDATE `email_outbox` SET `next_attempt_at` = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE `id` IN (' . implode(',', $parked) . ')');
     $t->cleanup(fn () => $t->sql("UPDATE `email_outbox` SET `next_attempt_at` = NULL WHERE `status` = 'pending' AND `id` IN (" . implode(',', $parked) . ')'));
 }
+// The test server (php -S) answers one request at a time, so a send still running from the last
+// section would hold up the timed request below and look like checkout-style waiting. Wait for it.
+$t->http('GET', "{$api}/health");
 $received = static fn (string $to): int => count(array_filter(
     file($countFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [],
     static fn (string $l): bool => $l === strtolower($to)

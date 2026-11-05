@@ -30,6 +30,32 @@ Admin → System status → **Redis (optional cache)** shows whether it answers 
 Unix socket (never open to the internet), and use `rediss://` when it is on another machine.
 Only public catalogue data is ever stored, so a leak would expose nothing private.
 
+## Hosted Redis (Upstash)
+
+Tried against a real Upstash database on 5 November 2026. Use the **TCP** address
+(`rediss://default:PASSWORD@NAME.upstash.io:6379`); the REST (`https://`) address and token do not
+work, because the shop speaks Redis's own protocol. Turn **Eviction** on.
+
+**The shop's code works on it:** a catalogue read stored one listing page with its 60 s lifetime
+and the catalogue version, and the secure connection's certificate checked out.
+
+**Distance decides whether it is any use.** PHP opens a new connection for each request, and each
+one costs several round trips (network, encryption, password) before the first command. Measured
+from a PC in Nigeria to a database in AWS Cape Town: about 1500 ms to connect and 220 ms per
+command, against a limit of 150 ms (`REDIS_TIMEOUT_MS`). So:
+
+- **Same region as the server, or leave it off.** Further away, every attempt times out and the
+  shop uses the file cache, losing up to 150 ms every `REDIS_RETRY_SECONDS`. Raising the limit
+  makes it worse: with a 5000 ms limit, each listing read took about 2 seconds from that PC.
+- **Not on a development PC.** It cannot reach a hosted database within the limit.
+- **Expect no speed gain on one server.** The file cache answers in 0.3 ms. A hosted Redis is
+  useful for a shop on several servers. After setup, compare in admin → System status; to stop
+  using it, empty `REDIS_URL`.
+
+**Free plan:** reported as 256 MB and 500,000 commands a month. A catalogue read costs about 2–3
+commands (password, version, and the page for listings), since each request connects afresh. Any
+Redis failure falls back to the file cache by design; a real exhausted quota has not been tried.
+
 ## Prompt 27: one purpose, the catalogue version
 
 The "catalogue changed" signal: every admin change gives the catalogue a new version, and cached
