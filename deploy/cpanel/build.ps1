@@ -22,6 +22,8 @@ $ApiUrl = $ApiUrl.TrimEnd('/')
 if (-not $AllowHttp -and $ApiUrl -notmatch '^https://[^/\s]+$') { throw '-ApiUrl must look like https://api.yourshop.example (https, no path).' }
 if ($ApiUrl -notmatch '^https?://[^/\s]+$') { throw '-ApiUrl must be an address with no path.' }
 
+# Windows' own tar, which also writes zip files. Git Bash's tar, if first on PATH, can't read C: paths.
+$tar = Join-Path $env:SystemRoot 'System32\tar.exe'
 function Step($text) { Write-Host "==> $text" }
 function Run($file, [string[]]$arguments) {
     & $file @arguments
@@ -39,7 +41,7 @@ New-Item -ItemType Directory -Force $src | Out-Null
 Step "Exporting commit $commit"
 $archive = Join-Path $work 'code.tar'
 Run git @('-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'archive', '--format=tar', '-o', $archive, 'HEAD')
-Run tar @('-xf', $archive, '-C', $src)
+Run $tar @('-xf', $archive, '-C', $src)
 
 Set-Location $src
 Step 'Installing packages (a few minutes the first time)'
@@ -102,9 +104,9 @@ $webZip = Join-Path $OutDir 'shopco-web.zip'
 $apiZip = Join-Path $OutDir 'shopco-api.zip'
 foreach ($zip in $webZip, $apiZip) { if (Test-Path $zip) { Remove-Item $zip -Force } }
 Set-Location $web
-Run tar @('-a', '-c', '-f', $webZip, '.')
+Run $tar @('-a', '-c', '-f', $webZip, '.')
 Set-Location $api
-Run tar @('-a', '-c', '-f', $apiZip, '.')
+Run $tar @('-a', '-c', '-f', $apiZip, '.')
 Copy-Item (Join-Path $src 'deploy\cpanel\check-host.php') (Join-Path $OutDir 'check-host.php') -Force
 Set-Location $repo
 cmd /c rmdir /s /q "$work" | Out-Null

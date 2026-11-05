@@ -59,7 +59,7 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **Daily database backups,** copied off the server to cloud storage, with a careful restore that
     works even on hosts without SSH.
 
-The full system has passed 1,193 automated backend checks and a full load test.
+The full system has passed 1,194 automated backend checks and a full load test.
 
 ---
 
@@ -297,7 +297,7 @@ brief network error never removes a valid code.
 abandoned payment can be retried on the same order. Coming back to checkout with the same cart
 resumes the unpaid order instead of creating a new one.
 
-**Too many orders at once:** at most 10 orders per 10 minutes from one connection (section 6.9).
+**Too many orders at once:** at most 10 orders per 10 minutes from one connection (section 6.10).
 
 **Going back to change the delivery details** before paying releases that order's items at once,
 so they don't sit reserved while the shopper places the corrected order. Once a payment has been
@@ -1098,7 +1098,41 @@ taking real payments, a low-cost paid plan is still recommended (`docs/DEPLOYMEN
   has a domain; live payment status is off until measured there. The admin page is public, so use
   strong passwords.
 
-### 6.9 Limits against abuse
+### 6.9 Hosting: shared hosting (cPanel)
+
+`deploy/cpanel/` puts the whole shop on one cPanel account (`deploy/cpanel/README.md`, steps for the
+owner). It is the fallback if Oracle refuses the sign-up, and a dependable home on a low-cost plan.
+**It passed the 30-step smoke test unpacked on Windows, but has not yet run on a real host or Linux.**
+
+- **What runs where:** the storefront as a cPanel Node.js app; the PHP API on a second address; MySQL
+  from the account; pictures in R2. The browser still talks only to the storefront.
+- **Built on a PC:** `build.ps1` makes a self-contained package from committed code in a fresh folder
+  (about 5 minutes, 16 MB zip), because builds on shared hosting usually run out of memory. It adds the
+  Linux picture library, since a Windows build carries only Windows files, and no `npm install` runs on
+  the host. The API's address goes into the build, so a new address needs a new build.
+- **`check-host.php`** answers "can this host run it?" before any money or time is spent: PHP version,
+  extensions, upload limits, and whether the host can reach R2, Resend, Kora and Monnify. It is deleted
+  straight afterwards.
+- **What's different from a server of your own:**
+  - The API has a public address, so the setup page isn't blocked by nginx. Importing the owner's
+    database closes it; on an empty database, create the administrator straight away.
+  - Rate limits rely on the host's proxy passing on visitors' addresses, which must be checked in
+    System status from two connections. Otherwise all visitors count as one.
+  - Cron may run every 5-15 minutes only (emails still go out after visits).
+  - Picture copies are off (`BACKUP_PICTURES=false`), for disk and file limits.
+  - Live payment status and Redis stay off.
+
+**Other free combinations were checked and aren't advised:**
+- **Render for the API:** the free service sleeps after 15 minutes and takes about a minute to wake, so a
+  client's first click waits. It has no MySQL, so a third service is needed for the database, no free
+  cron, and it can restart at any time.
+- **Vercel for the storefront:** its free plan is for non-commercial use, and "processing payment" counts
+  as commercial. Also, every request would reach the API from Vercel's changing addresses, so all
+  visitors would share one rate limit (10 orders per 10 minutes), until a signed header is built.
+- **Cloudflare Workers for the storefront:** 10 ms of processing per request on the free plan, and
+  Next.js there runs through a beta adapter.
+
+### 6.10 Limits against abuse
 
 Each counts per visitor address, for 10 minutes unless stated. A visitor over the limit is asked to
 wait.
@@ -1141,7 +1175,7 @@ proposal.
 | Duplicate emails | Two workers send the same email | Claim before sending; idempotency key with Resend | Load test: 20,000 emails, four workers, each sent once |
 | Slow or failing email service | Checkout hangs | Emails are sent after the shopper has their answer; paced retries | Tests and load test |
 | Newsletter sent twice | Double click emails everyone twice | Same newsletter at most once per person per day; recipient count confirmed | Tests |
-| Brute-force sign-in, code guessing, order snooping | Accounts and orders guessed | Limits on sign-in, sign-in links, promo codes, order lookups, reviews and orders (section 6.9) | Tests |
+| Brute-force sign-in, code guessing, order snooping | Accounts and orders guessed | Limits on sign-in, sign-in links, promo codes, order lookups, reviews and orders (section 6.10) | Tests |
 | Cross-site tricks (CSRF) | Another site acts as the signed-in user | Per-session security token on every change; secure, same-site cookies scripts can't read | Tests |
 | Faked visitor addresses | Rate limits dodged with a made-up address | Proxy addresses read from the trusted end only; trusted proxies listed by the owner | Tests |
 | Cache filling the disk | Endless made-up filter values | Normalised keys, uncached odd queries, 5,000-entry cap | Tests |
@@ -1162,7 +1196,7 @@ proposal.
 
 **Proof in numbers:**
 
-- **1,193 automated backend checks** in 21 test suites. They run against a throw-away database
+- **1,194 automated backend checks** in 21 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data, buckets and Redis are never touched.
 - Plus 22 storefront unit tests, type checks, lint and a production build. They are run by hand
   before changes are finished; there is no automatic build server yet.
@@ -1219,7 +1253,7 @@ Problems found by the load test were fixed one at a time and measured again:
 
 | Stage | When | What it takes | Status |
 |---|---|---|---|
-| 1. One server | Launch and growth | A cPanel plan with Node.js support, or a small VPS; OPcache on (it halved response times in the test). A free Oracle server for demos (section 6.8) | Ready; Oracle scripts not yet run on a real server |
+| 1. One server | Launch and growth | A cPanel plan with Node.js support (section 6.9), or a small VPS; OPcache on (it halved response times in the test). A free Oracle server for demos (section 6.8) | Ready; setup scripts for both not yet run on a real host |
 | 2. A bigger server or separate database | Hundreds of shoppers at once | More CPU (storefront page building is the first part to slow), or a managed database | Ready, no code change |
 | 3. Several servers | A large catalogue and heavy traffic | Redis for the shared cache; Cloudflare R2 for pictures; a shared storefront page cache | Redis **built and tried on real Upstash**; R2 **built and in use**; shared page cache **Planned** |
 | 4. Live updates | Instant "paid" on the payment page and an instant admin bell | Server-sent events, once measured on the real server | Payment status **built and load-tested** on the test rig (off until a short check on the server, then a switch in Tech switches, `docs/SSE_CONTRACT.md`); admin bell **Planned** |
@@ -1285,7 +1319,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive once." |
 | 5 | A clean-up button behind a password field and an emailed code | "No clean-up without your password and an emailed code." |
 | 6 | A calendar with a backup box every night, flying to a cloud | "Daily backups, copied off the server, with a careful restore." |
-| 7 | A counter climbing: 1,193 ✓ | "Over 1,100 automated checks." |
+| 7 | A counter climbing: 1,194 ✓ | "Over 1,100 automated checks." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
@@ -1371,7 +1405,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | Is my customers' data safe? | Secure sessions, protection against cross-site tricks, rate limits, card details never stored, keep periods, and clean-ups only with a password and an emailed code |
 | Has it taken real payments? | Not yet. Payments were tested heavily against stand-ins for Kora and Monnify; a sandbox run comes before launch (section 11) |
 | Will it be fast? | Measured at p95 about 0.1 s with 50 shoppers on a modest PC; a real server does better |
-| What hosting does it need? | PHP 8.2+ and MySQL or MariaDB for the API, Node.js 20.9+ for the storefront, cron jobs. A cPanel plan with Node.js support or a small VPS is ideal for real payments (`docs/DEPLOYMENT.md`). A free Oracle server suits demos, but Oracle can change its free offer |
+| What hosting does it need? | PHP 8.2+ and MySQL or MariaDB for the API, Node.js 20.9+ for the storefront, cron jobs. A cPanel plan with Node.js support or a small VPS is ideal for real payments (`docs/DEPLOYMENT.md`). A free Oracle server suits demos, but Oracle can change its free offer and may refuse a sign-up |
 | What does it cost to run? | Hosting, plus the payment providers' fees, plus the email service (reported free up to 3,000 emails a month on Resend; check its current plans). Cloudflare R2 is free up to 10 GB, and sending email from your own address needs a domain. Redis is optional, and not needed on one server |
 
 ---
@@ -1387,7 +1421,7 @@ Honest list, so proposals never overclaim:
 | Redis | **Built and optional;** the catalogue cache was tried on a real Upstash database. Speed from a real server, in the same region, is still to be measured |
 | Real payment sandbox runs (Kora and Monnify) | Waiting for the owner's sandbox keys and the server (its sslip.io address is the public https address they need) |
 | Real email delivery | Waiting for the owner's Resend key and a domain (log-only mode until then; without a domain, Resend reaches only the account's own address) |
-| Hosting | **Oracle Always Free chosen for the demo;** scripts written (`deploy/oracle/`), not yet run on a real server. A paid plan is still recommended for real payments (`docs/DEPLOYMENT.md`) |
+| Hosting | **Not yet online.** Oracle Always Free was first choice (`deploy/oracle/`), and its sign-up refused the owner with a generic error. Shared hosting prepared as the fallback (`deploy/cpanel/`). Neither has run on a real host. A paid plan is recommended for real payments (`docs/DEPLOYMENT.md`) |
 | Automatic test runs on a build server | **Planned.** Tests are run by hand today |
 | Several admin accounts, roles and invitations | **Planned.** One administrator level today, with no invite screen |
 | Admin password reset by email and two-step sign-in for admins | **Planned.** Clean-ups already require an emailed code |
@@ -1423,6 +1457,7 @@ Honest list, so proposals never overclaim:
 |---|---|
 | **Admin panel** | The owner's private area at `/admin` |
 | **Audit log** | The record of every admin change |
+| **cPanel** | The control panel of most shared hosting |
 | **Access key** | The private code a guest gets to open their order from another device |
 | **Cache** | A saved copy of an answer, to serve it faster |
 | **Cron / scheduled job** | A task the server runs on its own at set times |
@@ -1479,3 +1514,4 @@ When something changes, update the matching section in the same commit:
 | 5 Nov 2026 | Dev mode: Data & storage and System status now open only with dev mode on (Store settings, with the admin's password). New Tech switches page turns the scalability technology on or off; live payment status stays off until measured on the server. Database alerts still reach the bell |
 | 5 Nov 2026 | Fixed: pictures disappeared on a PC when the API was started without its router. `npm run api` now starts it correctly, the docs are corrected, and System status warns about it. Guide reviewed against the code, line by line: corrected the backup, email, cache and Redis details; added hosting (6.8) and rate limits (6.9); made the proposal wording match what is proven (payments applied once; clean-ups, not every delete, need a password and code; real payment providers not yet run). Fixed: Email outbox lost its counts and "Send queued now" with dev mode off. Backend checks: see section 7 |
 | 5 Nov 2026 | Home page: new Featured row, chosen by the owner; a product appears only once on the page; Top selling lists only products that have really sold. Catalogue paging has a fixed order. Backups: pictures in a bucket are now copied to a growing folder on the server, and a deleted picture can be put back (`migrate_uploads.php --from`, which also accepts backups made with pictures in a bucket). Removed the old `migrate_to_physical_only.php`, which deleted data with no confirmation |
+| 5 Nov 2026 | Shared hosting route: `deploy/cpanel/` builds the storefront on a PC into a self-contained package with the Linux picture library, with a host checker and step-by-step guide. `BACKUP_PICTURES=false` turns off the server's copy of bucket pictures, for tight hosting. Checked and not advised: Render, Vercel and Cloudflare Workers free plans |

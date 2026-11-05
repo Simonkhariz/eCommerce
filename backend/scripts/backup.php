@@ -13,6 +13,7 @@ declare(strict_types=1);
  * Pictures in an S3-compatible bucket are not archived each night: only new or changed ones are
  * copied into one growing folder, and nothing is ever removed from it, so a picture deleted from
  * the bucket by mistake can be put back (migrate_uploads.php --from=<that folder> --keys=<name>).
+ * BACKUP_PICTURES=false leaves it out, for hosting with tight disk or file limits.
  *
  * BACKUP_DIR defaults to backend/storage/backups. Old backups are never deleted by this script:
  * copy them off the server (another machine, or a separate MinIO/S3 bucket) and remove old ones
@@ -190,7 +191,7 @@ if ($uploads !== null && is_dir($uploads)) {
 }
 
 $mirror = null;
-if ($uploads === null && $storage instanceof ObjectStorage) {
+if ($uploads === null && $storage instanceof ObjectStorage && Env::bool('BACKUP_PICTURES', true)) {
     $mirror = PictureMirror::sync($storage, "{$root}/pictures");
     $mirror['failed_count'] = count($mirror['failed']);
 }
@@ -228,6 +229,9 @@ printf(
     $files,
     is_file($uploadsFile) ? filesize($uploadsFile) / 1024 : 0
 );
+if ($uploads === null && $mirror === null) {
+    echo "[backup] pictures in the bucket were not copied (BACKUP_PICTURES=false)\n";
+}
 if ($mirror !== null) {
     printf(
         "[backup] pictures in the bucket: %d, of which %d new or changed copied to %s/pictures%s\n",

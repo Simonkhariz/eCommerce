@@ -68,6 +68,8 @@ php backend/scripts/migrate_uploads.php --apply --all --from=backend/storage/bac
 ```
 
 The copy is on the server, so it doesn't cover losing the server and the bucket together.
+`BACKUP_PICTURES=false` turns the copy off, for hosting with tight disk or file limits; pictures are
+then only in the bucket.
 
 ## Checking a backup
 

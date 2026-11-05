@@ -187,6 +187,12 @@ $all = $run('migrate_uploads.php', ['--apply', '--all', '--backup=' . end($folde
 $t->ok('a whole bucket can be refilled from it, using a backup made with pictures in a bucket', $all['code'] === 0, $all['out']);
 $t->ok('backup_to_bucket ignores the copy and picks the dated backup', str_contains($copy([], $s3Env)['out'], basename((string) end($folders))));
 
+$offBackups = "{$fake->dir}/off-backups";
+@mkdir($offBackups, 0700, true);
+$offEnv = $fake->envFile('env-off', array_merge($fake->envLines(), ["BACKUP_DIR={$offBackups}", 'BACKUP_PICTURES=false']));
+$off = $run('backup.php', [], $offEnv);
+$t->ok('BACKUP_PICTURES=false: the database is still backed up, no pictures copied, and it says so', $off['code'] === 0 && !is_dir("{$offBackups}/pictures") && str_contains($off['out'], 'BACKUP_PICTURES=false'), $off['out']);
+
 $fake->mode('500');
 $broken = $run('backup.php', [], $s3Env);
 $fake->mode('ok');

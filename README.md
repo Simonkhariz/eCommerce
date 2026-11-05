@@ -62,7 +62,7 @@ orders list runs. On a quiet store only the schedule keeps that punctual.
 | `php backend/scripts/backup.php` | daily | Backs up the database and the uploaded pictures into one dated folder (copy it off the server); pictures in a bucket go to a growing `pictures` folder instead. See [`docs/BACKUPS.md`](docs/BACKUPS.md). |
 | `php backend/scripts/backup_to_bucket.php` | daily, after the backup | Copies the newest backup to the R2 bucket under `backups/` (never shown by the shop; never deletes anything). |
 
-Free always-on hosting for demos (Oracle Cloud): [`deploy/oracle/README.md`](deploy/oracle/README.md).
+Hosting guides: a server of your own, free on Oracle Cloud ([`deploy/oracle/README.md`](deploy/oracle/README.md)), or shared hosting with cPanel ([`deploy/cpanel/README.md`](deploy/cpanel/README.md)).
 
 Linux crontab (`crontab -e`, as the user that runs PHP; adjust the path):
 ```cron

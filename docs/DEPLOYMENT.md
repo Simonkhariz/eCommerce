@@ -42,7 +42,10 @@ normal. Constraints:
 ### B. Shared hosting (cPanel)
 
 API under a subdomain whose document root is `backend/public`; storefront as a cPanel
-"Node.js App" (Passenger) or on Vercel (option C). Constraints:
+"Node.js App" (Passenger) or on Vercel (option C). Step-by-step guide and build script:
+`deploy/cpanel/README.md`. The storefront is built on a PC into a self-contained package, because
+builds on shared hosting usually run out of memory. Passed the 30-step smoke test unpacked on
+Windows; not yet run on a real host or Linux. Constraints:
 
 - Check the PHP version (8.2+), the extensions and the upload limit in cPanel's "Select PHP
   Version" / "MultiPHP INI Editor", then in System status.
@@ -78,7 +81,8 @@ Official terms, read on 30 October 2026:
 | Free cPanel hosting such as InfinityFree for the API | **No** | Every free account has a browser check that blocks "Webhooks from external services" and "REST APIs" and "can't be turned off for one path" (forum.infinityfree.com, Browser security system). Kora's payment notifications and the storefront's own calls to the API would both be refused |
 | Cloudflare Workers free plan for the storefront | Not realistic | "CPU time per HTTP request: 10 ms" and 100,000 requests a day on the free plan (developers.cloudflare.com/workers/platform/limits); Next.js there runs through vinext, which "is in beta" |
 | Free cPanel hosting **with Node.js**, such as HelioHost or WebHostMost (checked 2 November 2026) | Untested | Both list Node.js on their free plans, so the storefront could run next to the PHP API (option B). Their memory and process limits are not published; the storefront must be built on a PC and uploaded (`output: 'standalone'`, not set up yet), since builds on shared hosts run out of memory. HelioHost is volunteer-run and reportedly suspends accounts not logged into monthly. A fallback if Oracle is not available |
-| Oracle Cloud Always Free (one server for everything, option A) | **Chosen for the demo (2 November 2026)** | Arm server; the free allowance was cut in August 2026 to 2 OCPUs and 12 GB of memory (servers above it were switched off), 200 GB of storage, "10 TB per month of outbound data". "Idle Always Free compute instances may be reclaimed by Oracle" when CPU, network **and** memory stay under 20% for 7 days. A quiet shop uses little CPU and network, so memory decides: an estimated 700–1000 MB (not yet measured on the server) is about 23–33% of a 1 OCPU / 3 GB server, and under 20% of a larger one. Card needed at sign-up. See "Free always-on demo" below |
+| Render free for the API, plus a free MySQL (checked 5 November 2026) | **Not advised** | Free web services "spin down" after 15 minutes idle and take about a minute to wake, so a client's first click waits. No MySQL (only Postgres, deleted after 30 days plus a grace period), so the database would be a third service such as Aiven's free 1 GB. PHP needs Docker; no free cron jobs or one-off jobs; 750 free hours a month across the workspace, so two services can't both run all month; and it can restart at any time, losing files that aren't in the bucket (logs, cache, backups) |
+| Oracle Cloud Always Free (one server for everything, option A) | **First choice for the demo (2 November 2026); sign-up refused the owner on 5 November with a generic error** | Arm server; the free allowance was cut in August 2026 to 2 OCPUs and 12 GB of memory (servers above it were switched off), 200 GB of storage, "10 TB per month of outbound data". "Idle Always Free compute instances may be reclaimed by Oracle" when CPU, network **and** memory stay under 20% for 7 days. A quiet shop uses little CPU and network, so memory decides: an estimated 700–1000 MB (not yet measured on the server) is about 23–33% of a 1 OCPU / 3 GB server, and under 20% of a larger one. Card needed at sign-up. See "Free always-on demo" below |
 
 **Recommendation:** for a shop that takes real payments, the dependable choice is a low-cost
 paid plan that runs both parts in one place: a cPanel plan that includes "Setup Node.js App"
