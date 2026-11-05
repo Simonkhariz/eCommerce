@@ -798,6 +798,11 @@ export interface SystemStatus {
   orders: { needs_attention: number; unpaid_overdue: number; awaiting_fulfilment: number };
 }
 
+/** Open without dev mode: the Email outbox page is for everyday use. */
+export function adminGetOutboxStatus() {
+  return apiRequest<SystemStatus['mail']>('/admin/notifications/outbox/status');
+}
+
 export function adminGetSystemStatus() {
   return apiRequest<SystemStatus>('/admin/system-status');
 }

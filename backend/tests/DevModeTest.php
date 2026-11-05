@@ -85,6 +85,9 @@ foreach ($refused as [$method, $path, $body]) {
 }
 $t->check('the switches are refused too', 403, $setSwitch(DevSwitches::GZIP, false)['status']);
 $t->check('the database alert still reaches the admin', 200, $t->http('GET', '/admin/data/alert', $as)['status']);
+$outboxStatus = $t->http('GET', '/admin/notifications/outbox/status', $as);
+$t->check('the Email outbox page keeps its counts and warnings', [200, true], [$outboxStatus['status'], is_int(TestKit::get($outboxStatus, 'data.outbox_pending')) && is_string(TestKit::get($outboxStatus, 'data.mode'))]);
+$t->check('and its Send queued now button works', 200, $t->http('POST', '/admin/notifications/outbox/process', $as)['status']);
 
 // -----------------------------------------------------------------------------
 $t->section('Turning it on needs the password');

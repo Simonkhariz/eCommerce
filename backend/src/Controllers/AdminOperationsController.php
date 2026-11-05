@@ -769,6 +769,26 @@ class AdminOperationsController
     // 7. EMAIL OUTBOX
     // =========================================================================
 
+    /** Email outbox health: used by the Email outbox page (always open) and System status. */
+    private function mailStatus(): array
+    {
+        $outbox = $this->db->fetchOne(
+            "SELECT COALESCE(SUM(status = 'pending'), 0) AS pending, COALESCE(SUM(status = 'failed'), 0) AS failed FROM `email_outbox`"
+        );
+        return [
+            'mode' => self::mailMode(),
+            'outbox_pending' => (int) ($outbox['pending'] ?? 0),
+            'outbox_failed' => (int) ($outbox['failed'] ?? 0),
+            // A due email older than ~15 minutes means process_outbox.php is not scheduled.
+            'oldest_due_minutes' => ($oldest = $this->db->fetchOne("SELECT TIMESTAMPDIFF(MINUTE, MIN(`created_at`), NOW()) AS m FROM `email_outbox` WHERE `status` = 'pending' AND (`next_attempt_at` IS NULL OR `next_attempt_at` <= NOW())")) && $oldest['m'] !== null ? (int) $oldest['m'] : null,
+        ];
+    }
+
+    public function outboxStatus(): void
+    {
+        Response::success($this->mailStatus(), 'Email outbox status retrieved.');
+    }
+
     public function listOutbox(): void
     {
         $status = $_GET['status'] ?? 'all';
@@ -1097,9 +1117,6 @@ class AdminOperationsController
         $storage = Storage::uploads();
 
         $count = fn (string $sql): int => (int) ($this->db->fetchOne($sql)['c'] ?? 0);
-        $outbox = $this->db->fetchOne(
-            "SELECT COALESCE(SUM(status = 'pending'), 0) AS pending, COALESCE(SUM(status = 'failed'), 0) AS failed FROM `email_outbox`"
-        );
         $migrations = $this->db->fetchOne("SELECT COUNT(*) AS c, MAX(filename) AS latest FROM `schema_migrations`");
 
         $checks = [
@@ -1134,13 +1151,7 @@ class AdminOperationsController
             'migrations' => ['applied' => (int) ($migrations['c'] ?? 0), 'latest' => $migrations['latest'] ?? null],
             'storage' => ['uploads_writable' => $checks['uploads_writable'], 'driver' => $storage->name()],
             'payments' => ['kora' => self::koraMode(), 'monnify' => self::monnifyMode()],
-            'mail' => [
-                'mode' => self::mailMode(),
-                'outbox_pending' => (int) ($outbox['pending'] ?? 0),
-                'outbox_failed' => (int) ($outbox['failed'] ?? 0),
-                // A due email older than ~15 minutes means process_outbox.php is not scheduled.
-                'oldest_due_minutes' => ($oldest = $this->db->fetchOne("SELECT TIMESTAMPDIFF(MINUTE, MIN(`created_at`), NOW()) AS m FROM `email_outbox` WHERE `status` = 'pending' AND (`next_attempt_at` IS NULL OR `next_attempt_at` <= NOW())")) && $oldest['m'] !== null ? (int) $oldest['m'] : null,
-            ],
+            'mail' => $this->mailStatus(),
             'storefront_refresh' => StorefrontRefresh::status($this->db),
             // Optional (REDIS_URL): shared catalogue cache; the file cache takes over when it is down.
             'redis' => Redis::status(),

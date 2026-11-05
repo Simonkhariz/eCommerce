@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { RefreshCw, RotateCcw, Send } from 'lucide-react';
-import { adminGetOutbox, adminGetSystemStatus, adminProcessOutbox, adminRetryOutbox, errorMessage, OutboxRow } from '@/lib/admin-api';
+import { adminGetOutbox, adminGetOutboxStatus, adminProcessOutbox, adminRetryOutbox, errorMessage, OutboxRow } from '@/lib/admin-api';
 import { formatDateTime, formatRelative, humanize } from '@/lib/admin-format';
 import {
   Button,
@@ -48,7 +48,7 @@ export function AdminNotifications() {
     () => adminGetOutbox({ status: filters.status, page, per_page: 25 }),
     [filters.status, page]
   );
-  const { data: status, reload: reloadStatus } = useAdminData(() => adminGetSystemStatus(), []);
+  const { data: mail, reload: reloadStatus } = useAdminData(() => adminGetOutboxStatus(), []);
   const [retrying, setRetrying] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
 
@@ -89,9 +89,9 @@ export function AdminNotifications() {
         description="Every email the store has queued. Message bodies are not shown here because they can contain customer details."
         actions={
           <>
-            <Button onClick={processNow} loading={processing} disabled={!status || status.mail.outbox_pending === 0}>
+            <Button onClick={processNow} loading={processing} disabled={!mail || mail.outbox_pending === 0}>
               <Send className="size-3.5" aria-hidden="true" />
-              Send queued now{status ? ` (${status.mail.outbox_pending})` : ''}
+              Send queued now{mail ? ` (${mail.outbox_pending})` : ''}
             </Button>
             <Button onClick={reload} loading={loading && !!data} aria-label="Refresh list">
               <RefreshCw className="size-3.5" aria-hidden="true" />
@@ -100,7 +100,7 @@ export function AdminNotifications() {
         }
       />
 
-      {status?.mail.mode === 'log_only' && (
+      {mail?.mode === 'log_only' && (
         <div className="mb-3">
           <Notice tone="warning">
             Email is in log-only mode: messages are written to <code>backend/storage/logs/mail.log</code> and do not reach customers. Set
@@ -109,10 +109,10 @@ export function AdminNotifications() {
           </Notice>
         </div>
       )}
-      {status && status.mail.oldest_due_minutes !== null && status.mail.oldest_due_minutes > 15 && (
+      {mail && mail.oldest_due_minutes !== null && mail.oldest_due_minutes > 15 && (
         <div className="mb-3">
           <Notice tone="warning">
-            The oldest email due to be sent has waited {status.mail.oldest_due_minutes} minutes. Emails are retried automatically
+            The oldest email due to be sent has waited {mail.oldest_due_minutes} minutes. Emails are retried automatically
             while the shop has visitors; schedule <code>php backend/scripts/process_outbox.php</code> every minute (cron) so they
             also go out when it is quiet, or use “Send queued now”.
           </Notice>
