@@ -35,7 +35,7 @@ php backend/migrations/migrate.php          # creates the database and applies e
 php backend/seeds/seed.php                  # optional demo catalogue and delivery zones
 
 # 3. API
-php -S 127.0.0.1:8000 -t backend/public
+npm run api                                 # php -S 127.0.0.1:8000 -t backend/public backend/dev-router.php
 
 # 4. Storefront (second terminal)
 cp .env.example .env.local                  # BACKEND_ORIGIN=http://127.0.0.1:8000

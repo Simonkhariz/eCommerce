@@ -71,7 +71,7 @@ XAMPP's PHP 8.2 already ships the OPcache file (`php_opcache.dll`); it is only s
      for development.
 4. Save, then restart PHP: press Ctrl+C in the terminal running the API on :8000 and start it again:
    ```
-   php -S 127.0.0.1:8000 -t backend/public
+   php -S 127.0.0.1:8000 -t backend/public backend/dev-router.php
    ```
    If you also use XAMPP's Apache, click Stop and then Start on it too.
 5. Check it worked:

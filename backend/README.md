@@ -98,7 +98,7 @@ CORS_ALLOWED_ORIGINS="http://localhost:3000,http://127.0.0.1:3000"
 ### Option A: PHP Built-in Server (Recommended for Quick Testing)
 You can run the PHP built-in server pointing directly to the public document root:
 ```bash
-php -S localhost:8000 -t backend/public
+php -S localhost:8000 -t backend/public backend/dev-router.php
 ```
 The API is then immediately available at:
 ```text

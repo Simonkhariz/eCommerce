@@ -145,5 +145,24 @@ $t->check('non-picture keys are never served', 404, $t->http('GET', "http://127.
 $status = $t->http('GET', "{$api}/admin/system-status", ['jar' => 's3-admin']);
 $t->check('System status shows the bucket', ['s3', true], [TestKit::get($status, 'data.storage.driver'), TestKit::get($status, 'data.storage.uploads_writable')]);
 $t->ok('and never the keys', !str_contains($status['body'], $secret) && !str_contains($status['body'], $access));
+$t->check('started with the router: no warning about it', false, str_contains($status['body'], 'dev-router'));
+
+// The mistake that made every picture disappear on a PC: `php -S` without backend/dev-router.php.
+$bareEnv = $fake->envFile('env-bare', array_merge($fake->envLines(), ['STOREFRONT_REVALIDATE_URL=']));
+$barePort = (int) (getenv('TEST_S3_BARE_PORT') ?: 8113);
+$bare = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$barePort}", '-t', BASE_PATH . '/public'], [1 => ['file', "{$dir}/bare.log", 'w'], 2 => ['file', "{$dir}/bare.log", 'a']], $barePipes, BASE_PATH, array_merge(getenv(), ['SHOPCO_ENV_FILE' => $bareEnv]));
+$t->cleanup(static function () use ($bare): void {
+    if (is_resource($bare)) {
+        proc_terminate($bare);
+    }
+});
+$bareUp = false;
+for ($i = 0; $i < 50 && !$bareUp; $i++) {
+    usleep(200000);
+    $bareUp = @file_get_contents("http://127.0.0.1:{$barePort}/api/v1/health") !== false;
+}
+$t->check('without the router: a picture in the bucket answers 404', 404, $t->http('GET', "http://127.0.0.1:{$barePort}/uploads/{$newKey}")['status']);
+$bareStatus = $t->http('GET', "http://127.0.0.1:{$barePort}/api/v1/admin/system-status", ['jar' => 's3-admin']);
+$t->ok('and System status says why, and how to fix it', str_contains($bareStatus['body'], 'dev-router.php') && str_contains($bareStatus['body'], 'npm run api'), $bareStatus['body']);
 
 exit($t->finish());

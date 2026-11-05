@@ -1071,6 +1071,21 @@ class AdminOperationsController
         return $warnings;
     }
 
+    /**
+     * php -S answers a missing .webp or .jpg with a 404 itself, before the shop's code runs. With
+     * pictures in a bucket none are on the disk, so without the router every /uploads link fails.
+     *
+     * @return list<string>
+     */
+    private static function testServerWarnings(string $storage): array
+    {
+        $firstFile = str_replace('\\', '/', (string) (get_included_files()[0] ?? ''));
+        if (PHP_SAPI !== 'cli-server' || $storage !== 's3' || str_ends_with($firstFile, '/dev-router.php')) {
+            return [];
+        }
+        return ['Pictures will not show: this API was started without backend/dev-router.php, so pictures in the bucket answer 404. Stop it and start it with: npm run api'];
+    }
+
     // =========================================================================
     // 10. SYSTEM STATUS
     // =========================================================================
@@ -1114,7 +1129,7 @@ class AdminOperationsController
                 'upload_limit_bytes' => UploadFiles::serverLimitBytes(),
             ],
             'network' => ['client_ip' => $clientIp, 'public_address' => $publicIp],
-            'config_warnings' => Env::isProduction() ? self::productionConfigWarnings() : [],
+            'config_warnings' => array_merge(Env::isProduction() ? self::productionConfigWarnings() : [], self::testServerWarnings($storage->name())),
             'database' => ['connected' => $dbPing['connected'], 'latency_ms' => $dbPing['latency_ms'] ?? null],
             'migrations' => ['applied' => (int) ($migrations['c'] ?? 0), 'latest' => $migrations['latest'] ?? null],
             'storage' => ['uploads_writable' => $checks['uploads_writable'], 'driver' => $storage->name()],

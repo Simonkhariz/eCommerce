@@ -198,7 +198,7 @@ To receive live asynchronous sandbox events dispatched from Kora's cloud dashboa
 
 1. **Start the PHP backend server**:
    ```bash
-   php -S 127.0.0.1:8000 -t backend/public
+   php -S 127.0.0.1:8000 -t backend/public backend/dev-router.php
    ```
 2. **Launch a secure temporary tunnel** (bind strictly to port 8000 only):
    ```bash

@@ -117,7 +117,7 @@ function StatusBody({ data }: { data: SystemStatus }) {
 
       {data.config_warnings.length > 0 && (
         <Notice tone="warning">
-          <span className="font-semibold">Settings to fix in backend/.env before customers use the shop:</span>
+          <span className="font-semibold">To fix before customers use the shop:</span>
           <ul className="mt-1 list-disc pl-5">
             {data.config_warnings.map((w) => (
               <li key={w}>{w}</li>
