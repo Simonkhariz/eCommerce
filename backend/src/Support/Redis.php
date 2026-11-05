@@ -56,7 +56,7 @@ final class Redis
             return self::$shared;
         }
         self::$sharedResolved = true;
-        if (!self::isConfigured()) {
+        if (!self::isConfigured() || !DevSwitches::enabled(DevSwitches::REDIS)) {
             return null;
         }
         $marker = self::markerFile();
@@ -105,12 +105,16 @@ final class Redis
      * For System status: set up or not, and whether it answers now (a direct check that ignores
      * the down marker), with the reply time.
      *
-     * @return array{configured: bool, ok: bool|null, ms: float|null, error: string|null, down_marker: bool}
+     * @return array{configured: bool, switched_off: bool, ok: bool|null, ms: float|null, error: string|null, down_marker: bool}
      */
     public static function status(): array
     {
         if (!self::isConfigured()) {
-            return ['configured' => false, 'ok' => null, 'ms' => null, 'error' => null, 'down_marker' => false];
+            return ['configured' => false, 'switched_off' => false, 'ok' => null, 'ms' => null, 'error' => null, 'down_marker' => false];
+        }
+        // Switched off in admin, Tech switches: no connection is made, so nothing can be measured.
+        if (!DevSwitches::enabled(DevSwitches::REDIS)) {
+            return ['configured' => true, 'switched_off' => true, 'ok' => null, 'ms' => null, 'error' => null, 'down_marker' => false];
         }
         $started = microtime(true);
         try {
@@ -118,9 +122,9 @@ final class Redis
             $redis->connect();
             $ok = $redis->command('PING') === 'PONG';
             $redis->close();
-            return ['configured' => true, 'ok' => $ok, 'ms' => round((microtime(true) - $started) * 1000, 1), 'error' => null, 'down_marker' => is_file(self::markerFile())];
+            return ['configured' => true, 'switched_off' => false, 'ok' => $ok, 'ms' => round((microtime(true) - $started) * 1000, 1), 'error' => null, 'down_marker' => is_file(self::markerFile())];
         } catch (\Throwable $e) {
-            return ['configured' => true, 'ok' => false, 'ms' => null, 'error' => mb_substr($e->getMessage(), 0, 200), 'down_marker' => is_file(self::markerFile())];
+            return ['configured' => true, 'switched_off' => false, 'ok' => false, 'ms' => null, 'error' => mb_substr($e->getMessage(), 0, 200), 'down_marker' => is_file(self::markerFile())];
         }
     }
 

@@ -69,7 +69,8 @@ the email is retried, Resend recognises it and does not send it twice. With SMTP
    MAIL_FROM_ADDRESS=orders@mail.yourshop.com
    MAIL_FROM_NAME="Shop.co"
    ```
-7. **Check** admin → **System status**: "Email delivery" should say **Resend**.
+7. **Check** admin → **Store settings**, "Configured on the server": "Email delivery" should say
+   **Resend**.
 8. **Send yourself a test**: place an order on the shop with your own email address (no need to
    pay: the "order received" email goes out when the order is placed), then cancel it in admin →
    Orders. Check admin → **Email outbox** says **Delivered** for both emails, they arrived, and

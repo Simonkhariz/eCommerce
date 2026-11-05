@@ -9,7 +9,7 @@ import { ExternalLink, LogOut, Moon, Sun } from 'lucide-react';
 import { AdminIcon } from '@/components/admin/AdminIcon';
 import { useAdminSession } from '@/components/admin/AdminAuthGate';
 import { ADMIN_NAV, AdminNavItem, findAdminNav, isActiveAdminLink } from '@/lib/admin-nav';
-import { bellCountsQuery, storageAlertQuery } from '@/lib/admin-queries';
+import { bellCountsQuery, devModeQuery, storageAlertQuery } from '@/lib/admin-queries';
 
 const THEME_KEY = 'shopco_admin_theme';
 const THEME_EVENT = 'shopco-admin-theme';
@@ -283,6 +283,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
 function AdminSidebar({ pathname, onClose, closeLabel }: { pathname: string; onClose: () => void; closeLabel: string }) {
   const { admin, signOut } = useAdminSession();
+  // Dev mode pages stay out of the menu until the answer is a definite yes.
+  const devMode = useQuery(devModeQuery(admin.id));
+  const devOn = devMode.status === 'success' && devMode.data.on;
   const [signingOut, setSigningOut] = useState(false);
 
   // Groups open by default when they contain the page the panel was opened on.
@@ -387,7 +390,7 @@ function AdminSidebar({ pathname, onClose, closeLabel }: { pathname: string; onC
       </div>
 
       <nav className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 py-3.5" aria-label="Admin sections">
-        {ADMIN_NAV.map((section) => (
+        {ADMIN_NAV.filter((section) => !section.devOnly || devOn).map((section) => (
           <div key={section.title} className="flex flex-col gap-1.5">
             <p className="px-1 text-[11px] font-bold uppercase tracking-wider text-[#6b7280]">{section.title}</p>
             <div className="flex flex-col gap-0.5">{section.items.map(renderItem)}</div>

@@ -338,7 +338,9 @@ streams:
   Customers over the cap get the usual checks, which confirm payments just as surely, only a few
   seconds slower.
 
-**Still to do on the chosen host before `SSE_ENABLED=true`:** run the same script against staging
+It can also be switched in admin → Tech switches (dev mode), which overrides `SSE_ENABLED`.
+
+**Still to do on the chosen host before turning it on:** run the same script against staging
 for 10 minutes at the planned cap, and read the host's limits (entry processes, database
 connections, PHP memory per process). Check that no proxy or CDN buffers the stream: the first
 message must arrive within 1 s through the real domain.

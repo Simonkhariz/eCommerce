@@ -31,6 +31,12 @@ final class Cache
         if (Env::get('APP_ENV', 'production') === 'testing') {
             return 0;
         }
+        return DevSwitches::enabled(DevSwitches::CATALOG_CACHE) ? self::configuredSeconds() : 0;
+    }
+
+    /** The lifetime set in backend/.env, whatever the admin's switch says. */
+    public static function configuredSeconds(): int
+    {
         return max(0, Env::int('CATALOG_CACHE_SECONDS', 60));
     }
 

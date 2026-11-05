@@ -129,7 +129,7 @@ Ubuntu 24.04 server). It is option A on one free server:
 1. Choose the hosting (A recommended). If C, ask for the signed-header change first.
 2. Set `APP_ENV=production`, `APP_DEBUG=false`, and `APP_URL`, `FRONTEND_URL` and
    `CORS_ALLOWED_ORIGINS` to the `https://` address.
-3. Open admin → System status: no warnings, PHP extensions complete, OPcache on, upload limit at
+3. Turn on dev mode (admin → Store settings), then open System status: no warnings, PHP extensions complete, OPcache on, upload limit at
    least 5 MB, "Visitor addresses" shows your real public address.
 4. Schedule the jobs, and set up Resend and the live payment keys (`docs/EMAIL_SETUP.md`,
    `docs/KORA_INTEGRATION.md`).

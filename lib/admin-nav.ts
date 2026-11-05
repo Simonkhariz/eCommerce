@@ -17,6 +17,8 @@ export interface AdminNavItem extends AdminNavLink {
 export interface AdminNavSection {
   title: string;
   items: AdminNavItem[];
+  /** Shown only while dev mode is on (Store settings). */
+  devOnly?: boolean;
 }
 
 export const ADMIN_NAV: AdminNavSection[] = [
@@ -78,9 +80,16 @@ export const ADMIN_NAV: AdminNavSection[] = [
       { href: '/admin/notifications', label: 'Email outbox', icon: 'bell' },
       { href: '/admin/audit-logs', label: 'Audit log', icon: 'clock-01' },
       { href: '/admin/settings', label: 'Store settings', icon: 'sb-settings' },
+      { href: '/admin/account', label: 'My account', icon: 'user-group' },
+    ],
+  },
+  {
+    title: 'Dev mode',
+    devOnly: true,
+    items: [
+      { href: '/admin/dev', label: 'Tech switches', icon: 'zap' },
       { href: '/admin/data', label: 'Data & storage', icon: 'database' },
       { href: '/admin/system', label: 'System status', icon: 'headset' },
-      { href: '/admin/account', label: 'My account', icon: 'user-group' },
     ],
   },
 ];

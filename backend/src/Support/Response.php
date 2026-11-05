@@ -145,7 +145,7 @@ class Response
             }
 
             // JSON shrinks 5-10x with gzip, which matters most on mobile data.
-            if (strlen($json) > 1024 && self::clientAcceptsGzip() && !ini_get('zlib.output_compression') && function_exists('gzencode')) {
+            if (strlen($json) > 1024 && self::clientAcceptsGzip() && !ini_get('zlib.output_compression') && function_exists('gzencode') && DevSwitches::enabled(DevSwitches::GZIP)) {
                 $compressed = gzencode($json, 5);
                 if ($compressed !== false) {
                     header('Content-Encoding: gzip');

@@ -21,6 +21,7 @@ require_once BASE_PATH . '/src/autoload.php';
 use App\Config\Env;
 use App\Controllers\AdminCatalogController;
 use App\Controllers\AdminDataController;
+use App\Controllers\AdminDevController;
 use App\Controllers\AdminDashboardController;
 use App\Controllers\AdminOperationsController;
 use App\Controllers\AdminOrderController;
@@ -253,6 +254,9 @@ $router->put('/api/v1/admin/settings', [AdminOperationsController::class, 'updat
 $router->put('/api/v1/admin/settings/payment-methods', [AdminOperationsController::class, 'updatePaymentMethods'], $adminGuard);
 
 $router->get('/api/v1/admin/system-status', [AdminOperationsController::class, 'getSystemStatus'], $adminGuard);
+$router->get('/api/v1/admin/dev-mode', [AdminDevController::class, 'show'], $adminGuard);
+$router->post('/api/v1/admin/dev-mode', [AdminDevController::class, 'setMode'], $adminGuard);
+$router->put('/api/v1/admin/dev-mode/switches', [AdminDevController::class, 'updateSwitches'], $adminGuard);
 
 $router->get('/api/v1/admin/data', [AdminDataController::class, 'overview'], $adminGuard);
 $router->get('/api/v1/admin/data/alert', [AdminDataController::class, 'alert'], $adminGuard);

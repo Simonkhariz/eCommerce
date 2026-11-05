@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Config\Env;
 use App\Database\Database;
+use App\Support\DevSwitches;
 use App\Support\Response;
 use Throwable;
 
@@ -470,7 +471,7 @@ class MailService
             return false;
         }
 
-        if ($deliverNow && filter_var(Env::get('MAIL_SEND_IMMEDIATELY', 'true'), FILTER_VALIDATE_BOOLEAN)) {
+        if ($deliverNow && DevSwitches::enabled(DevSwitches::MAIL_AFTER_RESPONSE)) {
             if (PHP_SAPI !== 'cli') {
                 $this->deliverAfterResponse($id);
             } elseif (!$this->db->inTransaction()) {
@@ -497,7 +498,7 @@ class MailService
      */
     public static function retryDueAfterResponse(): void
     {
-        if (!filter_var(Env::get('MAIL_AUTO_RETRY', 'true'), FILTER_VALIDATE_BOOLEAN)) {
+        if (!DevSwitches::enabled(DevSwitches::MAIL_AUTO_RETRY)) {
             return;
         }
         try {

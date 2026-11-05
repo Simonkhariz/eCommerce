@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { adminGetOrders, adminGetStorageAlert } from '@/lib/admin-api';
+import { adminGetDevMode, adminGetOrders, adminGetStorageAlert } from '@/lib/admin-api';
 import { adminKeys } from '@/lib/admin-query-keys';
 
 /**
@@ -32,6 +32,18 @@ export const bellCountsQuery = (adminId: number) =>
     staleTime: 30_000,
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+  });
+
+/**
+ * Whether dev mode is on, and the tech switches when it is. Decides which pages the sidebar shows;
+ * the API refuses those pages by itself when it is off.
+ */
+export const devModeQuery = (adminId: number) =>
+  queryOptions({
+    queryKey: adminKeys.devMode(adminId),
+    queryFn: ({ signal }) => adminGetDevMode(signal),
+    staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
 

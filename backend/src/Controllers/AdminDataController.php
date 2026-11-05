@@ -10,6 +10,7 @@ use App\Services\AuditService;
 use App\Services\DatabaseCleanup;
 use App\Services\MailService;
 use App\Services\StorageHealth;
+use App\Support\DevSwitches;
 use App\Support\Cache;
 use App\Support\RateLimiter;
 use App\Support\RequestContext;
@@ -49,6 +50,7 @@ final class AdminDataController
      */
     public function overview(): void
     {
+        DevSwitches::requireDevMode();
         $health = new StorageHealth($this->db);
 
         Response::success([
@@ -67,6 +69,7 @@ final class AdminDataController
      */
     public function records(): void
     {
+        DevSwitches::requireDevMode();
         $rule = (string) ($_GET['rule'] ?? '');
         if (!array_key_exists($rule, DatabaseCleanup::LABELS)) {
             Response::error('Unknown kind of data.', 422, 'VALIDATION_ERROR');
@@ -111,6 +114,7 @@ final class AdminDataController
      */
     public function updateSettings(): void
     {
+        DevSwitches::requireDevMode();
         $body = JsonBodyMiddleware::getBody();
         $options = DatabaseCleanup::OPTIONS + ['storage_alert_mb' => StorageHealth::ALERT_MB_OPTIONS];
         $errors = [];
@@ -154,6 +158,7 @@ final class AdminDataController
      */
     public function verify(): void
     {
+        DevSwitches::requireDevMode();
         $body = JsonBodyMiddleware::getBody();
         $admin = RequestContext::getUser();
         $session = RequestContext::getSession();
@@ -216,6 +221,7 @@ final class AdminDataController
      */
     public function runCleanup(): void
     {
+        DevSwitches::requireDevMode();
         $body = JsonBodyMiddleware::getBody();
         $admin = RequestContext::getUser();
         $session = RequestContext::getSession();

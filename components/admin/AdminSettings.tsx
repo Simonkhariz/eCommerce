@@ -27,6 +27,7 @@ import {
   useAdminData,
   useToast,
 } from '@/components/admin/ui';
+import { DevModePanel } from '@/components/admin/AdminDevMode';
 import { DEVELOPER } from '@/lib/developer';
 
 const LABELS: Record<string, string> = {
@@ -291,6 +292,8 @@ export function AdminSettings() {
             </Panel>
 
             <PaymentMethodsPanel settings={ro} onSaved={reload} />
+
+            <DevModePanel />
 
             <Panel title="Contact developer" bodyClassName="p-4">
               <p className="text-sm text-[#374151]">

@@ -85,7 +85,7 @@ breaks a request and is reported in System status.
 
 **Monitoring and recovery:** System status (row above); the PHP error log gets one line per
 outage (`[Redis] unavailable, using the file cache: …`). Nothing has to be done when Redis comes
-back. To stop using Redis, empty `REDIS_URL`.
+back. To stop using Redis, turn it off in admin → Tech switches (dev mode), or empty `REDIS_URL`.
 
 ## Prompt 28: one cache namespace, product listing pages
 

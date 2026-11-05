@@ -194,6 +194,8 @@ close the window and sign in at `https://<your address>/admin`.
 
 ## Troubleshooting
 
+System status and Data & storage open only with dev mode on: admin → Store settings → Dev mode.
+
 | Problem | Look at |
 |---|---|
 | Address doesn't load | Ingress rules (step 3); `sudo systemctl status nginx shopco-web` |

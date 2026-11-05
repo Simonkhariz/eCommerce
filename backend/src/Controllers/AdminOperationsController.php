@@ -13,6 +13,7 @@ use App\Services\AuditService;
 use App\Services\FulfillmentService;
 use App\Services\MailService;
 use App\Services\PaymentMethods;
+use App\Support\DevSwitches;
 use App\Support\PhoneNumber;
 use App\Support\RateLimiter;
 use App\Support\RequestContext;
@@ -1076,6 +1077,7 @@ class AdminOperationsController
 
     public function getSystemStatus(): void
     {
+        DevSwitches::requireDevMode();
         $dbPing = $this->db->ping();
         $storage = Storage::uploads();
 

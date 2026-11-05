@@ -17,7 +17,7 @@ final class SlowRequestLog
 {
     public static function thresholdMs(): int
     {
-        return max(0, Env::int('SLOW_REQUEST_MS', 1500));
+        return DevSwitches::enabled(DevSwitches::SLOW_REQUEST_LOG) ? max(0, Env::int('SLOW_REQUEST_MS', 1500)) : 0;
     }
 
     public static function record(string $method, ?string $route, float $startedAt): void

@@ -4,7 +4,7 @@
  */
 
 import { API_BASE_URL, ApiError, PaginationMeta, apiRequest, apiRequestFull } from '@/lib/api-client';
-import { refreshAfter, refreshBellCounts, refreshStorageAlert } from '@/lib/admin-query-keys';
+import { refreshAfter, refreshBellCounts, refreshDevMode, refreshStorageAlert } from '@/lib/admin-query-keys';
 
 export type { PaginationMeta };
 export { errorMessage } from '@/lib/api-client';
@@ -736,6 +736,43 @@ export function adminUpdatePaymentMethods(changes: Partial<Record<PaymentMethodI
   return send<Record<PaymentMethodId, PaymentMethodStatus>>('/admin/settings/payment-methods', 'PUT', changes);
 }
 
+export interface DevSwitch {
+  key: string;
+  label: string;
+  what: string;
+  when_off: string;
+  on: boolean;
+  recommended: boolean;
+  /** False when the technology is not set up on this server, so the switch would do nothing. */
+  available: boolean;
+  note: string | null;
+}
+
+export interface DevMode {
+  on: boolean;
+  /** Only sent while dev mode is on. */
+  switches?: DevSwitch[];
+  fixed?: Array<{ name: string; state: string; why: string }>;
+  warnings?: string[];
+}
+
+export function adminGetDevMode(signal?: AbortSignal) {
+  return apiRequest<DevMode>('/admin/dev-mode', { signal });
+}
+
+/** Turning on needs the admin's password. */
+export function adminSetDevMode(on: boolean, password?: string) {
+  return refreshAfter(send<DevMode>('/admin/dev-mode', 'POST', on ? { on, password } : { on }), refreshDevMode);
+}
+
+export function adminUpdateDevSwitch(key: string, on: boolean) {
+  return refreshAfter(send<DevMode>('/admin/dev-mode/switches', 'PUT', { key, on }), refreshDevMode);
+}
+
+export function adminResetDevSwitches() {
+  return refreshAfter(send<DevMode>('/admin/dev-mode/switches', 'PUT', { reset: true }), refreshDevMode);
+}
+
 export interface SystemStatus {
   system_health: 'healthy' | 'degraded';
   server_time: string;
@@ -746,7 +783,7 @@ export interface SystemStatus {
   /** The admin's address as the API sees it; a private or local address on a live server means the proxy is not set up. */
   network: { client_ip: string; public_address: boolean };
   /** Optional Redis for the catalogue cache: set up or not, answering now, and the last outage marker. */
-  redis: { configured: boolean; ok: boolean | null; ms: number | null; error: string | null; down_marker: boolean };
+  redis: { configured: boolean; switched_off: boolean; ok: boolean | null; ms: number | null; error: string | null; down_marker: boolean };
   /** Live-server settings that would break the shop (empty outside production). */
   config_warnings: string[];
   database: { connected: boolean; latency_ms: number | null };

@@ -436,8 +436,9 @@ Protection:
   - **Operations:** Overview; Orders (All orders, Shipping queue, Delivery zones); Catalogue &
     stock (Products, Categories, Inventory); Customers; Payments (Transactions, Refunds).
   - **Growth:** Marketing (Promo codes, Newsletter, Banners & reviews); Analytics.
-  - **System:** Email outbox, Audit log, Store settings, Data & storage, System status, My
-    account.
+  - **System:** Email outbox, Audit log, Store settings, My account.
+  - **Dev mode** (only while dev mode is on, section 5.15): Tech switches, Data & storage, System
+    status.
 - **Top bar:** breadcrumb, "View store", the **alert bell**, settings.
 - **The bell** has three rows. It refreshes every minute while the tab is open, and right after
   the admin acts:
@@ -728,6 +729,36 @@ instead of cancelled.
     test payment keys still in use).
 - **My account:** name, phone, and password change. Changing the password signs out every other
   device.
+
+### 5.15 Dev mode and tech switches
+
+Technical pages stay out of the owner's way until they are needed.
+
+- **Dev mode** is off by default and is turned on in Store settings with the admin's password
+  (5 wrong tries, then a 15-minute wait). Turning it off needs no password. It applies to the whole
+  shop, for every admin, and every change is in the audit log.
+- **While it is off,** Tech switches, Data & storage and System status are out of the menu, and the
+  server refuses them too. **Database alerts still appear in the bell**, and nothing is ever cleaned
+  up automatically.
+- **Tech switches** turn the scalability technology on or off, each with what it does and what
+  happens without it. Changes apply within a minute. "Reset to defaults" undoes them all.
+
+| Switch | Starts | Without it |
+|---|---|---|
+| Catalogue cache | On | Every visit reads the database |
+| Redis shared cache | On, if set up | The file cache does the job |
+| Live payment status | **Off** until measured on the server | The payment page checks every 15 seconds |
+| Instant page refresh | On, if set up | Changes appear within about a minute |
+| Email right after each request | On | Emails wait for the scheduled job or the retries |
+| Automatic email retries | On | Only the scheduled job sends due emails |
+| Compressed API answers | On | More data on mobile |
+| Slow request log | On | The alert cannot warn about a slow shop |
+
+- **No switch, on purpose:** picture storage (a switch would break every picture), OPcache (a server
+  setting), the email outbox, payment and stock protection, rate limits, and the storefront's own
+  page cache. The page lists them with the reason.
+- A switch that cannot work on this server is greyed out and says why (for example Redis with no
+  address set, or live payment status on the `php -S` test server).
 
 ---
 
@@ -1194,3 +1225,4 @@ When something changes, update the matching section in the same commit:
 | 31 Oct 2026 | Owner requests: admin emails for new orders and payments; customer emails for "being prepared" and "delivered"; fixed-amount coupons, minimum order and maximum discount; delivery fee by quantity; one "Pay now" button (Monnify default) plus WhatsApp; "Awaiting confirmation" until the store confirms; WhatsApp messages carry only the order number; receipts from Track order with order number + email; optional delivery pin and store location; admin dark mode; developer credit |
 | 2 Nov 2026 | Free always-on demo hosting on Oracle Cloud (`deploy/oracle/`: one-command server setup, https without a domain, uptime alerts). Nightly backups are now also copied to the R2 bucket (`backup_to_bucket.php`). Fixed: a backup on a new shop with no pictures yet stopped with an error |
 | 5 Nov 2026 | Optional Redis tried on a real Upstash database: the catalogue cache works on it, and it must be in the same region as the server (`docs/REDIS.md`). The server setup asks for its address. Tests never use a real Redis |
+| 5 Nov 2026 | Dev mode: Data & storage and System status now open only with dev mode on (Store settings, with the admin's password). New Tech switches page turns the scalability technology on or off; live payment status stays off until measured on the server. Database alerts still reach the bell |

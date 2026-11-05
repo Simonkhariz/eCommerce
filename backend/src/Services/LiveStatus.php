@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Config\Env;
+use App\Support\DevSwitches;
 use App\Database\Database;
 
 /**
@@ -12,7 +13,7 @@ use App\Database\Database;
  *
  * The stream only watches: it reads the order and its payments with plain autocommit queries,
  * so it can only ever see committed data, and it never confirms a payment or changes an order
- * (every confirmation still goes through PaymentFinalizer). Off unless SSE_ENABLED=true.
+ * (every confirmation still goes through PaymentFinalizer). Off unless switched on in admin (Tech switches) or SSE_ENABLED=true.
  *
  * Each open stream holds one PHP worker and one database connection, so streams are counted in
  * `rate_limits` rows (id "sse:<order>:<visitor>:<random>", window_start = opening time) and
@@ -32,7 +33,7 @@ final class LiveStatus
 
     public static function enabled(): bool
     {
-        return Env::bool('SSE_ENABLED', false);
+        return DevSwitches::enabled(DevSwitches::LIVE_STATUS);
     }
 
     /** Streams allowed on this server at once (each holds a PHP worker and a DB connection). */

@@ -31,7 +31,7 @@ final class StorefrontRefresh
     public static function afterAdminChange(): void
     {
         $status = http_response_code();
-        if (!is_int($status) || $status >= 400 || !self::isConfigured()) {
+        if (!is_int($status) || $status >= 400 || !self::isConfigured() || !DevSwitches::enabled(DevSwitches::INSTANT_REFRESH)) {
             return;
         }
         // Hand the admin their response first so they never wait for the storefront.

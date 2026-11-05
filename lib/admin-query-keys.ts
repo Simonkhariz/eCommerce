@@ -10,6 +10,7 @@ export const adminKeys = {
   all: (adminId: number) => ['admin', adminId] as const,
   bell: (adminId: number) => ['admin', adminId, 'bell'] as const,
   storageAlert: (adminId: number) => ['admin', adminId, 'storage-alert'] as const,
+  devMode: (adminId: number) => ['admin', adminId, 'dev-mode'] as const,
 };
 
 const adminQuery = (part: string) => (query: Query) => query.queryKey[0] === 'admin' && query.queryKey[2] === part;
@@ -22,6 +23,11 @@ export function refreshBellCounts(): void {
 /** The database alert may have changed (clean-up run, retention or alert settings saved). */
 export function refreshStorageAlert(): void {
   void getQueryClient().invalidateQueries({ predicate: adminQuery('storage-alert') });
+}
+
+/** Dev mode or a tech switch changed. */
+export function refreshDevMode(): void {
+  void getQueryClient().invalidateQueries({ predicate: adminQuery('dev-mode') });
 }
 
 /**

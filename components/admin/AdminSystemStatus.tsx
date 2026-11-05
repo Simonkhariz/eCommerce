@@ -169,10 +169,12 @@ function StatusBody({ data }: { data: SystemStatus }) {
             <Row label="Shop page refresh after admin changes" state={refresh.state} value={refresh.text} />
             <Row
               label="Redis (optional cache)"
-              state={!data.redis.configured || data.redis.ok ? 'ok' : 'warn'}
+              state={!data.redis.configured || data.redis.switched_off || data.redis.ok ? 'ok' : 'warn'}
               value={
                 <span>
-                  {!data.redis.configured
+                  {data.redis.switched_off
+                    ? 'Switched off in Tech switches · using the file cache'
+                    : !data.redis.configured
                     ? 'Not used · the file cache is in use'
                     : data.redis.ok
                       ? `Answering${data.redis.ms !== null ? ` · ${data.redis.ms} ms` : ''}`
