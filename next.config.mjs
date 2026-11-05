@@ -15,6 +15,9 @@ const LEGACY_ADMIN_TABS = {
 };
 
 const nextConfig = {
+  // deploy/cpanel/build.ps1: a self-contained build to upload to shared hosting, where building
+  // on the server usually runs out of memory. Normal builds stay as they are.
+  ...(process.env.SHOPCO_STANDALONE === 'true' ? { output: 'standalone' } : {}),
   reactStrictMode: true,
   experimental: {
     // Calls forwarded to the API (/api/v1) give up after 30 s by default. Some admin actions
