@@ -18,8 +18,8 @@ use App\Support\StoreBrands;
  */
 class CatalogController
 {
-    /** Products the admin ticked "Featured" that the home page shows (two rows of 4). */
-    private const HOME_FEATURED_LIMIT = 8;
+    /** Products in each row of the home page: one line on desktop, two on a phone. */
+    private const HOME_ROW_LIMIT = 4;
 
     private ProductRepository $productRepo;
     private CategoryRepository $categoryRepo;
@@ -198,13 +198,13 @@ class CatalogController
     {
         // A product appears once on the page, in the first row that has it, so the rows don't
         // repeat each other: the same order the shopper sees them in.
-        $flashDeals = $this->productRepo->getFlashDeals(4);
+        $flashDeals = $this->productRepo->getFlashDeals(self::HOME_ROW_LIMIT);
         $shown = array_column($flashDeals, 'id');
-        $featured = $this->productRepo->getFeatured(self::HOME_FEATURED_LIMIT, $shown);
+        $featured = $this->productRepo->getFeatured(self::HOME_ROW_LIMIT, $shown);
         $shown = array_merge($shown, array_column($featured, 'id'));
-        $newArrivals = $this->productRepo->getNewArrivals(4, $shown);
+        $newArrivals = $this->productRepo->getNewArrivals(self::HOME_ROW_LIMIT, $shown);
         $shown = array_merge($shown, array_column($newArrivals, 'id'));
-        $topSelling = $this->productRepo->getTopSelling(4, $shown);
+        $topSelling = $this->productRepo->getTopSelling(self::HOME_ROW_LIMIT, $shown);
         $categories = $this->categoryRepo->getAllActive();
 
         // Active promotions (validated by date and max_uses) and banners

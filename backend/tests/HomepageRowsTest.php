@@ -71,7 +71,7 @@ $t->sql("UPDATE `products` SET `status` = 'published' WHERE `id` = ?", 'i', [$id
 
 $feature(array_slice($ids, 0, 12));
 $data = $home();
-$t->check('at most 8 show, newest first', array_slice($ids, 0, 8), $rowIds($data, 'featured_products'));
+$t->check('at most 4 show, newest first', array_slice($ids, 0, 4), $rowIds($data, 'featured_products'));
 $listed = $t->http('GET', '/products?is_featured=1&per_page=50');
 $t->check('"View all" lists every ticked product', 12, count((array) (TestKit::get($listed, 'data.items') ?? TestKit::get($listed, 'data'))));
 $t->sql('UPDATE `products` SET `is_featured` = 0');
@@ -91,6 +91,16 @@ $t->ok('no product is in two rows', $noRepeats($data));
 $t->sql("UPDATE `products` SET `is_flash_deal` = 1, `flash_deal_ends_at` = '2020-01-01 00:00:00' WHERE `id` = ?", 'i', [$ids[0]]);
 $data = $home();
 $t->check('a finished deal goes back to the other rows', true, in_array($ids[0], $rowIds($data, 'featured_products'), true));
+
+// -----------------------------------------------------------------------------
+$t->section('Every row stops at 4 products');
+$t->sql('UPDATE `products` SET `is_featured` = 1, `is_flash_deal` = 1, `flash_deal_ends_at` = NULL, `units_sold` = 5');
+$data = $home();
+$t->check('flash deals', 4, count($rowIds($data, 'flash_deals')));
+$t->check('featured, when more are left', 4, count($rowIds($data, 'featured_products')));
+$t->check('new arrivals', 4, count($rowIds($data, 'new_arrivals')));
+$t->ok('top selling, however many have sold', count($rowIds($data, 'top_selling')) <= 4 && count($rowIds($data, 'top_selling')) > 0, (string) count($rowIds($data, 'top_selling')));
+$t->ok('and still no repeats', $noRepeats($data));
 
 // -----------------------------------------------------------------------------
 $t->section('Top Selling is real');

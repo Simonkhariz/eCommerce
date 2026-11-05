@@ -124,7 +124,7 @@ export function HomeClient({ initial = null }: { initial?: HomepageData | null }
         )}
 
         {/* 3. Featured: the products the admin ticked (hidden when there are none) */}
-        {homepageData && <ProductSection title="FEATURED" products={featured} viewAllHref="/category?featured=true" limit={8} />}
+        {homepageData && <ProductSection title="FEATURED" products={featured} viewAllHref="/category?featured=true" />}
 
         {/* 4. New Arrivals */}
         {homepageData && (

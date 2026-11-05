@@ -712,7 +712,7 @@ export function ProductManagement() {
               )}
             </Field>
             <div className="flex flex-col justify-end gap-2 pb-1 sm:col-span-2">
-              <Checkbox label="Featured on the home page" hint="Shows in the home page's Featured row (the 8 newest ticked). Must be Published." checked={form.is_featured} onChange={(v) => update('is_featured', v)} />
+              <Checkbox label="Featured on the home page" hint="The home page's Featured row shows the 4 newest ticked products; View All lists the rest. Must be Published." checked={form.is_featured} onChange={(v) => update('is_featured', v)} />
               <Checkbox label="Show in flash deals" checked={form.is_flash_deal} onChange={(v) => update('is_flash_deal', v)} />
             </div>
             {form.is_flash_deal && (
