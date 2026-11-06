@@ -41,7 +41,7 @@ class AdminCatalogController
      */
     public function index(): void
     {
-        $page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
+        $page = Input::page($_GET['page'] ?? 1);
         $perPage = isset($_GET['per_page']) ? (int) $_GET['per_page'] : 15;
 
         $filters = [
@@ -69,6 +69,14 @@ class AdminCatalogController
     public function createProduct(): void
     {
         $body = JsonBodyMiddleware::getBody();
+        if (array_key_exists('name', $body)) {
+            $body['name'] = Input::singleSpaced($body['name']);
+        }
+
+        // No web address given: make one from the name, never just a number ("501" -> "product-501").
+        if (Input::text($body['slug'] ?? '') === '' && Input::text($body['name'] ?? '') !== '') {
+            $body['slug'] = Input::slugFromName($body['name'], 'product', fn (string $slug): bool => $this->productRepo->findDetail($slug, true) !== null);
+        }
 
         // Auto-generate SKU based on product details if omitted or blank
         if (empty($body['sku'])) {
@@ -94,6 +102,7 @@ class AdminCatalogController
         if (!empty($errors)) {
             Response::error('Validation failed for new product.', 422, 'VALIDATION_ERROR', $errors);
         }
+        $this->requireCategoryExists($body);
 
         $variants = $body['variants'] ?? [];
         $images = $body['images'] ?? [];
@@ -142,11 +151,15 @@ class AdminCatalogController
         }
 
         $body = JsonBodyMiddleware::getBody();
+        if (array_key_exists('name', $body)) {
+            $body['name'] = Input::singleSpaced($body['name']);
+        }
         $errors = ProductValidator::validate($body, true);
 
         if (!empty($errors)) {
             Response::error('Validation failed.', 422, 'VALIDATION_ERROR', $errors);
         }
+        $this->requireCategoryExists($body);
 
         $variants = array_key_exists('variants', $body) ? $body['variants'] : null;
         $images = array_key_exists('images', $body) ? $body['images'] : null;
@@ -244,8 +257,8 @@ class AdminCatalogController
 
         $variantId = (int) $body['variant_id'];
         $adjustment = (int) $body['adjustment'];
-        $reason = trim((string) $body['reason']);
-        $notes = !empty($body['notes']) ? trim((string) $body['notes']) : null;
+        $reason = Input::text($body['reason']);
+        $notes = !empty($body['notes']) ? Input::text($body['notes']) : null;
         $admin = RequestContext::getUser();
 
         try {
@@ -299,6 +312,9 @@ class AdminCatalogController
     public function createCategory(): void
     {
         $body = JsonBodyMiddleware::getBody();
+        if (Input::text($body['slug'] ?? '') === '' && Input::text($body['name'] ?? '') !== '') {
+            $body['slug'] = Input::slugFromName(Input::text($body['name']), 'category', fn (string $slug): bool => $this->categoryRepo->findBySlug($slug) !== null);
+        }
         $errors = CategoryValidator::validate($body);
         if (!empty($errors)) {
             Response::error('Please fix the highlighted fields.', 422, 'VALIDATION_ERROR', $errors);
@@ -381,6 +397,16 @@ class AdminCatalogController
         $this->categoryRepo->delete($id);
         AuditService::record($this->currentAdminId(), 'category.deactivate', 'category', (string) $id, $existing, ['is_active' => 0]);
         Response::success(['id' => $id, 'is_active' => false], 'Category hidden from the store. You can restore it any time.');
+    }
+
+    /** A category that does not exist answers 422 (the database would refuse it with a 500). */
+    private function requireCategoryExists(array $body): void
+    {
+        $categoryId = (int) ($body['category_id'] ?? 0);
+        if ($categoryId > 0 && $this->categoryRepo->findById($categoryId) === null) {
+            $message = 'That category does not exist. Choose one from the list.';
+            Response::error($message, 422, 'VALIDATION_ERROR', ['category_id' => $message]);
+        }
     }
 
     private function currentAdminId(): ?int

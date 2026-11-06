@@ -8,6 +8,7 @@ use App\Database\Database;
 use App\Middleware\JsonBodyMiddleware;
 use App\Services\AuditService;
 use App\Services\CheckoutService;
+use App\Support\Input;
 use App\Support\RequestContext;
 use App\Support\Response;
 
@@ -140,7 +141,7 @@ class AdminZoneController
     private function input(array $body, ?array $current = null): array
     {
         $str = static fn (string $key, string $default = ''): string => array_key_exists($key, $body)
-            ? trim((string) $body[$key])
+            ? Input::text($body[$key])
             : (string) ($current[$key] ?? $default);
 
         $name = $str('name');
@@ -156,21 +157,25 @@ class AdminZoneController
         $errors = [];
         if ($name === '') {
             $errors['name'] = 'Name is required.';
+        } elseif (mb_strlen($name) > 100) {
+            $errors['name'] = 'Keep the name to 100 characters.';
         }
         if (!preg_match('/^[A-Z0-9_-]{2,30}$/', $code)) {
             $errors['code'] = 'Use 2-30 letters, numbers, dashes or underscores.';
         }
         if (!is_numeric($feeRaw) || (float) $feeRaw < 0 || (float) $feeRaw > 1000000) {
-            $errors['fee'] = 'Enter a delivery fee of 0 or more.';
+            $errors['fee'] = 'Enter a delivery fee from ₦0 to ₦1,000,000.';
         }
         if (!is_numeric($includedRaw) || (int) $includedRaw < 1 || (int) $includedRaw > 1000 || (float) $includedRaw != (int) $includedRaw) {
             $errors['items_included'] = 'Enter how many items the fee covers (1 or more).';
         }
         if (!is_numeric($extraRaw) || (float) $extraRaw < 0 || (float) $extraRaw > 1000000) {
-            $errors['extra_item_fee'] = 'Enter 0 or more for each extra item.';
+            $errors['extra_item_fee'] = 'Enter ₦0 to ₦1,000,000 for each extra item.';
         }
         if ($estimatedDays === '') {
             $errors['estimated_days'] = 'Give customers a delivery estimate, e.g. "2-4 business days".';
+        } elseif (mb_strlen($estimatedDays) > 50) {
+            $errors['estimated_days'] = 'Keep the delivery estimate to 50 characters.';
         }
 
         $states = [];
@@ -179,7 +184,7 @@ class AdminZoneController
         } else {
             $unknown = [];
             foreach ($statesRaw as $state) {
-                $state = trim((string) $state);
+                $state = Input::text($state);
                 if ($state === '*') {
                     $states[] = '*';
                     continue;
@@ -201,6 +206,13 @@ class AdminZoneController
             Response::error('Please fix the highlighted fields.', 422, 'VALIDATION_ERROR', $errors);
         }
 
+        if ($isActive === 1) {
+            $conflict = $this->coverageConflict($states, (int) ($current['id'] ?? 0));
+            if ($conflict !== null) {
+                Response::error($conflict, 422, 'ZONE_OVERLAP', ['states_covered' => $conflict]);
+            }
+        }
+
         return [
             'name' => $name,
             'code' => $code,
@@ -212,6 +224,26 @@ class AdminZoneController
             'estimated_days' => $estimatedDays,
             'is_active' => $isActive,
         ];
+    }
+
+    /**
+     * Checkout charges the first active zone that covers a state, so a second one would show as
+     * active and never be used. Says which zone already covers these states, or null if none does.
+     *
+     * @param list<string> $states
+     */
+    private function coverageConflict(array $states, int $zoneId): ?string
+    {
+        $canonical = static fn (string $state): string => $state === '*' ? '*' : (CheckoutService::canonicalState($state) ?? $state);
+        foreach ($this->db->fetchAll("SELECT `id`, `name`, `states_covered` FROM `shipping_zones` WHERE `is_active` = 1 AND `id` <> ? ORDER BY `id` ASC", 'i', [$zoneId]) as $zone) {
+            $covered = array_map(static fn ($s): string => $canonical(trim((string) $s)), (array) json_decode((string) $zone['states_covered'], true));
+            $overlap = array_values(array_intersect($states, $covered));
+            if ($overlap !== []) {
+                $names = implode(', ', array_map(static fn (string $s): string => $s === '*' ? 'All other states' : $s, $overlap));
+                return "{$names} " . (count($overlap) === 1 ? 'is' : 'are') . " already covered by the active zone \"{$zone['name']}\". Remove " . (count($overlap) === 1 ? 'it' : 'them') . ' from this zone, or switch that zone off first.';
+            }
+        }
+        return null;
     }
 
     private function adminId(): ?int

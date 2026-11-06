@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Validators;
 
+use App\Support\Input;
+
 class ProductValidator
 {
     /**
@@ -17,30 +19,70 @@ class ProductValidator
         $errors = [];
 
         if (!$isUpdate || array_key_exists('name', $data)) {
-            $name = trim((string) ($data['name'] ?? ''));
+            $name = Input::text($data['name'] ?? '');
             if ($name === '' || strlen($name) < 3) {
                 $errors['name'] = 'Product name is required and must be at least 3 characters.';
+            } elseif (mb_strlen($name) > 255) {
+                $errors['name'] = 'Product name can be at most 255 characters.';
             }
         }
 
         if (!$isUpdate || array_key_exists('slug', $data)) {
-            $slug = trim((string) ($data['slug'] ?? ''));
+            $slug = Input::text($data['slug'] ?? '');
             if ($slug === '' || !preg_match('/^[a-z0-9\-]+$/', $slug)) {
                 $errors['slug'] = 'Valid URL slug (lowercase letters, numbers, hyphens) is required.';
+            } elseif (is_numeric($slug)) {
+                $errors['slug'] = 'A slug cannot be only a number like 501 or 2e3: it would be read as a product ID. Add a word, e.g. product-501.';
+            } elseif (mb_strlen($slug) > 255) {
+                $errors['slug'] = 'A slug can be at most 255 characters.';
             }
         }
 
         if (!$isUpdate || array_key_exists('base_price', $data)) {
             if (!isset($data['base_price']) || !is_numeric($data['base_price']) || (float) $data['base_price'] <= 0) {
                 $errors['base_price'] = 'Base price must be a positive number.';
+            } elseif (!Input::isMoney($data['base_price'])) {
+                $errors['base_price'] = 'Base price can be at most ' . Input::maxMoneyLabel() . '.';
             }
         }
 
+        if (!in_array($data['original_price'] ?? null, [null, ''], true) && !Input::isMoney($data['original_price'])) {
+            $errors['original_price'] = 'The "was" price must be from ₦0 to ' . Input::maxMoneyLabel() . '.';
+        }
+
+        if (!in_array($data['category_id'] ?? null, [null, ''], true) && Input::wholeNumber($data['category_id'], 0, 2147483647) === null) {
+            $errors['category_id'] = 'Choose a category from the list.';
+        }
+
         if (!$isUpdate || array_key_exists('sku', $data)) {
-            $sku = trim((string) ($data['sku'] ?? ''));
+            $sku = Input::text($data['sku'] ?? '');
             if ($sku === '' || strlen($sku) < 3) {
                 $errors['sku'] = 'SKU is required and must be at least 3 characters.';
+            } elseif (mb_strlen($sku) > 100) {
+                $errors['sku'] = 'SKU can be at most 100 characters.';
             }
+        }
+
+        if (is_array($data['description'] ?? null) || strlen(Input::text($data['description'] ?? '')) > 65535) {
+            $errors['description'] = 'Enter the description as plain text, up to 65,000 characters.';
+        }
+
+        if (is_array($data['dress_style'] ?? null) || Input::tooLong($data['dress_style'] ?? '', 50)) {
+            $errors['dress_style'] = 'Style can be at most 50 characters.';
+        }
+
+        foreach (['stock_quantity' => 'Stock', 'low_stock_threshold' => 'Low-stock level'] as $field => $label) {
+            if (isset($data[$field]) && Input::wholeNumber($data[$field], 0, Input::MAX_STOCK) === null) {
+                $errors[$field] = "{$label} must be a whole number from 0 to " . number_format(Input::MAX_STOCK) . '.';
+            }
+        }
+
+        if (array_key_exists('variants', $data) && ($problem = self::variantsProblem($data['variants'])) !== null) {
+            $errors['variants'] = $problem;
+        }
+
+        if (array_key_exists('images', $data) && ($problem = self::imagesProblem($data['images'])) !== null) {
+            $errors['images'] = $problem;
         }
 
         if (isset($data['product_type']) && $data['product_type'] !== 'physical') {
@@ -51,11 +93,77 @@ class ProductValidator
             $errors['status'] = "Status must be 'draft', 'published', or 'archived'.";
         }
 
-        if (!empty($data['flash_deal_ends_at']) && strtotime(str_replace('T', ' ', (string) $data['flash_deal_ends_at'])) === false) {
+        if (!empty($data['flash_deal_ends_at']) && strtotime(str_replace('T', ' ', Input::text($data['flash_deal_ends_at']))) === false) {
             $errors['flash_deal_ends_at'] = 'Enter a valid end date and time for the flash deal.';
         }
 
         return $errors;
+    }
+
+    /**
+     * The first thing wrong with a form's variant rows, or null when they are fine. Stock that
+     * was not changed is not re-checked, so a product whose stock is already over the limit can
+     * still be saved.
+     */
+    private static function variantsProblem(mixed $variants): ?string
+    {
+        if ($variants === null) {
+            return null;
+        }
+        if (!is_array($variants)) {
+            return 'Send the variants as a list.';
+        }
+        foreach (array_values($variants) as $i => $v) {
+            $row = 'Variant ' . ($i + 1) . ': ';
+            if (!is_array($v)) {
+                return $row . 'send it as a size and a colour.';
+            }
+            if (Input::text($v['size'] ?? '') === '' || Input::text($v['color_name'] ?? '') === '') {
+                return $row . 'every variant needs a size and a colour.';
+            }
+            if (Input::tooLong($v['size'], 50) || Input::tooLong($v['color_name'], 50)) {
+                return $row . 'size and colour can be at most 50 characters.';
+            }
+            if (is_array($v['sku'] ?? null) || Input::tooLong($v['sku'] ?? '', 100)) {
+                return $row . 'SKU can be at most 100 characters.';
+            }
+            if (is_array($v['color_hex'] ?? null) || Input::tooLong($v['color_hex'] ?? '', 10)) {
+                return $row . 'colour code can be at most 10 characters.';
+            }
+            if (!in_array($v['price_override'] ?? null, [null, ''], true) && !Input::isMoney($v['price_override'])) {
+                return $row . 'price must be from ₦0 to ' . Input::maxMoneyLabel() . '.';
+            }
+            if (isset($v['stock_quantity'])) {
+                $unchanged = is_numeric($v['original_stock_quantity'] ?? null) && is_numeric($v['stock_quantity'])
+                    && (float) $v['original_stock_quantity'] === (float) $v['stock_quantity'];
+                if (!$unchanged && Input::wholeNumber($v['stock_quantity'], 0, Input::MAX_STOCK) === null) {
+                    return $row . 'stock must be a whole number from 0 to ' . number_format(Input::MAX_STOCK) . '.';
+                }
+            }
+            if (isset($v['low_stock_threshold']) && Input::wholeNumber($v['low_stock_threshold'], 0, Input::MAX_STOCK) === null) {
+                return $row . 'low-stock level must be a whole number from 0 to ' . number_format(Input::MAX_STOCK) . '.';
+            }
+        }
+        return null;
+    }
+
+    private static function imagesProblem(mixed $images): ?string
+    {
+        if ($images === null) {
+            return null;
+        }
+        if (!is_array($images)) {
+            return 'Send the photos as a list.';
+        }
+        foreach ($images as $img) {
+            if (!is_array($img) || Input::text($img['image_url'] ?? '') === '' || Input::tooLong($img['image_url'], 500)) {
+                return 'Every photo needs an address of at most 500 characters.';
+            }
+            if (is_array($img['alt_text'] ?? null) || Input::tooLong($img['alt_text'] ?? '', 255)) {
+                return 'A photo description can be at most 255 characters.';
+            }
+        }
+        return null;
     }
 
     /**
@@ -72,11 +180,11 @@ class ProductValidator
             $errors['variant_id'] = 'Valid variant ID is required.';
         }
 
-        if (!isset($data['adjustment']) || !is_numeric($data['adjustment']) || (int) $data['adjustment'] === 0) {
-            $errors['adjustment'] = 'Adjustment quantity must be a non-zero integer (e.g. +10 or -5).';
+        if (!isset($data['adjustment']) || !Input::wholeNumber($data['adjustment'], -Input::MAX_STOCK, Input::MAX_STOCK)) {
+            $errors['adjustment'] = 'Adjustment quantity must be a non-zero whole number up to ' . number_format(Input::MAX_STOCK) . ' (e.g. +10 or -5).';
         }
 
-        $reason = trim((string) ($data['reason'] ?? ''));
+        $reason = Input::text($data['reason'] ?? '');
         if ($reason === '') {
             $errors['reason'] = 'Adjustment reason is required (e.g. restock, damage, return, audit_reconciliation).';
         }

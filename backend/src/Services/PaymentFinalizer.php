@@ -184,7 +184,7 @@ class PaymentFinalizer
                 );
                 $order['payment_status'] = 'successful';
                 $this->flagAttention($db, $orderId, sprintf(
-                    'Payment received after the order was cancelled/expired (%s %s). Its stock was already released: refund the customer or reinstate the order manually.',
+                    'Payment received after the order was cancelled/expired (%s %s). Its stock was already released and a cancelled order cannot be reopened: refund the customer, who can place a new order for the items.',
                     $label,
                     $providerReference
                 ));
@@ -269,7 +269,12 @@ class PaymentFinalizer
             if ($order === null) {
                 throw new InvalidArgumentException('Order not found.');
             }
-            if ($order['order_status'] !== 'pending_payment') {
+            // The customer said they sent a transfer, but the order expired before it was checked:
+            // the money is still recorded (finalizeSuccess keeps it as a late payment to refund).
+            $claimExpired = $order['order_status'] === 'cancelled'
+                && !empty($order['customer_marked_paid_at'])
+                && in_array($order['payment_status'], ['pending', 'failed', 'cancelled'], true);
+            if ($order['order_status'] !== 'pending_payment' && !$claimExpired) {
                 throw new InvalidArgumentException("Only orders awaiting payment can be confirmed manually (this order is '{$order['order_status']}').");
             }
 

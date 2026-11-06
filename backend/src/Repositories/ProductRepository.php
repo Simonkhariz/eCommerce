@@ -631,7 +631,7 @@ class ProductRepository
 
         // Search (name, slug, SKU, description)
         if (!empty($filters['search'])) {
-            $search = '%' . trim((string) $filters['search']) . '%';
+            $search = '%' . Input::singleSpaced($filters['search']) . '%';
             $conditions[] = "(p.name LIKE ? OR p.sku LIKE ? OR p.slug LIKE ? OR p.description LIKE ?)";
             $params[] = $search;
             $params[] = $search;
@@ -778,6 +778,9 @@ class ProductRepository
 
             if ($newStock < 0) {
                 throw new \InvalidArgumentException("Cannot reduce stock below zero. Current stock is {$currentStock}, requested adjustment is {$adjustment}.");
+            }
+            if ($adjustment > 0 && $newStock > Input::MAX_STOCK) {
+                throw new \InvalidArgumentException('Stock can be at most ' . number_format(Input::MAX_STOCK) . ". Current stock is {$currentStock}, so this adjustment of {$adjustment} is too large.");
             }
 
             $db->execute(
@@ -939,7 +942,7 @@ class ProductRepository
                 "sisssssddsssiis",
                 [
                     $uuid,
-                    $data['category_id'] ?? null,
+                    empty($data['category_id']) ? null : (int) $data['category_id'],
                     $data['name'],
                     $data['slug'],
                     $data['description'] ?? null,
@@ -1106,7 +1109,9 @@ class ProductRepository
      * - Existing variants (matched by id, or by size + colour) are updated in place.
      * - Stock on an existing variant changes only if the form's `original_stock_quantity`
      *   still matches the database; otherwise orders arrived meanwhile and the edit is refused
-     *   rather than silently overwriting reserved stock. Every stock change is logged.
+     *   rather than silently overwriting reserved stock. A variant the form adds again (archived,
+     *   or a row with no id) has no stock on the form to compare: its stock is simply set.
+     *   Every stock change is logged.
      * - Variants removed from the form are archived if anything references them, else deleted.
      */
     private function syncVariants(Database $db, int $productId, string $masterSku, array $variants): void
@@ -1138,10 +1143,12 @@ class ProductRepository
             $colorHex = trim((string) ($v['color_hex'] ?? '#000000')) ?: '#000000';
 
             $vid = isset($v['id']) ? (int) $v['id'] : 0;
-            $current = ($vid > 0 && isset($byId[$vid])) ? $byId[$vid] : ($byOptions[$optionsKey] ?? null);
+            $matchedById = $vid > 0 && isset($byId[$vid]);
+            $current = $matchedById ? $byId[$vid] : ($byOptions[$optionsKey] ?? null);
 
             if ($current !== null) {
                 $vid = (int) $current['id'];
+                $revived = !$matchedById || (int) $current['is_active'] === 0;
                 if (in_array($vid, $keptIds, true)) {
                     throw new \InvalidArgumentException("Duplicate variant {$size} / {$colorName} in the form.");
                 }
@@ -1161,7 +1168,7 @@ class ProductRepository
                     if ($newStock < 0) {
                         throw new \InvalidArgumentException("Stock for {$sku} cannot be negative.");
                     }
-                    if ($expected === null || $expected !== (int) $current['stock_quantity']) {
+                    if (!$revived && ($expected === null || $expected !== (int) $current['stock_quantity'])) {
                         throw new \InvalidArgumentException(
                             "Stock for {$sku} changed to {$current['stock_quantity']} since this form was opened (orders or another edit). Reload the product and try again."
                         );
@@ -1169,9 +1176,9 @@ class ProductRepository
                     $db->execute("UPDATE product_variants SET stock_quantity = ? WHERE id = ?", 'ii', [$newStock, $vid]);
                     $db->execute(
                         "INSERT INTO `inventory_logs` (`variant_id`, `product_id`, `previous_stock`, `new_stock`, `change_amount`, `reason`, `adjusted_by_user_id`)
-                         VALUES (?, ?, ?, ?, ?, 'Product form edit', ?)",
-                        'iiiiii',
-                        [$vid, $productId, (int) $current['stock_quantity'], $newStock, $newStock - (int) $current['stock_quantity'], $adminId]
+                         VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        'iiiiisi',
+                        [$vid, $productId, (int) $current['stock_quantity'], $newStock, $newStock - (int) $current['stock_quantity'], $revived ? 'Variant added back' : 'Product form edit', $adminId]
                     );
                 }
             } else {

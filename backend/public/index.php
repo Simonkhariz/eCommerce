@@ -206,6 +206,7 @@ $router->get('/api/v1/admin/orders', [AdminOrderController::class, 'index'], $ad
 $router->get('/api/v1/admin/orders/{idOrNumber}', [AdminOrderController::class, 'show'], $adminGuard);
 $router->patch('/api/v1/admin/orders/{idOrNumber}/status', [AdminOrderController::class, 'updateStatus'], $adminGuard);
 $router->post('/api/v1/admin/orders/{idOrNumber}/confirm-payment', [AdminOrderController::class, 'confirmPayment'], $adminGuard);
+$router->post('/api/v1/admin/orders/{idOrNumber}/resolve-attention', [AdminOrderController::class, 'resolveAttention'], $adminGuard);
 $router->post('/api/v1/admin/orders/{idOrNumber}/shipment', [AdminOrderController::class, 'assignShipment'], $adminGuard);
 $router->post('/api/v1/admin/orders/{idOrNumber}/delivered', [AdminOrderController::class, 'confirmDelivery'], $adminGuard);
 

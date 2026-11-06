@@ -26,6 +26,12 @@ class AdminDashboardController
     private const RECEIVED_PAYMENT_STATUSES = "'successful', 'partially_refunded', 'refunded'";
 
     /**
+     * Joined to `refunds` r: only refunds of money counted as a sale. Underpaid money sent back was
+     * never verified, so it is in no sales figure and must not come off net sales either.
+     */
+    private const REFUND_OF_A_SALE = " JOIN `payments` rp ON rp.id = r.payment_id AND rp.verified_at IS NOT NULL";
+
+    /**
      * GET /api/v1/admin/dashboard/overview?period=7|30|90
      *
      * Sales are verified payments (by verification time) in the period; net sales subtract refunds
@@ -132,6 +138,7 @@ class AdminDashboardController
                     SUM(oi.quantity) AS total_units_sold,
                     SUM(oi.line_total) AS total_revenue
              FROM `order_items` oi
+             JOIN `orders` o ON o.id = oi.order_id AND o.order_status NOT IN ('cancelled', 'refunded')
              JOIN `products` p ON p.id = oi.product_id
              WHERE oi.order_id IN (
                  SELECT DISTINCT order_id FROM `payments`
@@ -171,6 +178,7 @@ class AdminDashboardController
                 'gross_sales' => $current['gross'],
                 'net_sales' => $current['net'],
                 'total_refunded' => $current['refunded'],
+                'owed_refunds' => $current['owed'],
                 'paid_orders' => $current['paid_orders'],
                 'aov' => $current['aov'],
                 'total_orders' => $current['orders_placed'],
@@ -202,7 +210,7 @@ class AdminDashboardController
     /**
      * Money and order totals for [start, end).
      *
-     * @return array{gross: float, refunded: float, net: float, paid_orders: int, aov: float, orders_placed: int, new_customers: int}
+     * @return array{gross: float, refunded: float, owed: float, net: float, paid_orders: int, aov: float, orders_placed: int, new_customers: int}
      */
     private function periodTotals(string $start, string $end): array
     {
@@ -214,11 +222,12 @@ class AdminDashboardController
             [$start, $end]
         );
         $refunded = (float) ($this->db->fetchOne(
-            "SELECT COALESCE(SUM(amount), 0) AS total FROM `refunds`
-             WHERE status = 'completed' AND COALESCE(completed_at, updated_at) >= ? AND COALESCE(completed_at, updated_at) < ?",
+            "SELECT COALESCE(SUM(r.amount), 0) AS total FROM `refunds` r" . self::REFUND_OF_A_SALE . "
+             WHERE r.status = 'completed' AND COALESCE(r.completed_at, r.updated_at) >= ? AND COALESCE(r.completed_at, r.updated_at) < ?",
             'ss',
             [$start, $end]
         )['total'] ?? 0);
+        $owed = array_sum(array_map(static fn (array $r): float => (float) $r['owed'], $this->owedRefunds($start, $end)));
         $ordersPlaced = (int) ($this->db->fetchOne(
             "SELECT COUNT(*) AS c FROM `orders` WHERE created_at >= ? AND created_at < ?",
             'ss',
@@ -236,12 +245,36 @@ class AdminDashboardController
         return [
             'gross' => $gross,
             'refunded' => round($refunded, 2),
-            'net' => round(max(0, $gross - $refunded), 2),
+            'owed' => round($owed, 2),
+            'net' => round(max(0, $gross - $refunded - $owed), 2),
             'paid_orders' => $paidOrders,
             'aov' => $paidOrders > 0 ? round($gross / $paidOrders, 2) : 0.0,
             'orders_placed' => $ordersPlaced,
             'new_customers' => $newCustomers,
         ];
+    }
+
+    /**
+     * Orders paid in [start, end) and then cancelled, with money still not returned (paid minus
+     * completed refunds). Net sales subtract these on the overview and in the report alike.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function owedRefunds(string $start, string $end): array
+    {
+        $received = self::RECEIVED_PAYMENT_STATUSES;
+        return $this->db->fetchAll(
+            "SELECT o.order_number, o.updated_at AS cancelled_at, o.payment_status,
+                    p.paid, COALESCE(r.refunded, 0) AS refunded, p.paid - COALESCE(r.refunded, 0) AS owed
+             FROM `orders` o
+             JOIN (SELECT order_id, SUM(amount) AS paid FROM `payments`
+                   WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ? GROUP BY order_id) p ON p.order_id = o.id
+             LEFT JOIN (SELECT r.order_id, SUM(r.amount) AS refunded FROM `refunds` r" . self::REFUND_OF_A_SALE . " WHERE r.status = 'completed' GROUP BY r.order_id) r ON r.order_id = o.id
+             WHERE o.order_status = 'cancelled' AND p.paid - COALESCE(r.refunded, 0) > 0.009
+             ORDER BY o.updated_at DESC",
+            'ss',
+            [$start, $end]
+        );
     }
 
     /**
@@ -317,25 +350,13 @@ class AdminDashboardController
             $w
         );
         $refunds = $this->db->fetchOne(
-            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt FROM `refunds`
-             WHERE status = 'completed' AND COALESCE(completed_at, updated_at) >= ? AND COALESCE(completed_at, updated_at) < ?",
+            "SELECT COALESCE(SUM(r.amount), 0) AS total, COUNT(*) AS cnt FROM `refunds` r" . self::REFUND_OF_A_SALE . "
+             WHERE r.status = 'completed' AND COALESCE(r.completed_at, r.updated_at) >= ? AND COALESCE(r.completed_at, r.updated_at) < ?",
             'ss',
             $w
         );
 
-        // Paid, then cancelled, with money still not returned (paid minus completed refunds).
-        $owed = $this->db->fetchAll(
-            "SELECT o.order_number, o.updated_at AS cancelled_at, o.payment_status,
-                    p.paid, COALESCE(r.refunded, 0) AS refunded, p.paid - COALESCE(r.refunded, 0) AS owed
-             FROM `orders` o
-             JOIN (SELECT order_id, SUM(amount) AS paid FROM `payments`
-                   WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ? GROUP BY order_id) p ON p.order_id = o.id
-             LEFT JOIN (SELECT order_id, SUM(amount) AS refunded FROM `refunds` WHERE status = 'completed' GROUP BY order_id) r ON r.order_id = o.id
-             WHERE o.order_status = 'cancelled' AND p.paid - COALESCE(r.refunded, 0) > 0.009
-             ORDER BY o.updated_at DESC",
-            'ss',
-            $w
-        );
+        $owed = $this->owedRefunds($start, $end);
         $owedTotal = array_sum(array_map(static fn ($r) => (float) $r['owed'], $owed));
 
         $orders = $this->db->fetchOne(
@@ -381,9 +402,9 @@ class AdminDashboardController
             $w
         ), 'placed', 'd');
         $refundsByDay = array_column($this->db->fetchAll(
-            "SELECT DATE(COALESCE(completed_at, updated_at)) AS d, SUM(amount) AS refunded FROM `refunds`
-             WHERE status = 'completed' AND COALESCE(completed_at, updated_at) >= ? AND COALESCE(completed_at, updated_at) < ?
-             GROUP BY DATE(COALESCE(completed_at, updated_at))",
+            "SELECT DATE(COALESCE(r.completed_at, r.updated_at)) AS d, SUM(r.amount) AS refunded FROM `refunds` r" . self::REFUND_OF_A_SALE . "
+             WHERE r.status = 'completed' AND COALESCE(r.completed_at, r.updated_at) >= ? AND COALESCE(r.completed_at, r.updated_at) < ?
+             GROUP BY DATE(COALESCE(r.completed_at, r.updated_at))",
             'ss',
             $w
         ), 'refunded', 'd');
@@ -406,6 +427,7 @@ class AdminDashboardController
                     SUM(oi.quantity) AS units_sold,
                     SUM(oi.line_total) AS revenue
              FROM `order_items` oi
+             JOIN `orders` o ON o.id = oi.order_id AND o.order_status NOT IN ('cancelled', 'refunded')
              LEFT JOIN `products` p ON p.id = oi.product_id
              LEFT JOIN `categories` c ON c.id = p.category_id
              WHERE oi.order_id IN ({$paidInWindow})
@@ -418,6 +440,7 @@ class AdminDashboardController
         $topProducts = $this->db->fetchAll(
             "SELECT oi.product_id, MAX(oi.item_name) AS name, SUM(oi.quantity) AS units_sold, SUM(oi.line_total) AS revenue
              FROM `order_items` oi
+             JOIN `orders` o ON o.id = oi.order_id AND o.order_status NOT IN ('cancelled', 'refunded')
              WHERE oi.order_id IN ({$paidInWindow})
              GROUP BY oi.product_id
              ORDER BY units_sold DESC, revenue DESC
@@ -480,13 +503,15 @@ class AdminDashboardController
             'owed_refunds' => $owed,
             'formulas' => [
                 'gross_sales' => 'Sum of payments verified in the period (Kora, Monnify and confirmed bank transfers), by verification time.',
-                'total_refunded' => 'Sum of refunds marked completed in the period, by completion time.',
+                'total_refunded' => 'Sum of refunds marked completed in the period, by completion time. Underpaid money sent back is left out, as it never counted as a sale.',
                 'owed_refunds' => 'Orders paid in the period and later cancelled, minus anything already refunded: money the store still has to return.',
                 'net_sales' => 'Gross sales − refunds completed − refunds owed on cancelled orders.',
                 'aov' => 'Gross sales ÷ paid orders.',
                 'conversion_rate' => 'Orders placed in the period that were paid ÷ orders placed in the period.',
                 'repeat_customer_rate' => 'Customers with 2+ paid orders in the period ÷ customers who paid in the period.',
                 'total_units_sold' => 'Units on orders paid in the period.',
+                'top_products' => 'Item prices on orders paid in the period, before discounts and delivery fees. Cancelled and refunded orders are left out.',
+                'category_breakdown' => 'Item prices on orders paid in the period, before discounts and delivery fees. Cancelled and refunded orders are left out.',
                 'gateway_breakdown' => 'Attempts and success counts are payment attempts started in the period; volume is money received in the period.',
                 'pending_fulfillment' => 'Paid or processing orders right now (not limited to the period).',
             ],
@@ -549,7 +574,7 @@ class AdminDashboardController
         }
         fputcsv($out, []);
 
-        fputcsv($out, ['Category', 'Orders', 'Units sold', 'Revenue (NGN)']);
+        fputcsv($out, ['Category', 'Orders', 'Units sold', 'Item sales before discounts (NGN)']);
         foreach ($r['category_breakdown'] as $c) {
             fputcsv($out, [$this->sanitizeCsvCell($c['category_name']), $c['order_count'], $c['units_sold'], $money($c['revenue'])]);
         }

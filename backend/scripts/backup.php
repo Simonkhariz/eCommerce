@@ -45,6 +45,7 @@ use App\Storage\LocalStorage;
 use App\Storage\ObjectStorage;
 use App\Storage\PictureMirror;
 use App\Storage\Storage;
+use App\Support\GzipFile;
 use App\Support\SqlDump;
 
 Env::load(BASE_PATH . '/.env');
@@ -106,17 +107,31 @@ if ($method === 'mysqldump') {
         $method = 'php';
         $note = " (mysqldump could not be started: {$mysqldump})";
     } else {
-        $gz = gzopen($dbFile, 'wb6');
+        $writeError = null;
         $dumped = 0;
-        while (!feof($pipes[1])) {
-            $chunk = fread($pipes[1], 1 << 20);
-            if ($chunk === false) {
-                break;
+        try {
+            $gz = new GzipFile($dbFile);
+            while (!feof($pipes[1])) {
+                $chunk = fread($pipes[1], 1 << 20);
+                if ($chunk === false) {
+                    break;
+                }
+                $dumped += strlen($chunk);
+                $gz->write($chunk);
             }
-            $dumped += strlen($chunk);
-            gzwrite($gz, $chunk);
+            $gz->close();
+        } catch (RuntimeException $e) {
+            $writeError = $e->getMessage();
         }
-        gzclose($gz);
+        if ($writeError !== null) {
+            // Stop mysqldump first: it may be waiting for this script to read more.
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_terminate($process);
+            proc_close($process);
+            @unlink($dbFile);
+            $fail('The database dump failed: ' . $writeError);
+        }
         $errors = trim((string) stream_get_contents($pipes[2]));
         fclose($pipes[1]);
         fclose($pipes[2]);
@@ -145,11 +160,11 @@ if ($method === 'php') {
             Env::int('DB_PORT', 3306)
         );
         $conn->set_charset('utf8mb4');
-        $gz = gzopen($dbFile, 'wb6');
+        $gz = new GzipFile($dbFile);
         $tableRows = SqlDump::dump($conn, static function (string $sql) use ($gz): void {
-            gzwrite($gz, $sql);
+            $gz->write($sql);
         });
-        gzclose($gz);
+        $gz->close();
         $conn->close();
     } catch (Throwable $e) {
         @unlink($dbFile);
@@ -217,7 +232,10 @@ $manifest = [
         'failed' => $mirror['failed_count'],
     ],
 ];
-file_put_contents("{$target}/manifest.json", json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+if (file_put_contents("{$target}/manifest.json", json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n") === false) {
+    @unlink("{$target}/manifest.json");
+    $fail("Could not write {$target}/manifest.json (is the disk full?).");
+}
 
 printf(
     "[%s] backup written to %s: database %.1f KB (%s%s), %d picture files (%.1f KB)\n",

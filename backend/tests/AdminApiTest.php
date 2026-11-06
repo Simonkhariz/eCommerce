@@ -60,6 +60,21 @@ $t->check('category actions audited with admin id', 3, (int) $t->scalar(
     [(string) $cid, $adminId]
 ));
 
+foreach (['501', '2e3'] as $numericSlug) {
+    $bad = $A('POST', '/admin/categories', ['json' => ['name' => 'Numbered', 'slug' => $numericSlug]]);
+    $t->check("category slug {$numericSlug} refused: it would read as an ID", [422, true], [$bad['status'], str_contains((string) TestKit::get($bad, 'error.details.slug'), 'only a number')]);
+}
+$t->check('renaming a category slug to a number is refused', 422, $A('PUT', "/admin/categories/{$cid}", ['json' => ['slug' => '777']])['status']);
+$autoCat = $A('POST', '/admin/categories', ['json' => ['name' => '777']]);
+$t->check('no slug given, name "777": slug category-777', [201, 'category-777'], [$autoCat['status'], TestKit::get($autoCat, 'data.slug')]);
+$t->cleanup(fn () => $t->sql("DELETE FROM `categories` WHERE `slug` = 'category-777'"));
+foreach ([-5, 100001, 2147483648] as $order) {
+    $t->check("category display order {$order} refused", 422, $A('PUT', "/admin/categories/{$cid}", ['json' => ['display_order' => $order]])['status']);
+}
+$t->check('category display order 100000 accepted', 200, $A('PUT', "/admin/categories/{$cid}", ['json' => ['display_order' => 100000]])['status']);
+$t->check('category name over 100 characters refused', 422, $A('PUT', "/admin/categories/{$cid}", ['json' => ['name' => str_repeat('n', 101)]])['status']);
+$t->check('category name sent as a list refused, not saved as "Array"', 422, $A('PUT', "/admin/categories/{$cid}", ['json' => ['name' => ['x']]])['status']);
+
 // -----------------------------------------------------------------------------
 $t->section('Delivery zones');
 $t->check('zone list returns state list', 37, count((array) TestKit::get($A('GET', '/admin/shipping-zones'), 'data.states')));
@@ -92,6 +107,32 @@ if ($qv !== null) {
     $t->check('1 or 2 items: the zone fee', [1000.0, 1000.0], [$quoteFor(1), $quoteFor(2)]);
     $t->check('3 items: + N500, 5 items: + N1,500', [1500.0, 2500.0], [$quoteFor(3), $quoteFor(5)]);
 }
+
+// Input the columns can't hold, and fees out of range.
+$zoneBody = static fn (array $over): array => $over + ['name' => 'Limits', 'code' => 'TLIM' . strtoupper(bin2hex(random_bytes(3))), 'fee' => 100, 'estimated_days' => '2 days', 'states_covered' => ['Sokoto'], 'is_active' => false];
+$t->check('zone name over 100 characters refused', 422, $A('POST', '/admin/shipping-zones', ['json' => $zoneBody(['name' => str_repeat('z', 101)])])['status']);
+$t->check('estimate over 50 characters refused', 422, $A('POST', '/admin/shipping-zones', ['json' => $zoneBody(['estimated_days' => str_repeat('d', 51)])])['status']);
+$bigFee = $A('POST', '/admin/shipping-zones', ['json' => $zoneBody(['fee' => 1000001])]);
+$t->check('a too-big fee says the real limit', [422, true], [$bigFee['status'], str_contains((string) TestKit::get($bigFee, 'error.details.fee'), '1,000,000')]);
+
+// One active zone per state: checkout only ever charges the first, so a second never works.
+$hubs = (string) $t->scalar("SELECT `name` FROM `shipping_zones` WHERE `code` = 'ZONE-MAJOR-HUBS'");
+$national = (string) $t->scalar("SELECT `name` FROM `shipping_zones` WHERE `code` = 'ZONE-NATIONAL'");
+$second = $A('POST', '/admin/shipping-zones', ['json' => $zoneBody(['states_covered' => ['Lagos'], 'is_active' => true])]);
+$t->check('a second active zone for Lagos is refused, naming the zone', [422, true], [$second['status'], str_contains((string) TestKit::get($second, 'error.message'), $hubs)]);
+$t->ok('and the field is highlighted', str_contains((string) TestKit::get($second, 'error.details.states_covered'), 'Lagos'));
+$secondAll = $A('POST', '/admin/shipping-zones', ['json' => $zoneBody(['states_covered' => ['*'], 'is_active' => true])]);
+$t->check('a second "All other states" zone is refused, naming the zone', [422, true], [$secondAll['status'], str_contains((string) TestKit::get($secondAll, 'error.message'), $national)]);
+$spare = $A('POST', '/admin/shipping-zones', ['json' => $zoneBody(['states_covered' => ['Lagos'], 'is_active' => false])]);
+$t->check('an inactive zone may list a covered state', 201, $spare['status']);
+$spareId = (int) TestKit::get($spare, 'data.id');
+$t->cleanup(fn () => $t->sql("DELETE FROM `shipping_zones` WHERE `id` = ?", 'i', [$spareId]));
+$t->check('switching it on is refused', 422, $A('PUT', "/admin/shipping-zones/{$spareId}", ['json' => ['is_active' => true]])['status']);
+$t->check('moved to a free state it can be switched on', 200, $A('PUT', "/admin/shipping-zones/{$spareId}", ['json' => ['is_active' => true, 'states_covered' => ['Sokoto']]])['status']);
+$t->check('an active zone gaining a covered state is refused', 422, $A('PUT', "/admin/shipping-zones/{$spareId}", ['json' => ['states_covered' => ['Sokoto', 'Rivers']]])['status']);
+$t->sql("UPDATE `shipping_zones` SET `states_covered` = ? WHERE `id` = ?", 'si', [json_encode(['lagos', 'Sokoto']), $spareId]); // an old overlap
+$t->check('zones that already overlap still load', 200, $A('GET', '/admin/shipping-zones')['status']);
+$t->check('and can be switched off', false, TestKit::get($A('PUT', "/admin/shipping-zones/{$spareId}", ['json' => ['is_active' => false]]), 'data.is_active'));
 
 // -----------------------------------------------------------------------------
 $t->section('Promotions');
@@ -148,6 +189,26 @@ if ($fv !== null) {
     $t->check('a quote that would cost N0 is refused with a clear reason', [422, true], [$zeroQuote['status'], str_contains((string) TestKit::get($zeroQuote, 'error.message'), 'would cost ₦0')]);
 }
 
+// Limits, and a used code keeps its name (orders refer to it by name).
+$limit = 'TL' . strtoupper(bin2hex(random_bytes(3)));
+$renamed = $limit . 'X';
+$t->cleanup(fn () => $t->sql("DELETE FROM `promotions` WHERE `code` IN (?, ?)", 'ss', [$limit, $renamed]));
+$promoBody = static fn (array $over): array => $over + ['code' => $limit, 'description' => 't', 'discount_percent' => 10];
+$t->check('promotion description over 255 characters refused', 422, $A('POST', '/admin/promotions', ['json' => $promoBody(['description' => str_repeat('d', 256)])])['status']);
+$promoRefused = static fn (array $over): array => (static fn (array $r): array => [$r['status'], array_keys((array) TestKit::get($r, 'error.details'))])($A('POST', '/admin/promotions', ['json' => $promoBody($over)]));
+$t->check('promotion max uses 2147483648 refused', [422, ['max_uses']], $promoRefused(['max_uses' => 2147483648]));
+$t->check('promotion max uses over the limit refused', [422, ['max_uses']], $promoRefused(['max_uses' => 1000001]));
+$t->check('promotion minimum order too large refused', [422, ['min_order_amount']], $promoRefused(['min_order_amount' => 100000000]));
+$limitRes = $A('POST', '/admin/promotions', ['json' => $promoBody(['max_uses' => 1000000])]);
+$t->check('promotion max uses at the limit accepted', 201, $limitRes['status']);
+$limitId = (int) TestKit::get($limitRes, 'data.id');
+$t->sql("UPDATE `promotions` SET `used_count` = 2 WHERE `id` = ?", 'i', [$limitId]);
+$rename = $A('PUT', "/admin/promotions/{$limitId}", ['json' => ['code' => $renamed]]);
+$t->check('a used code cannot be renamed', [422, 'CODE_IN_USE'], [$rename['status'], TestKit::get($rename, 'error.code')]);
+$t->check('saving a used code under its own name is fine', 200, $A('PUT', "/admin/promotions/{$limitId}", ['json' => ['code' => strtolower($limit), 'description' => 'edited']])['status']);
+$t->sql("UPDATE `promotions` SET `used_count` = 0 WHERE `id` = ?", 'i', [$limitId]);
+$t->check('an unused code can be renamed', 200, $A('PUT', "/admin/promotions/{$limitId}", ['json' => ['code' => $renamed]])['status']);
+
 // -----------------------------------------------------------------------------
 $t->section('Banners');
 $t->check('banner with javascript: link refused', 422, $A('POST', '/admin/storefront/banners', ['json' => ['title' => 'x', 'image_url' => '/uploads/x.jpg', 'cta_url' => 'javascript:alert(1)']])['status']);
@@ -157,6 +218,10 @@ $t->check('valid banner created', 201, $res['status']);
 $bid = (int) TestKit::get($res, 'data.id');
 $t->cleanup(fn () => $t->sql("DELETE FROM `banners` WHERE `id` = ?", 'i', [$bid]));
 $t->check('deleting a banner that does not exist -> 404, not "deleted"', 404, $A('DELETE', '/admin/storefront/banners/999999999')['status']);
+$bannerBody = static fn (array $over): array => $over + ['title' => 'Limits', 'image_url' => '/uploads/x.jpg'];
+$t->check('banner title over 255 characters refused', 422, $A('POST', '/admin/storefront/banners', ['json' => $bannerBody(['title' => str_repeat('t', 256)])])['status']);
+$t->check('banner display order -5 refused', 422, $A('POST', '/admin/storefront/banners', ['json' => $bannerBody(['display_order' => -5])])['status']);
+$t->check('banner display order 100001 refused', 422, $A('PUT', "/admin/storefront/banners/{$bid}", ['json' => ['display_order' => 100001]])['status']);
 
 // -----------------------------------------------------------------------------
 $t->section('Settings');
@@ -165,6 +230,9 @@ $t->ok('settings expose editable allowlist', in_array('store_whatsapp_phone', ar
 $t->ok('settings never expose secrets', !preg_match('/sk_(live|test)|secret/i', $settings['body']));
 $t->check('unknown setting refused', 422, $A('PUT', '/admin/settings', ['json' => ['tax_rate' => '7.5']])['status']);
 $t->check('bad email refused', 422, $A('PUT', '/admin/settings', ['json' => ['store_contact_email' => 'nope']])['status']);
+$nameBefore = $t->scalar("SELECT `value` FROM `store_settings` WHERE `key_name` = 'store_name'");
+$t->check('a setting sent as a list is refused', 422, $A('PUT', '/admin/settings', ['json' => ['store_name' => ['x']]])['status']);
+$t->check('and "Array" is not saved', $nameBefore, $t->scalar("SELECT `value` FROM `store_settings` WHERE `key_name` = 'store_name'"));
 $oldWa = $t->scalar("SELECT `value` FROM `store_settings` WHERE `key_name` = 'store_whatsapp_phone'");
 $t->cleanup(function () use ($t, $oldWa): void {
     if ($oldWa === null) {
@@ -276,6 +344,13 @@ $t->check('invalid customer status refused', 422, $A('PATCH', "/admin/customers/
 $t->check('suspend customer', 200, $A('PATCH', "/admin/customers/{$cuid}/status", ['json' => ['status' => 'suspended']])['status']);
 $t->check('suspension signs the customer out', 0, (int) $t->scalar("SELECT COUNT(*) FROM `sessions` WHERE `user_id` = ?", 'i', [$cuid]));
 $t->check('customer detail loads', $cemail, TestKit::get($A('GET', "/admin/customers/{$cuid}"), 'data.customer.email'));
+// Sign-up saves customers as active: "not verified" means the email was never confirmed.
+$unverifiedEmail = $t->uniq('unverified') . '@example.test';
+$unverifiedId = (int) $t->db->insert("INSERT INTO `users` (`uuid`, `email`, `full_name`, `role`, `status`) VALUES (UUID(), ?, 'New Customer', 'customer', 'active')", 's', [$unverifiedEmail]);
+$t->cleanup(fn () => $t->sql("DELETE FROM `users` WHERE `id` = ?", 'i', [$unverifiedId]));
+$unverifiedList = array_column((array) TestKit::get($A('GET', '/admin/customers?status=unverified&per_page=100'), 'data.items'), 'email');
+$t->ok('"Email not verified" lists a customer who never confirmed', in_array($unverifiedEmail, $unverifiedList, true));
+$t->ok('and not one who did', !in_array($cemail, $unverifiedList, true));
 
 // -----------------------------------------------------------------------------
 $t->section('Order lifecycle');
@@ -380,7 +455,158 @@ if ($variant === null) {
         $row = $t->db->fetchOne("SELECT `status`, `transport` FROM `email_outbox` WHERE `recipient_email` = ? AND `template` = ? ORDER BY `id` DESC LIMIT 1", 'ss', [$email, $tpl]);
         $t->check("{$tpl} email logged", 'sent/log', $row ? "{$row['status']}/{$row['transport']}" : null);
     }
+
+    // -------------------------------------------------------------------------
+    $t->section('Order page: flags, customer email, refund figures, input limits');
+    $email3 = $t->uniq('buyer3') . '@example.test';
+    $res3 = $t->http('POST', '/checkout/orders', [
+        'headers' => ['Idempotency-Key: ' . bin2hex(random_bytes(16))],
+        'json' => [
+            'email' => $email3,
+            'items' => [['product_id' => (int) $variant['product_id'], 'variant_id' => (int) $variant['variant_id'], 'quantity' => 1]],
+            'shipping_address' => ['full_name' => 'Flagged Order', 'phone' => '08000000004', 'address_line1' => '4 Test Close', 'city' => 'Ikeja', 'state' => 'Lagos', 'country' => 'Nigeria'],
+        ],
+    ]);
+    $onum3 = (string) TestKit::get($res3, 'data.order_number');
+    $total3 = (float) TestKit::get($res3, 'data.grand_total');
+    $oid3 = (int) $t->scalar("SELECT `id` FROM `orders` WHERE `order_number` = ?", 's', [$onum3]);
+    $t->cleanup(function () use ($t, $oid3, $email3): void {
+        foreach (['refunds', 'shipments', 'payments', 'order_status_history', 'order_items'] as $table) {
+            $t->sql("DELETE FROM `{$table}` WHERE `order_id` = ?", 'i', [$oid3]);
+        }
+        $t->sql("DELETE FROM `orders` WHERE `id` = ?", 'i', [$oid3]);
+        $t->sql("DELETE FROM `email_outbox` WHERE `recipient_email` = ?", 's', [$email3]);
+    });
+
+    $resolve = static fn (array $body, array $opts = []): array => $A('POST', "/admin/orders/{$onum3}/resolve-attention", $opts + ['json' => $body]);
+    $notFlagged = $resolve(['note' => 'Nothing to do']);
+    $t->check('resolving an order that is not flagged: 422', [422, 'NOT_FLAGGED'], [$notFlagged['status'], TestKit::get($notFlagged, 'error.code')]);
+    $t->sql("UPDATE `orders` SET `requires_attention` = 1, `attention_reason` = 'Overpaid by NGN 5.00' WHERE `id` = ?", 'i', [$oid3]);
+    $t->check('resolving needs a sign-in', 401, $t->http('POST', "/admin/orders/{$onum3}/resolve-attention", ['json' => ['note' => 'Dealt with']])['status']);
+    $t->check('resolving needs the CSRF token', 403, $t->http('POST', "/admin/orders/{$onum3}/resolve-attention", ['json' => ['note' => 'Dealt with'], 'jar' => $admin['jar']])['status']);
+    foreach (['too short' => 'ab', 'too long' => str_repeat('n', 501), 'not text' => ['x'], 'empty' => '   '] as $label => $badNote) {
+        $t->check("resolving with a note that is {$label}: 422", 422, $resolve(['note' => $badNote])['status']);
+    }
+    $t->check('resolving with no note: 422', 422, $resolve([])['status']);
+    $t->check('none of those cleared the flag', 1, (int) $t->scalar("SELECT `requires_attention` FROM `orders` WHERE `id` = ?", 'i', [$oid3]));
+    $resolved = $resolve(['note' => 'Refunded the extra from the bank app']);
+    $t->check('resolved', 200, $resolved['status']);
+    $t->check('the answer is the full order', [$onum3, false, true, true], [
+        TestKit::get($resolved, 'data.order_number'),
+        TestKit::get($resolved, 'data.requires_attention'),
+        is_array(TestKit::get($resolved, 'data.items')),
+        is_array(TestKit::get($resolved, 'data.audit_logs')),
+    ]);
+    $flagRow = $t->db->fetchOne("SELECT `requires_attention`, `attention_reason` FROM `orders` WHERE `id` = ?", 'i', [$oid3]);
+    $t->check('the flag is cleared', [0, null], [(int) $flagRow['requires_attention'], $flagRow['attention_reason']]);
+    $t->ok('the history keeps the note and the old reason', str_contains((string) json_encode(TestKit::get($resolved, 'data.history')), 'Refunded the extra from the bank app')
+        && str_contains((string) json_encode(TestKit::get($resolved, 'data.history')), 'Overpaid by NGN 5.00'));
+    $t->check('the audit log records who resolved it', 1, (int) $t->scalar("SELECT COUNT(*) FROM `admin_audit_logs` WHERE `action` = 'order.attention_resolved' AND `entity_id` = ? AND `admin_id` = ?", 'si', [(string) $oid3, $adminId]));
+
+    $t->check('the order page shows a guest\'s email', $email3, TestKit::get($A('GET', "/admin/orders/{$onum3}"), 'data.customer_email'));
+    $t->sql("UPDATE `orders` SET `user_id` = ? WHERE `id` = ?", 'ii', [$cuid, $oid3]);
+    $t->check('and a signed-in customer\'s', $cemail, TestKit::get($A('GET', "/admin/orders/{$onum3}"), 'data.customer_email'));
+
+    $A('POST', "/admin/orders/{$onum3}/confirm-payment", ['json' => ['reference' => 'BANK-' . bin2hex(random_bytes(4))]]);
+    $found = (array) TestKit::get($A('GET', '/admin/payments?search=' . urlencode($cemail)), 'data.items');
+    $t->check('Payments search finds a signed-in customer by email', [$onum3], array_column($found, 'order_number'));
+
+    $t->check('carrier over 100 characters: 422', 422, $A('POST', "/admin/orders/{$onum3}/shipment", ['json' => ['carrier' => str_repeat('c', 101)]])['status']);
+    $t->check('tracking number over 100 characters: 422', 422, $A('POST', "/admin/orders/{$onum3}/shipment", ['json' => ['carrier' => 'GIG', 'tracking_number' => str_repeat('t', 101)]])['status']);
+    $t->check('a refund reference over 100 characters: 422', 422, $A('POST', '/admin/refunds', ['json' => ['order_number' => $onum3, 'amount' => 1, 'reason' => 'Long ref', 'provider_refund_reference' => str_repeat('r', 101)]])['status']);
+    $t->check('a refund amount sent as a list: 422', 422, $A('POST', '/admin/refunds', ['json' => ['order_number' => $onum3, 'amount' => [1], 'reason' => 'List']])['status']);
+
+    $A('POST', '/admin/refunds', ['json' => ['order_number' => $onum3, 'amount' => $total3, 'reason' => 'All of it', 'status' => 'completed', 'restock' => true]]);
+    $figures = (array) TestKit::get($A('GET', '/admin/refunds/eligibility?order_number=' . urlencode($onum3)), 'data');
+    $t->check('"Check order" on a fully refunded order shows the true figures', [round($total3, 2), round($total3, 2), 0.0], [(float) $figures['paid_amount'], (float) $figures['refunded_amount'], (float) $figures['refundable_amount']]);
+    $t->ok('and the payment it was', ($figures['payment_reference'] ?? null) !== null);
 }
+
+// -----------------------------------------------------------------------------
+$t->section('Paging: an absurd page number is a clear 422');
+foreach (['orders', 'payments', 'customers', 'products'] as $path) {
+    $t->check("GET {$path}?page=99999999999999999999", 422, $A('GET', "/admin/{$path}?page=99999999999999999999")['status']);
+}
+$t->check('a page past the end is just empty', 200, $A('GET', '/admin/orders?page=999999')['status']);
+
+// -----------------------------------------------------------------------------
+$t->section('Products: slugs, names, prices and stock');
+$pstamp = bin2hex(random_bytes(3));
+$productBody = static fn (array $over = []): array => $over + ['name' => "Limit Test {$pstamp}", 'slug' => "limit-test-{$pstamp}", 'sku' => "LIM-{$pstamp}", 'base_price' => 1000, 'status' => 'draft'];
+$madeProducts = [];
+$makeProduct = static function (array $body) use ($A, $t, &$madeProducts): array {
+    $res = $A('POST', '/admin/products', ['json' => $body]);
+    if ($res['status'] === 201) {
+        $madeProducts[] = (int) TestKit::get($res, 'data.id');
+    }
+    return $res;
+};
+$t->cleanup(function () use ($t, &$madeProducts): void {
+    foreach ($madeProducts as $id) {
+        $t->sql("DELETE FROM `inventory_logs` WHERE `product_id` = ?", 'i', [$id]);
+        $t->sql("DELETE FROM `products` WHERE `id` = ?", 'i', [$id]);
+    }
+});
+
+foreach (['501', '2e3'] as $numericSlug) {
+    $bad = $makeProduct($productBody(['slug' => $numericSlug]));
+    $t->check("product slug {$numericSlug} refused: it would read as an ID", [422, true], [$bad['status'], str_contains((string) TestKit::get($bad, 'error.details.slug'), 'only a number')]);
+}
+$auto = $makeProduct($productBody(['name' => '501', 'slug' => '', 'sku' => "LIM-A-{$pstamp}"]));
+$t->check('no slug given, name "501": slug product-501', [201, 'product-501'], [$auto['status'], TestKit::get($auto, 'data.slug')]);
+$auto2 = $makeProduct(['name' => '501', 'sku' => "LIM-B-{$pstamp}", 'base_price' => 1000, 'status' => 'draft']);
+$t->check('a second one gets its own slug', [201, 'product-501-2'], [$auto2['status'], TestKit::get($auto2, 'data.slug')]);
+$t->check('and it is stored under that slug', 'product-501', TestKit::get($A('GET', '/admin/products?search=product-501&per_page=1&sort=oldest'), 'data.0.slug'));
+$named = $makeProduct($productBody(['name' => "Blue Tee {$pstamp}", 'slug' => '', 'sku' => "LIM-C-{$pstamp}"]));
+$t->check('a slug is made from an ordinary name too', "blue-tee-{$pstamp}", TestKit::get($named, 'data.slug'));
+
+// Each is refused for its own field, not for some other reason.
+$refusedFor = static fn (array $over): array => (static function (array $res): array {
+    return [$res['status'], array_keys((array) TestKit::get($res, 'error.details'))];
+})($makeProduct($productBody($over)));
+$t->check('price 999,999,999,999 refused', [422, ['base_price']], $refusedFor(['base_price' => 999999999999]));
+$t->check('price just over the limit refused', [422, ['base_price']], $refusedFor(['base_price' => 100000000]));
+$t->check('an impossible "was" price refused', [422, ['original_price']], $refusedFor(['original_price' => 100000000]));
+$t->check('a category that does not exist: 422', [422, ['category_id']], $refusedFor(['category_id' => 99999999]));
+$t->check('a category sent as text: 422', [422, ['category_id']], $refusedFor(['category_id' => 'shirts']));
+$longVariant = ['size' => str_repeat('s', 51), 'color_name' => 'Black', 'color_hex' => '#000000', 'stock_quantity' => 1];
+$t->check('a variant size over 50 characters: 422', [422, ['variants']], $refusedFor(['variants' => [$longVariant]]));
+$t->check('a variant colour over 50 characters: 422', [422, ['variants']], $refusedFor(['variants' => [['color_name' => str_repeat('c', 51), 'size' => 'M'] + $longVariant]]));
+$t->check('a variant with too much stock: 422', [422, ['variants']], $refusedFor(['variants' => [['size' => 'M', 'stock_quantity' => 1000001] + $longVariant]]));
+$t->check('a variant with an impossible price: 422', [422, ['variants']], $refusedFor(['variants' => [['size' => 'M', 'price_override' => 100000000] + $longVariant]]));
+$t->check('product name sent as a list: 422', [422, ['name']], $refusedFor(['name' => ['x']]));
+
+$spaced = $makeProduct($productBody(['name' => "Top   Wear  {$pstamp}", 'base_price' => 99999999.99]));
+$t->check('the highest price is accepted', [201, 99999999.99], [$spaced['status'], (float) TestKit::get($spaced, 'data.base_price')]);
+$t->check('repeated spaces in a name are collapsed on save', "Top Wear {$pstamp}", TestKit::get($spaced, 'data.name'));
+$spacedId = (int) TestKit::get($spaced, 'data.id');
+$t->check('and on update', "Top Wear Two {$pstamp}", TestKit::get($A('PUT', "/admin/products/{$spacedId}", ['json' => ['name' => "Top  Wear  Two {$pstamp}"]]), 'data.name'));
+$t->check('admin product search collapses the term', [$spacedId], array_map('intval', array_column((array) TestKit::get($A('GET', '/admin/products?search=' . urlencode("Top  Wear   Two {$pstamp}")), 'data'), 'id')));
+$t->check('and so does inventory search', [$spacedId], array_map('intval', array_column((array) TestKit::get($A('GET', '/admin/inventory?search=' . urlencode("Top  Wear   Two {$pstamp}")), 'data.items'), 'product_id')));
+$t->check('price too large on update: 422', 422, $A('PUT', "/admin/products/{$spacedId}", ['json' => ['base_price' => 100000000]])['status']);
+$t->check('category that does not exist on update: 422', 422, $A('PUT', "/admin/products/{$spacedId}", ['json' => ['category_id' => 99999999]])['status']);
+$t->check('renaming the slug to a number: 422', 422, $A('PUT', "/admin/products/{$spacedId}", ['json' => ['slug' => '2e3']])['status']);
+
+$limitVariant = (int) $t->scalar("SELECT `id` FROM `product_variants` WHERE `product_id` = ? LIMIT 1", 'i', [$spacedId]);
+$stockNow = static fn (): int => (int) $t->scalar("SELECT `stock_quantity` FROM `product_variants` WHERE `id` = ?", 'i', [$limitVariant]);
+$adjust = static fn (mixed $by): array => $A('POST', '/admin/inventory/adjust', ['json' => ['variant_id' => $limitVariant, 'change_amount' => $by, 'reason' => 'Limit test']]);
+$start = $stockNow();
+$t->check('stock adjust +99,999,999,999 refused', [422, ['adjustment']], (static fn (array $r): array => [$r['status'], array_keys((array) TestKit::get($r, 'error.details'))])($adjust(99999999999)));
+$t->check('stock adjust of part of a unit refused', [422, ['adjustment']], (static fn (array $r): array => [$r['status'], array_keys((array) TestKit::get($r, 'error.details'))])($adjust(1.5)));
+$t->check('a refused adjust changes nothing', $start, $stockNow());
+$t->check('adjusting up to the limit is fine', 1000000, TestKit::get($adjust(1000000 - $start), 'data.new_stock'));
+$over = $adjust(500);
+$t->check('going over the limit is refused, saying the limit', [422, true], [$over['status'], str_contains((string) TestKit::get($over, 'error.message'), '1,000,000')]);
+$t->check('and nothing was logged for it', 1, (int) $t->scalar("SELECT COUNT(*) FROM `inventory_logs` WHERE `variant_id` = ?", 'i', [$limitVariant]));
+$t->check('adjusting down works', 999995, TestKit::get($adjust(-5), 'data.new_stock'));
+// Stock an old non-strict database capped at the column's limit does not block saving the product.
+$t->sql("UPDATE `product_variants` SET `stock_quantity` = 2147483647 WHERE `id` = ?", 'i', [$limitVariant]);
+$oldRow = ['id' => $limitVariant, 'size' => 'Standard', 'color_name' => 'Default', 'color_hex' => '#000000'];
+$t->check('a product with old over-limit stock can still be saved', 200, $A('PUT', "/admin/products/{$spacedId}", ['json' => ['variants' => [$oldRow + ['stock_quantity' => 2147483647, 'original_stock_quantity' => 2147483647]]]])['status']);
+$t->check('and its stock corrected', [200, 100], (function () use ($A, $spacedId, $oldRow, $stockNow): array {
+    $res = $A('PUT', "/admin/products/{$spacedId}", ['json' => ['variants' => [$oldRow + ['stock_quantity' => 100, 'original_stock_quantity' => 2147483647]]]]);
+    return [$res['status'], $stockNow()];
+})());
 
 // -----------------------------------------------------------------------------
 $t->section('Admin account');

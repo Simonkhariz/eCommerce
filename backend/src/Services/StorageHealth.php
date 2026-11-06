@@ -98,7 +98,11 @@ final class StorageHealth
 
         // --- Old data waiting for the admin -------------------------------------------------
         $cleanup = new DatabaseCleanup($this->db);
-        $due = $cleanup->snapshot($asOf)['counts'];
+        $snapshot = $cleanup->snapshot($asOf);
+        $due = $snapshot['counts'];
+        if (!$snapshot['pictures_checked']) {
+            $issues[] = $this->issue('warning', 'pictures_not_checked', 'Pictures could not be checked', DatabaseCleanup::PICTURES_NOT_CHECKED);
+        }
         $records = 0;
         $technical = 0;
         foreach ($due as $rule => $count) {
@@ -153,6 +157,8 @@ final class StorageHealth
             ],
             'cleanup' => [
                 'due' => $due,
+                'pictures_checked' => $snapshot['pictures_checked'],
+                'note' => $snapshot['pictures_checked'] ? null : DatabaseCleanup::PICTURES_NOT_CHECKED,
                 'last_run' => $lastRun,
                 'days_since' => $lastRun ? (int) floor((time() - strtotime((string) $lastRun['at'])) / 86400) : null,
             ],

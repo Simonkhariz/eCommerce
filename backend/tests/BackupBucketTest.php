@@ -58,6 +58,29 @@ $makeBackup = static function (string $name, string $dump, ?string $manifestDump
 };
 
 // -----------------------------------------------------------------------------
+$t->section('A backup that cannot be written fails, with no manifest');
+// support/failing_gzip.php makes the writer's gzwrite/gzclose fail as on a full disk.
+$failedDir = "{$fake->dir}/backups-failed";
+@mkdir($failedDir, 0700, true);
+$failedEnv = $fake->envFile('env-failed', array_merge($fake->envLines(), ['STORAGE_DRIVER=local', "UPLOAD_DIR={$fake->dir}/empty-uploads", "BACKUP_DIR={$failedDir}"]));
+foreach ([['short', '--php-dump'], ['lost', '--php-dump'], ['close', '--php-dump'], ['short', ''], ['close', '']] as [$failure, $flag]) {
+    $proc = proc_open(
+        array_values(array_filter([PHP_BINARY, '-d', 'auto_prepend_file=' . __DIR__ . '/support/failing_gzip.php', BASE_PATH . '/scripts/backup.php', $flag])),
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        BASE_PATH,
+        array_merge(getenv(), ['SHOPCO_ENV_FILE' => $failedEnv, 'FAKE_GZIP_FAILURE' => $failure])
+    );
+    $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $code = proc_close($proc);
+    $label = "{$failure} write" . ($flag !== '' ? ' (PHP dump)' : ' (default dump)');
+    $t->ok("{$label}: exits with an error saying so", $code === 1 && str_contains($out, 'database dump failed'), "exit {$code}: {$out}");
+    $t->check("{$label}: no manifest, no cut-off dump", [], array_merge(glob("{$failedDir}/*/manifest.json") ?: [], glob("{$failedDir}/*/database.sql.gz") ?: []));
+}
+
+// -----------------------------------------------------------------------------
 $t->section('A real backup is copied to the bucket and reads back identical');
 $made = $run('backup.php');
 $t->ok('backup.php made a backup, even with no pictures yet (an empty folder used to stop it)', $made['code'] === 0, $made['out']);

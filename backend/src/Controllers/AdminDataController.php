@@ -12,6 +12,7 @@ use App\Services\MailService;
 use App\Services\StorageHealth;
 use App\Support\DevSwitches;
 use App\Support\Cache;
+use App\Support\Input;
 use App\Support\RateLimiter;
 use App\Support\RequestContext;
 use App\Support\Response;
@@ -75,7 +76,7 @@ final class AdminDataController
             Response::error('Unknown kind of data.', 422, 'VALIDATION_ERROR');
         }
         $asOf = $this->reviewTime((string) ($_GET['as_of'] ?? ''));
-        $page = max(1, (int) ($_GET['page'] ?? 1));
+        $page = Input::page($_GET['page'] ?? 1);
         $perPage = 25;
 
         try {

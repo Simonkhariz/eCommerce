@@ -165,4 +165,34 @@ $t->check('without the router: a picture in the bucket answers 404', 404, $t->ht
 $bareStatus = $t->http('GET', "http://127.0.0.1:{$barePort}/api/v1/admin/system-status", ['jar' => 's3-admin']);
 $t->ok('and System status says why, and how to fix it', str_contains($bareStatus['body'], 'dev-router.php') && str_contains($bareStatus['body'], 'npm run api'), $bareStatus['body']);
 
+// -----------------------------------------------------------------------------
+$t->section('A bucket outage does not break Data & storage or the daily check');
+$outageEnv = $fake->envFile('env-outage', array_merge($fake->envLines(), ['STOREFRONT_REVALIDATE_URL=']));
+$t->cleanup(fn () => $t->sql("DELETE FROM `email_outbox` WHERE `template` = 'storage_alert'"));
+$hasNote = static fn (array $issues): bool => in_array('pictures_not_checked', array_column($issues, 'code'), true);
+$mode('500');
+$alert = $t->http('GET', "{$api}/admin/data/alert", ['jar' => 's3-admin']);
+$t->check('the alert bell still answers', 200, $alert['status']);
+$t->ok('and says pictures could not be checked', $hasNote((array) TestKit::get($alert, 'data.issues')), $alert['body']);
+$dataPage = $t->http('GET', "{$api}/admin/data", ['jar' => 's3-admin']);
+$t->check('Data & storage still answers', 200, $dataPage['status']);
+$t->check('pictures are left out of what is due', false, array_key_exists('unused_images', (array) TestKit::get($dataPage, 'data.health.cleanup.due')));
+$t->check('and the page is told why', [false, true, true], [
+    TestKit::get($dataPage, 'data.health.cleanup.pictures_checked'),
+    str_contains((string) TestKit::get($dataPage, 'data.health.cleanup.note'), 'could not be reached'),
+    $hasNote((array) TestKit::get($dataPage, 'data.health.issues')),
+]);
+$t->check('the list of pictures says the same instead of failing', 422, $t->http('GET', "{$api}/admin/data/records?rule=unused_images&as_of=" . urlencode(date('Y-m-d H:i:s')), ['jar' => 's3-admin'])['status']);
+$proc = proc_open([PHP_BINARY, BASE_PATH . '/scripts/check_database.php'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $checkPipes, BASE_PATH, array_merge(getenv(), ['SHOPCO_ENV_FILE' => $outageEnv]));
+$checkOutput = stream_get_contents($checkPipes[1]) . stream_get_contents($checkPipes[2]);
+$t->ok('the daily check still runs', proc_close($proc) === 0, $checkOutput);
+$t->ok('and says pictures could not be checked', str_contains($checkOutput, 'Pictures could not be checked'), $checkOutput);
+$mode('ok');
+$dataPage = $t->http('GET', "{$api}/admin/data", ['jar' => 's3-admin']);
+$t->check('when the bucket is back pictures are checked again', [true, null, true], [
+    TestKit::get($dataPage, 'data.health.cleanup.pictures_checked'),
+    TestKit::get($dataPage, 'data.health.cleanup.note'),
+    array_key_exists('unused_images', (array) TestKit::get($dataPage, 'data.health.cleanup.due')),
+]);
+
 exit($t->finish());

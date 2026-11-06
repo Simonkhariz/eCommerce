@@ -12,6 +12,7 @@ declare(strict_types=1);
 require __DIR__ . '/support/TestKit.php';
 
 use App\Services\DatabaseCleanup;
+use App\Services\FulfillmentService;
 
 $t = new TestKit('Maintenance');
 
@@ -73,6 +74,22 @@ $t->sql(
 // The abandoned order had a checkout that was opened but never paid.
 $t->sql("INSERT INTO `payments` (`order_id`, `provider`, `provider_reference`, `amount`, `currency`, `status`) SELECT `id`, 'monnify', ?, `grand_total`, 'NGN', 'cancelled' FROM `orders` WHERE `id` = ?", 'si', ['CLEAN-' . bin2hex(random_bytes(4)), $abandoned]);
 
+// The customer said they sent the transfer, then the order expired: the money may be in the bank.
+$claimed = $placeOrder();
+$t->sql("UPDATE `orders` SET `customer_marked_paid_at` = NOW(), `expires_at` = DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE `id` = ?", 'i', [$claimed]);
+(new FulfillmentService($t->db))->expireOrder($claimed);
+$t->sql("UPDATE `orders` SET `updated_at` = DATE_SUB(NOW(), INTERVAL 40 DAY) WHERE `id` = ?", 'i', [$claimed]);
+// Part of the money came in on a closed attempt, and the flag was dealt with.
+$partPaid = $placeOrder();
+$t->sql(
+    "UPDATE `product_variants` v JOIN `order_items` oi ON oi.variant_id = v.id
+     SET v.stock_quantity = v.stock_quantity + oi.quantity WHERE oi.order_id = ?",
+    'i',
+    [$partPaid]
+);
+$t->sql("UPDATE `orders` SET `order_status` = 'cancelled', `expires_at` = NULL, `updated_at` = DATE_SUB(NOW(), INTERVAL 40 DAY) WHERE `id` = ?", 'i', [$partPaid]);
+$t->sql("INSERT INTO `payments` (`order_id`, `provider`, `provider_reference`, `amount`, `amount_received`, `currency`, `status`) SELECT `id`, 'kora', ?, `grand_total`, 100, 'NGN', 'cancelled' FROM `orders` WHERE `id` = ?", 'si', ['CLEAN-' . bin2hex(random_bytes(4)), $partPaid]);
+
 $oldToken = (int) $t->db->insert(
     "INSERT INTO `email_verification_tokens` (`email`, `token_hash`, `type`, `expires_at`, `used_at`)
      VALUES (?, ?, 'magic_link', DATE_SUB(NOW(), INTERVAL 3 DAY), DATE_SUB(NOW(), INTERVAL 3 DAY))",
@@ -86,6 +103,8 @@ $asOf = date('Y-m-d H:i:s');
 $snapshot = (new DatabaseCleanup($t->db))->snapshot($asOf);
 $t->ok('review lists the abandoned order', in_array((string) $abandoned, $snapshot['ids']['unpaid_cancelled_orders'] ?? [], true), json_encode($snapshot['counts']));
 $t->ok('reviewing removes nothing', $exists($abandoned));
+$t->ok('an expired claim to have paid is not listed as never paid', !in_array((string) $claimed, $snapshot['ids']['unpaid_cancelled_orders'] ?? [], true));
+$t->ok('an order that received part of the money is not listed either', !in_array((string) $partPaid, $snapshot['ids']['unpaid_cancelled_orders'] ?? [], true));
 
 // -----------------------------------------------------------------------------
 $t->section('Clean-up');
@@ -100,6 +119,11 @@ $t->ok('cancelled order that received money is kept', $exists($latePaid));
 $t->ok('recently cancelled order is kept', $exists($recent));
 $t->ok('order flagged for the admin is kept', $exists($flagged));
 $t->ok('order still awaiting payment is kept', $exists($pending));
+$t->ok('the expired claim is kept', $exists($claimed));
+$t->ok('the part-paid order is kept', $exists($partPaid));
+(new FulfillmentService($t->db))->resolveAttention($claimed, 'Checked the bank: nothing arrived', null);
+$t->sql("UPDATE `orders` SET `updated_at` = DATE_SUB(NOW(), INTERVAL 40 DAY) WHERE `id` = ?", 'i', [$claimed]);
+$t->ok('once the admin resolves the claim it can be reviewed for clean-up', in_array((string) $claimed, (new DatabaseCleanup($t->db))->snapshot(date('Y-m-d H:i:s'))['ids']['unpaid_cancelled_orders'] ?? [], true));
 $t->check('used sign-in link older than a day is removed', 0, (int) $t->scalar("SELECT COUNT(*) FROM `email_verification_tokens` WHERE `id` = ?", 'i', [$oldToken]));
 
 exit($t->finish());

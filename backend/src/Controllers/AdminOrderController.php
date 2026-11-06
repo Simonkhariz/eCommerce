@@ -9,6 +9,7 @@ use App\Middleware\JsonBodyMiddleware;
 use App\Services\AuditService;
 use App\Services\FulfillmentService;
 use App\Services\PaymentFinalizer;
+use App\Support\Input;
 use App\Support\RequestContext;
 use App\Support\Response;
 use InvalidArgumentException;
@@ -36,7 +37,7 @@ class AdminOrderController
     {
         $status = isset($_GET['status']) ? trim(strtolower((string) $_GET['status'])) : '';
         $search = isset($_GET['search']) ? trim((string) $_GET['search']) : '';
-        $page = max(1, (int) ($_GET['page'] ?? 1));
+        $page = Input::page($_GET['page'] ?? 1);
         $perPage = min(100, max(1, (int) ($_GET['per_page'] ?? 20)));
         $offset = ($page - 1) * $perPage;
 
@@ -175,8 +176,8 @@ class AdminOrderController
         $order = $this->resolveOrder($idOrNumber);
 
         $body = JsonBodyMiddleware::getBody();
-        $newStatus = trim((string) ($body['status'] ?? ''));
-        $comment = isset($body['comment']) ? trim((string) $body['comment']) : null;
+        $newStatus = Input::text($body['status'] ?? '');
+        $comment = isset($body['comment']) ? Input::text($body['comment']) : null;
 
         if ($newStatus === '') {
             Response::error('New status is required.', 422, 'VALIDATION_ERROR', ['status' => 'Status field cannot be empty.']);
@@ -206,8 +207,8 @@ class AdminOrderController
         $order = $this->resolveOrder($idOrNumber);
 
         $body = JsonBodyMiddleware::getBody();
-        $reference = trim((string) ($body['reference'] ?? ''));
-        $note = trim((string) ($body['note'] ?? $body['comment'] ?? ''));
+        $reference = Input::text($body['reference'] ?? '');
+        $note = Input::text($body['note'] ?? $body['comment'] ?? '');
 
         $adminUser = RequestContext::getUser();
         $adminId = $adminUser ? (int) $adminUser['id'] : null;
@@ -221,13 +222,45 @@ class AdminOrderController
             ]);
             Response::success(
                 $this->withAuditLogs($this->fulfillmentService->loadOrderSnapshot((int) $order['id'])),
-                'Payment recorded and order marked as paid.'
+                $result['outcome'] === PaymentFinalizer::OUTCOME_LATE_PAYMENT
+                    ? 'Payment recorded as a late payment. The order stays cancelled and is flagged so you can refund the customer.'
+                    : 'Payment recorded and order marked as paid.'
             );
         } catch (InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'INVALID_PAYMENT_CONFIRMATION');
         } catch (\Throwable $e) {
             error_log("[Payment Confirmation Failure] " . $e->getMessage());
             Response::error('Failed to confirm the payment. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
+        }
+    }
+
+    /**
+     * Clear an order's attention flag once the admin has dealt with it, with a note saying how.
+     * POST /api/v1/admin/orders/{idOrNumber}/resolve-attention  {note}
+     */
+    public function resolveAttention(array $params): void
+    {
+        $idOrNumber = trim((string) ($params['idOrNumber'] ?? $params['id'] ?? ''));
+        $order = $this->resolveOrder($idOrNumber);
+
+        $body = JsonBodyMiddleware::getBody();
+        $note = is_string($body['note'] ?? null) ? trim($body['note']) : '';
+        if (mb_strlen($note) < 3 || mb_strlen($note) > 500) {
+            $message = 'Add a note of 3 to 500 characters saying how this was resolved.';
+            Response::error($message, 422, 'VALIDATION_ERROR', ['note' => $message]);
+        }
+
+        $adminUser = RequestContext::getUser();
+        $adminId = $adminUser ? (int) $adminUser['id'] : null;
+
+        try {
+            $updated = $this->fulfillmentService->resolveAttention((int) $order['id'], $note, $adminId);
+            Response::success($this->withAuditLogs($updated), 'Attention flag cleared.');
+        } catch (InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422, 'NOT_FLAGGED');
+        } catch (\Throwable $e) {
+            error_log("[Resolve Attention Failure] " . $e->getMessage());
+            Response::error('Failed to clear the flag. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         }
     }
 
@@ -241,7 +274,7 @@ class AdminOrderController
         $order = $this->resolveOrder($idOrNumber);
 
         $body = JsonBodyMiddleware::getBody();
-        $carrier = trim((string) ($body['carrier'] ?? ''));
+        $carrier = Input::text($body['carrier'] ?? '');
 
         if ($carrier === '') {
             Response::error('Carrier name is required.', 422, 'VALIDATION_ERROR', ['carrier' => 'Please provide a valid carrier (e.g. GIG Logistics, DHL, FedEx).']);
@@ -271,7 +304,7 @@ class AdminOrderController
         $order = $this->resolveOrder($idOrNumber);
 
         $body = JsonBodyMiddleware::getBody();
-        $comment = isset($body['comment']) ? trim((string) $body['comment']) : null;
+        $comment = isset($body['comment']) ? Input::text($body['comment']) : null;
 
         $adminUser = RequestContext::getUser();
         $adminId = $adminUser ? (int) $adminUser['id'] : null;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Database\Database;
+use App\Storage\StorageError;
 use App\Support\UploadFiles;
 use DomainException;
 
@@ -82,6 +83,9 @@ final class DatabaseCleanup
      * still on the list, which are always among those reviewed.
      */
     private const SHRINK_ONLY = ['abandoned_guest_carts', 'expired_sessions', 'used_or_expired_sign_in_links', 'old_rate_limit_counters'];
+
+    /** Shown when the storage holding the pictures can't be reached. */
+    public const PICTURES_NOT_CHECKED = 'The picture storage could not be reached, so unused pictures were left out of this check. Nothing was removed; they will be checked again once it is back.';
     private const CHUNK = 500;
 
     private Database $db;
@@ -125,7 +129,11 @@ final class DatabaseCleanup
     /**
      * Everything a clean-up as of $asOf would remove.
      *
-     * @return array{ids: array<string, list<string>>, counts: array<string, int>, fingerprint: string}
+     * Pictures are left out when their storage can't be reached (pictures_checked is false). A
+     * list reviewed that way never matches one with pictures, so a clean-up refuses until reviewed
+     * again.
+     *
+     * @return array{ids: array<string, list<string>>, counts: array<string, int>, fingerprint: string, pictures_checked: bool}
      */
     public function snapshot(string $asOf): array
     {
@@ -137,7 +145,13 @@ final class DatabaseCleanup
         foreach ($this->rules($asOf, $s) as $name => $rule) {
             $ids[$name] = isset($rule['ids']) ? $this->column($rule['ids'], $rule['types'], $rule['params']) : [];
         }
-        $ids['unused_images'] = UploadFiles::unused($this->db, $asOf);
+        $picturesChecked = true;
+        try {
+            $ids['unused_images'] = UploadFiles::unused($this->db, $asOf);
+        } catch (StorageError $e) {
+            error_log('[Database check] ' . $e->getMessage());
+            $picturesChecked = false;
+        }
         if ($s['retention_customer_days'] > 0) {
             $ids['inactive_customers'] = $emails;
             $ids['inactive_customer_accounts'] = $this->columnForEmails(
@@ -173,6 +187,7 @@ final class DatabaseCleanup
             'ids' => $ordered,
             'counts' => array_map('count', $ordered),
             'fingerprint' => hash('sha256', json_encode([$s, $sorted])),
+            'pictures_checked' => $picturesChecked,
         ];
     }
 
@@ -184,6 +199,9 @@ final class DatabaseCleanup
     public function records(string $rule, string $asOf, int $page, int $perPage): array
     {
         $snapshot = $this->snapshot($asOf);
+        if ($rule === 'unused_images' && !$snapshot['pictures_checked']) {
+            throw new DomainException(self::PICTURES_NOT_CHECKED);
+        }
         if (!isset($snapshot['ids'][$rule])) {
             throw new DomainException('This kind of data is not part of the clean-up with your current settings.');
         }
@@ -210,7 +228,12 @@ final class DatabaseCleanup
                 ['key' => 'size_kb', 'label' => 'Size (KB)', 'type' => 'number'],
                 ['key' => 'modified', 'label' => 'Last changed', 'type' => 'date'],
             ];
-            return ['columns' => $columns, 'items' => UploadFiles::describe($slice), 'total' => count($all)];
+            try {
+                return ['columns' => $columns, 'items' => UploadFiles::describe($slice), 'total' => count($all)];
+            } catch (StorageError $e) {
+                error_log('[Database check] ' . $e->getMessage());
+                throw new DomainException(self::PICTURES_NOT_CHECKED);
+            }
         }
 
         $display = $this->display()[$rule];
@@ -300,7 +323,13 @@ final class DatabaseCleanup
             return count($ids);
         }
         if ($rule === 'unused_images') {
-            return UploadFiles::delete($ids);
+            try {
+                return UploadFiles::delete($ids);
+            } catch (StorageError $e) {
+                // The database part is done by now: the next review lists what is left.
+                error_log('[Database clean-up] ' . $e->getMessage());
+                return 0;
+            }
         }
 
         $targets = [
@@ -360,16 +389,18 @@ final class DatabaseCleanup
             $rules['inactive_customer_orders'] = ['types' => '', 'params' => []];
         }
         $rules += [
-            // Never paid, nothing refunded, nothing waiting for the admin; stock was already
-            // released when the order was cancelled. Items, history and closed payment
-            // attempts go with the order (foreign keys cascade).
+            // Never paid, nothing refunded, nothing waiting for the admin (that includes a
+            // customer's claim to have paid, flagged until the admin resolves it); stock was
+            // already released when the order was cancelled. Items, history and closed payment
+            // attempts go with the order (foreign keys cascade). An attempt that received part
+            // of the money is a money record, so its order stays.
             'unpaid_cancelled_orders' => [
                 'ids' => "SELECT o.`id` AS k FROM `orders` o
                           WHERE o.`order_status` = 'cancelled'
                             AND o.`requires_attention` = 0
                             AND o.`updated_at` < DATE_SUB(?, INTERVAL ? DAY)
                             AND NOT EXISTS (SELECT 1 FROM `payments` p WHERE p.`order_id` = o.`id`
-                                            AND p.`status` IN ('successful', 'partially_refunded', 'refunded'))
+                                            AND (p.`status` IN ('successful', 'partially_refunded', 'refunded') OR p.`amount_received` > 0))
                             AND NOT EXISTS (SELECT 1 FROM `refunds` r WHERE r.`order_id` = o.`id`)
                           ORDER BY o.`created_at`",
                 'types' => 'si',

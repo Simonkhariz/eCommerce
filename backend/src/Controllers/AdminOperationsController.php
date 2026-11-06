@@ -14,6 +14,7 @@ use App\Services\FulfillmentService;
 use App\Services\MailService;
 use App\Services\PaymentMethods;
 use App\Support\DevSwitches;
+use App\Support\Input;
 use App\Support\PhoneNumber;
 use App\Support\RateLimiter;
 use App\Support\RequestContext;
@@ -60,7 +61,7 @@ class AdminOperationsController
      */
     private function paging(int $defaultPerPage = 20): array
     {
-        $page = max(1, (int) ($_GET['page'] ?? 1));
+        $page = Input::page($_GET['page'] ?? 1);
         $perPage = min(100, max(1, (int) ($_GET['per_page'] ?? $defaultPerPage)));
         return [$page, $perPage, ($page - 1) * $perPage];
     }
@@ -97,7 +98,7 @@ class AdminOperationsController
     public function getInventory(): void
     {
         $filter = $_GET['filter'] ?? 'all';
-        $search = trim((string) ($_GET['search'] ?? ''));
+        $search = Input::singleSpaced($_GET['search'] ?? '');
 
         $where = " WHERE v.is_active = 1";
         $types = '';
@@ -178,7 +179,10 @@ class AdminOperationsController
         $where = " WHERE u.role = 'customer'";
         $types = '';
         $params = [];
-        if (in_array($status, ['active', 'unverified', 'suspended'], true)) {
+        if ($status === 'unverified') {
+            // Sign-up saves customers as active; "not verified" is whether they confirmed their email.
+            $where .= " AND u.email_verified_at IS NULL";
+        } elseif (in_array($status, ['active', 'suspended'], true)) {
             $where .= " AND u.status = ?";
             $types .= 's';
             $params[] = $status;
@@ -295,9 +299,9 @@ class AdminOperationsController
             $params[] = $status;
         }
         if ($search !== '') {
-            $where .= " AND (p.provider_reference LIKE ? OR o.order_number LIKE ? OR o.guest_email LIKE ?)";
-            $types .= 'sss';
-            array_push($params, "%{$search}%", "%{$search}%", "%{$search}%");
+            $where .= " AND (p.provider_reference LIKE ? OR o.order_number LIKE ? OR o.guest_email LIKE ? OR u.email LIKE ?)";
+            $types .= 'ssss';
+            array_push($params, "%{$search}%", "%{$search}%", "%{$search}%", "%{$search}%");
         }
 
         $from = " FROM `payments` p
@@ -367,33 +371,24 @@ class AdminOperationsController
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
 
-        $payment = $this->db->fetchOne(
-            "SELECT id, provider, provider_reference, amount FROM `payments`
-             WHERE `order_id` = ? AND `status` IN ('successful', 'partially_refunded')
-             ORDER BY `verified_at` ASC, `id` ASC LIMIT 1",
-            'i',
-            [(int) $order['id']]
-        );
-        $refunded = $payment
-            ? $this->db->fetchOne(
-                "SELECT COALESCE(SUM(CASE WHEN status = 'completed' THEN amount END), 0) AS completed,
-                        COALESCE(SUM(CASE WHEN status = 'pending' THEN amount END), 0) AS pending
-                 FROM `refunds` WHERE `payment_id` = ?",
-                'i',
-                [(int) $payment['id']]
-            )
-            : ['completed' => 0, 'pending' => 0];
+        // All the money on the order, including payments already refunded. A refund takes one
+        // payment at a time, so refundable_amount is the most the next one can be (and
+        // payment_reference the payment it goes against); refundable_total is everything left.
+        $money = (new FulfillmentService($this->db))->moneyOnOrder($this->db, (int) $order['id']);
+        $sum = static fn (string $key): float => round(array_sum(array_column($money, $key)), 2);
+        $withBalance = array_values(array_filter($money, static fn (array $p): bool => $p['status'] !== 'refunded' && $p['left'] > 0.005));
+        $payment = $withBalance[0] ?? ($money[0] ?? null);
 
-        $paid = $payment ? (float) $payment['amount'] : 0.0;
         Response::success([
             'order_number' => $order['order_number'],
             'order_status' => $order['order_status'],
             'payment_status' => $order['payment_status'],
             'currency' => $order['currency'],
-            'paid_amount' => $paid,
-            'refunded_amount' => (float) $refunded['completed'],
-            'pending_refund_amount' => (float) $refunded['pending'],
-            'refundable_amount' => max(0, round($paid - (float) $refunded['completed'] - (float) $refunded['pending'], 2)),
+            'paid_amount' => $sum('received'),
+            'refunded_amount' => $sum('refunded'),
+            'pending_refund_amount' => $sum('pending_refunds'),
+            'refundable_amount' => $withBalance === [] ? 0.0 : (float) $withBalance[0]['left'],
+            'refundable_total' => round(array_sum(array_column($withBalance, 'left')), 2),
             'payment_reference' => $payment['provider_reference'] ?? null,
             'gateway' => $payment['provider'] ?? null,
             'can_restock' => in_array($order['order_status'], ['paid', 'processing', 'returned', 'refund_pending'], true),
@@ -402,19 +397,19 @@ class AdminOperationsController
 
     /**
      * POST /api/v1/admin/refunds
-     * Record a refund against the order's successful payment. Capped at what was paid
-     * (minus earlier refunds). status 'completed' = money already returned via the gateway
+     * Record a refund against the order's money, the newest payment first. Capped at what that
+     * payment has left. status 'completed' = money already returned via the gateway
      * dashboard or bank; 'pending' = approved, to be completed later.
      */
     public function createRefund(): void
     {
         $body = JsonBodyMiddleware::getBody();
-        $orderNumber = trim((string) ($body['order_number'] ?? ''));
-        $amount = (float) ($body['amount'] ?? 0);
-        $reason = trim((string) ($body['reason'] ?? ''));
-        $status = strtolower(trim((string) ($body['status'] ?? 'completed')));
+        $orderNumber = Input::text($body['order_number'] ?? '');
+        $amount = is_numeric($body['amount'] ?? null) ? (float) $body['amount'] : 0.0;
+        $reason = Input::text($body['reason'] ?? '');
+        $status = strtolower(Input::text($body['status'] ?? 'completed'));
         $restock = filter_var($body['restock'] ?? false, FILTER_VALIDATE_BOOLEAN);
-        $providerRef = isset($body['provider_refund_reference']) ? (string) $body['provider_refund_reference'] : null;
+        $providerRef = isset($body['provider_refund_reference']) ? Input::text($body['provider_refund_reference']) : null;
 
         if ($orderNumber === '' || $amount <= 0 || $reason === '') {
             Response::error('Order number, amount, and reason are required.', 422, 'VALIDATION_ERROR');
@@ -491,10 +486,10 @@ class AdminOperationsController
      */
     private function promotionInput(array $body, ?array $existing = null): array
     {
-        $code = array_key_exists('code', $body) ? strtoupper(trim((string) $body['code'])) : ($existing['code'] ?? '');
-        $description = array_key_exists('description', $body) ? trim((string) $body['description']) : ($existing['description'] ?? '');
-        $type = array_key_exists('discount_type', $body) ? (string) $body['discount_type'] : (string) ($existing['discount_type'] ?? 'percent');
-        $percent = array_key_exists('discount_percent', $body) ? (int) $body['discount_percent'] : (int) ($existing['discount_percent'] ?? 0);
+        $code = array_key_exists('code', $body) ? strtoupper(Input::text($body['code'])) : ($existing['code'] ?? '');
+        $description = array_key_exists('description', $body) ? Input::text($body['description']) : ($existing['description'] ?? '');
+        $type = array_key_exists('discount_type', $body) ? Input::text($body['discount_type']) : (string) ($existing['discount_type'] ?? 'percent');
+        $percent = array_key_exists('discount_percent', $body) ? (Input::wholeNumber($body['discount_percent'], 0, 100) ?? -1) : (int) ($existing['discount_percent'] ?? 0);
         // Money fields: empty means "none"; kept from the stored code when left out.
         $money = static function (array $body, ?array $existing, string $key): ?float {
             $value = array_key_exists($key, $body) ? $body[$key] : ($existing[$key] ?? null);
@@ -503,14 +498,17 @@ class AdminOperationsController
         $amount = $money($body, $existing, 'discount_amount');
         $minOrder = $money($body, $existing, 'min_order_amount');
         $maxDiscount = $money($body, $existing, 'max_discount_amount');
-        $maxUses = array_key_exists('max_uses', $body) ? (int) $body['max_uses'] : (int) ($existing['max_uses'] ?? 0);
+        // Empty means unlimited, as 0 does.
+        $maxUses = array_key_exists('max_uses', $body)
+            ? (in_array($body['max_uses'], [null, ''], true) ? 0 : Input::wholeNumber($body['max_uses'], 0, Input::MAX_PROMO_USES))
+            : (int) ($existing['max_uses'] ?? 0);
         $isActive = array_key_exists('is_active', $body) ? (int) (bool) $body['is_active'] : (int) ($existing['is_active'] ?? 1);
 
         $date = static function ($value, string $time): ?string {
             if ($value === null || $value === '') {
                 return null;
             }
-            $ts = strtotime(substr((string) $value, 0, 10) . ' ' . $time);
+            $ts = strtotime(substr(Input::text($value), 0, 10) . ' ' . $time);
             return $ts === false ? 'invalid' : date('Y-m-d H:i:s', $ts);
         };
         $startsAt = array_key_exists('starts_at', $body) ? $date($body['starts_at'], '00:00:00') : ($existing['starts_at'] ?? null);
@@ -519,6 +517,9 @@ class AdminOperationsController
         $errors = [];
         if (!preg_match('/^[A-Z0-9_-]{3,30}$/', $code)) {
             $errors['code'] = 'Use 3-30 letters, numbers, dashes or underscores.';
+        }
+        if (mb_strlen((string) $description) > 255) {
+            $errors['description'] = 'Keep the description to 255 characters.';
         }
         if (!in_array($type, ['percent', 'fixed'], true)) {
             $errors['discount_type'] = 'Choose a percentage or a fixed amount.';
@@ -549,8 +550,13 @@ class AdminOperationsController
                 $errors['discount_amount'] = 'The amount off must be less than the minimum order.';
             }
         }
-        if ($maxUses < 0) {
-            $errors['max_uses'] = 'Use 0 for unlimited, or a positive limit.';
+        foreach (['discount_amount' => $amount, 'min_order_amount' => $minOrder, 'max_discount_amount' => $maxDiscount] as $field => $value) {
+            if ($value !== null && $value > Input::MAX_MONEY) {
+                $errors[$field] = 'Enter at most ' . Input::maxMoneyLabel() . '.';
+            }
+        }
+        if ($maxUses === null) {
+            $errors['max_uses'] = 'Use 0 for unlimited, or a whole number up to ' . number_format(Input::MAX_PROMO_USES) . '.';
         }
         if ($startsAt === 'invalid') {
             $errors['starts_at'] = 'Invalid start date.';
@@ -596,6 +602,12 @@ class AdminOperationsController
         }
 
         $in = $this->promotionInput(JsonBodyMiddleware::getBody(), $promo);
+        // Orders refer to a code by its text: renaming a used one would lose its use count when
+        // those orders are later cancelled.
+        if (strcasecmp((string) $in['code'], (string) $promo['code']) !== 0 && (int) $promo['used_count'] > 0) {
+            $message = "Code {$promo['code']} has already been used, so it can't be renamed. Create a new code instead.";
+            Response::error($message, 422, 'CODE_IN_USE', ['code' => $message]);
+        }
         if ($in['code'] !== $promo['code'] && $this->db->fetchOne("SELECT id FROM `promotions` WHERE `code` = ? AND id <> ?", 'si', [$in['code'], $id])) {
             Response::error("Promotion code '{$in['code']}' already exists.", 422, 'CODE_EXISTS');
         }
@@ -653,7 +665,10 @@ class AdminOperationsController
      */
     private function bannerInput(array $body, ?array $existing = null): array
     {
-        $get = static fn (string $k, $default = '') => array_key_exists($k, $body) ? trim((string) $body[$k]) : ($existing[$k] ?? $default);
+        $get = static fn (string $k, $default = '') => array_key_exists($k, $body) ? Input::text($body[$k]) : ($existing[$k] ?? $default);
+        $order = array_key_exists('display_order', $body)
+            ? (in_array($body['display_order'], [null, ''], true) ? 0 : Input::wholeNumber($body['display_order'], 0, Input::MAX_DISPLAY_ORDER))
+            : (int) ($existing['display_order'] ?? 1);
         $in = [
             'title' => $get('title'),
             'subtitle' => $get('subtitle'),
@@ -661,7 +676,7 @@ class AdminOperationsController
             'cta_url' => $get('cta_url', '/category'),
             'image_url' => $get('image_url'),
             'is_active' => array_key_exists('is_active', $body) ? (int) (bool) $body['is_active'] : (int) ($existing['is_active'] ?? 1),
-            'display_order' => array_key_exists('display_order', $body) ? (int) $body['display_order'] : (int) ($existing['display_order'] ?? 1),
+            'display_order' => $order,
         ];
 
         $errors = [];
@@ -673,6 +688,14 @@ class AdminOperationsController
         }
         if ($in['cta_url'] !== '' && !preg_match('#^(/(?!/)|https://)#', $in['cta_url'])) {
             $errors['cta_url'] = 'Link must be a store path like /category or an https:// URL.';
+        }
+        foreach (['title' => 255, 'subtitle' => 255, 'cta_text' => 50, 'cta_url' => 255, 'image_url' => 500] as $field => $max) {
+            if (Input::tooLong($in[$field], $max)) {
+                $errors[$field] = "Keep this to {$max} characters.";
+            }
+        }
+        if ($order === null) {
+            $errors['display_order'] = 'Display order must be a whole number from 0 to ' . number_format(Input::MAX_DISPLAY_ORDER) . '.';
         }
         if (!empty($errors)) {
             Response::error('Please fix the highlighted fields.', 422, 'VALIDATION_ERROR', $errors);
@@ -929,7 +952,11 @@ class AdminOperationsController
                 $errors[$key] = 'This setting cannot be changed here.';
                 continue;
             }
-            $value = trim((string) $value);
+            if (is_array($value) || is_bool($value)) {
+                $errors[$key] = 'Enter this as plain text.';
+                continue;
+            }
+            $value = Input::text($value);
             if (mb_strlen($value) > 255) {
                 $errors[$key] = 'Too long (255 characters maximum).';
             } elseif ($key === 'store_contact_email' && $value !== '' && !filter_var($value, FILTER_VALIDATE_EMAIL)) {

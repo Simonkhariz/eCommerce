@@ -79,11 +79,16 @@ Each flagged order says why:
 
 | Flag says | What happened | What to do |
 |---|---|---|
-| Underpaid … received X of Y | The customer paid less than the total | The order is not paid. Ask the customer to pay the rest, or refund what came in and cancel |
-| Overpaid / duplicate payment | Paid twice or too much | The order is paid; refund the extra from the gateway dashboard, then record it in Refunds |
-| Payment received after the order was cancelled/expired | Money arrived after the payment window; stock was already released | Check stock; either reinstate and fulfil the order or refund the customer |
+| Underpaid … received X of Y | The customer paid less than the total | The order is not paid. Ask the customer to pay the rest, or refund what came in (Refunds takes up to the amount received) and cancel |
+| Overpaid / duplicate payment | Paid twice or too much | The order is paid; refund the extra from the gateway dashboard, then record it in Refunds (a refund goes against the newest payment), then resolve the flag with a note |
+| Payment received after the order was cancelled/expired | Money arrived after the payment window; stock was already released | A cancelled order can't be reopened. Refund the customer; they can place a new order for the items |
+| The customer said they sent the transfer, but the payment window ended | They tapped "I've sent the transfer" and nobody confirmed it in time | Check your bank. Money arrived: confirm the payment (it is kept as a late payment), then refund it. Nothing arrived: resolve the flag with a note |
 | Currency mismatch … verify with the gateway | The gateway reported another currency | Not applied. Check the transaction in the Kora/Monnify dashboard before doing anything |
 | Cancelled after payment: record a refund | An admin cancelled a paid order | Refund in the gateway dashboard, then record it in Refunds |
+
+Recording a refund clears the flag once no payment is left on the order. Any other flag stays until
+you have dealt with it and resolved it on the order page, with a note saying what you did; the note
+and the old reason stay in the order's history.
 
 **Daily check (two minutes):** compare yesterday's successful payments in the Kora and Monnify
 dashboards with admin → Payments. A payment the gateway shows but the shop does not means its

@@ -664,6 +664,173 @@ try {
     $reason = (string) orderRow($r4['order_number'])['attention_reason'];
     check('a repeated alert is kept once, and a later different alert still shows', substr_count($reason, "REF-{$stamp}") === 1 && str_contains($reason, 'after the order was cancelled'), $reason);
 
+    // -----------------------------------------------------------------------
+    echo "== Refunds: a duplicate payment, the newest money first\n";
+    $d1 = $placeOrder($line);
+    $d1Row = orderRow($d1['order_number']);
+    $d1Id = (int) $d1Row['id'];
+    $d1Total = (float) $d1Row['grand_total'];
+    $d1Good = $koraMock->initializeCheckout($d1['order_number'])['provider_reference'];
+    $d1Dup = $koraMock->initializeCheckout($d1['order_number'])['provider_reference'];
+    $finalizer->finalizeSuccess($d1Good, ['amount' => $d1Total, 'currency' => 'NGN', 'label' => 'Kora']);
+    $dupOutcome = $finalizer->finalizeSuccess($d1Dup, ['amount' => $d1Total, 'currency' => 'NGN', 'label' => 'Kora']);
+    check('the second payment is a duplicate', ($dupOutcome['outcome'] ?? '') === PaymentFinalizer::OUTCOME_DUPLICATE_PAYMENT);
+    $payStatus = static fn (string $ref): string => (string) $db->fetchOne("SELECT `status` FROM `payments` WHERE `provider_reference` = ?", 's', [$ref])['status'];
+    $d1Eligible = http('GET', "{$api}/admin/refunds/eligibility?order_number=" . urlencode($d1['order_number']), null, [], $jar)['json']['data'] ?? [];
+    check('"Check order" counts both payments and offers the duplicate first', abs((float) ($d1Eligible['paid_amount'] ?? 0) - 2 * $d1Total) < 0.01
+        && abs((float) ($d1Eligible['refundable_amount'] ?? 0) - $d1Total) < 0.01 && abs((float) ($d1Eligible['refundable_total'] ?? 0) - 2 * $d1Total) < 0.01
+        && ($d1Eligible['payment_reference'] ?? '') === $d1Dup, json_encode($d1Eligible));
+    expectThrows('a refund larger than the newest payment is refused, saying why', fn () => $fulfillment->recordRefund($d1Id, $d1Total * 2, 'Too much', 'completed', false, null), 'more than one payment');
+    $d1Stock = stockOf($variantA);
+    $d1Refund = $fulfillment->recordRefund($d1Id, $d1Total, 'Paid twice', 'completed', true, null);
+    $d1After = orderRow($d1['order_number']);
+    check('the refund goes against the duplicate, not the payment that paid the order', $payStatus($d1Dup) === 'refunded' && $payStatus($d1Good) === 'successful');
+    check('the good order stays paid', $d1After['order_status'] === 'paid' && $d1After['payment_status'] === 'successful', json_encode([$d1After['order_status'], $d1After['payment_status']]));
+    check('the flag stays until no payment is left (or the admin resolves it)', (int) $d1After['requires_attention'] === 1);
+    check('stock is not released while a good payment remains', stockOf($variantA) === $d1Stock, stockOf($variantA) . " vs {$d1Stock}");
+    check('the wish to restock is kept for later', (int) $d1Refund['restocked'] === 2);
+    $d1Comments = static fn (): string => implode(' | ', array_column($db->fetchAll("SELECT `comment` FROM `order_status_history` WHERE `order_id` = ?", 'i', [$d1Id]), 'comment'));
+    check('and the history does not say the items were restocked', !str_contains($d1Comments(), 'restocked'), $d1Comments());
+
+    $fulfillment->recordRefund($d1Id, $d1Total, 'Changed their mind', 'completed', false, null);
+    $d1Final = orderRow($d1['order_number']);
+    check('refunding the last payment refunds the order and clears the flag', $d1Final['order_status'] === 'refunded' && $d1Final['payment_status'] === 'refunded' && (int) $d1Final['requires_attention'] === 0, json_encode([$d1Final['order_status'], $d1Final['payment_status'], $d1Final['requires_attention']]));
+    check('now the items go back, once', stockOf($variantA) === $d1Stock + 2, stockOf($variantA) . " vs {$d1Stock}+2");
+    check('and the history says so', str_contains($d1Comments(), 'and items restocked'), $d1Comments());
+    expectThrows('nothing more can be refunded', fn () => $fulfillment->recordRefund($d1Id, 1, 'Again', 'completed', false, null), 'no successful payment');
+
+    // A pending refund uses up the newest payment, so the next refund moves on to the older one.
+    $d2 = $placeOrder($line);
+    $d2Row = orderRow($d2['order_number']);
+    $d2Id = (int) $d2Row['id'];
+    $d2Total = (float) $d2Row['grand_total'];
+    $d2Good = $koraMock->initializeCheckout($d2['order_number'])['provider_reference'];
+    $d2Dup = $koraMock->initializeCheckout($d2['order_number'])['provider_reference'];
+    $finalizer->finalizeSuccess($d2Good, ['amount' => $d2Total, 'currency' => 'NGN', 'label' => 'Kora']);
+    $finalizer->finalizeSuccess($d2Dup, ['amount' => $d2Total, 'currency' => 'NGN', 'label' => 'Kora']);
+    $refundPayment = static fn (array $r): string => (string) $db->fetchOne("SELECT p.`provider_reference` AS r FROM `payments` p JOIN `refunds` f ON f.`payment_id` = p.`id` WHERE f.`id` = ?", 'i', [(int) $r['id']])['r'];
+    check('first refund: the duplicate', $refundPayment($fulfillment->recordRefund($d2Id, $d2Total, 'Paid twice', 'pending', false, null)) === $d2Dup);
+    check('second refund: the older payment', $refundPayment($fulfillment->recordRefund($d2Id, 1, 'Goodwill', 'completed', false, null)) === $d2Good);
+    check('a partial refund of the paying payment reads as partially refunded', orderRow($d2['order_number'])['payment_status'] === 'partially_refunded');
+
+    // Status history must not claim a restock that only happens later.
+    $p1 = $placeOrder($line);
+    $p1Id = (int) orderRow($p1['order_number'])['id'];
+    (new PaymentFinalizer($db))->recordManualPayment($p1Id, 'PARTIAL-' . $stamp, null, 'partial refund test');
+    $p1Refund = $fulfillment->recordRefund($p1Id, 1, 'Part of it', 'completed', true, null);
+    $p1Note = (string) $db->fetchOne("SELECT `comment` FROM `order_status_history` WHERE `order_id` = ? ORDER BY `id` DESC LIMIT 1", 'i', [$p1Id])['comment'];
+    check('a partial refund with restock ticked does not say "items restocked"', (int) $p1Refund['restocked'] === 2 && !str_contains($p1Note, 'restocked'), $p1Note);
+
+    // Cancelling a partly refunded order: the rest of the money is still owed.
+    $fulfillment->updateOrderStatus($p1Id, 'cancelled', 'Cannot fulfil', null);
+    $p1Row = orderRow($p1['order_number']);
+    check('cancelling a partly refunded order flags the money still owed', (int) $p1Row['requires_attention'] === 1 && str_contains((string) $p1Row['attention_reason'], 'Cancelled after payment'), json_encode($p1Row['attention_reason']));
+
+    // -----------------------------------------------------------------------
+    echo "== Underpaid money can be refunded, up to what came in\n";
+    $u1 = $placeOrder($line);
+    $u1Id = (int) orderRow($u1['order_number'])['id'];
+    $u1Ref = $koraMock->initializeCheckout($u1['order_number'])['provider_reference'];
+    $u1Stock = stockOf($variantA);
+    $u1Under = $finalizer->finalizeSuccess($u1Ref, ['amount' => 500, 'currency' => 'NGN', 'label' => 'Kora']);
+    check('the payment is underpaid and the order flagged', ($u1Under['outcome'] ?? '') === PaymentFinalizer::OUTCOME_UNDERPAID && (int) orderRow($u1['order_number'])['requires_attention'] === 1);
+    expectThrows('a refund above what actually came in is refused', fn () => $fulfillment->recordRefund($u1Id, 600, 'Too much', 'completed', false, null), 'maximum now 500');
+    $fulfillment->recordRefund($u1Id, 200, 'First part', 'completed', false, null);
+    check('part of it refunded: the order is still unpaid and flagged', orderRow($u1['order_number'])['order_status'] === 'pending_payment'
+        && orderRow($u1['order_number'])['payment_status'] === 'pending' && (int) orderRow($u1['order_number'])['requires_attention'] === 1);
+    $fulfillment->recordRefund($u1Id, 300, 'The rest', 'completed', true, null);
+    $u1Row = orderRow($u1['order_number']);
+    check('all of it refunded: the flag clears, the order still waits for payment', $u1Row['order_status'] === 'pending_payment' && $u1Row['payment_status'] === 'pending' && (int) $u1Row['requires_attention'] === 0, json_encode([$u1Row['order_status'], $u1Row['payment_status']]));
+    check('its stock stays held until the order expires', stockOf($variantA) === $u1Stock);
+    check('the attempt is marked refunded', $payStatus($u1Ref) === 'refunded');
+    $db->execute("UPDATE `orders` SET `expires_at` = NOW() - INTERVAL 1 MINUTE WHERE `id` = ?", 'i', [$u1Id]);
+    $fulfillment->expireOrder($u1Id);
+    check('when it expires the stock goes back and the refund record stays', stockOf($variantA) === $u1Stock + 2 && $payStatus($u1Ref) === 'refunded');
+
+    // Underpaid, then paid in full another way: the stray money is refunded before the good payment.
+    $u2 = $placeOrder($line);
+    $u2Row = orderRow($u2['order_number']);
+    $u2Id = (int) $u2Row['id'];
+    $u2Stray = $koraMock->initializeCheckout($u2['order_number'])['provider_reference'];
+    $finalizer->finalizeSuccess($u2Stray, ['amount' => 700, 'currency' => 'NGN', 'label' => 'Kora']);
+    $u2Good = $koraMock->initializeCheckout($u2['order_number'])['provider_reference'];
+    $finalizer->finalizeSuccess($u2Good, ['amount' => $u2Row['grand_total'], 'currency' => 'NGN', 'label' => 'Kora']);
+    check('the order is paid, the stray attempt closed but its money remembered', orderRow($u2['order_number'])['order_status'] === 'paid' && $payStatus($u2Stray) === 'cancelled');
+    $fulfillment->recordRefund($u2Id, 700, 'Stray money', 'completed', false, null);
+    $u2After = orderRow($u2['order_number']);
+    check('the stray money goes first; the order stays paid', $payStatus($u2Stray) === 'refunded' && $payStatus($u2Good) === 'successful' && $u2After['order_status'] === 'paid' && $u2After['payment_status'] === 'successful', json_encode([$payStatus($u2Stray), $payStatus($u2Good), $u2After['order_status'], $u2After['payment_status']]));
+
+    // -----------------------------------------------------------------------
+    echo "== \"I've sent the transfer\", then the order expires\n";
+    $c1 = $placeOrder($line);
+    $c1Row = orderRow($c1['order_number']);
+    $c1Id = (int) $c1Row['id'];
+    (new PaymentAttempts($db))->open($c1Row, 'whatsapp', 'WA-CLAIM-' . $stamp, PaymentAttempts::manualWindowMinutes());
+    $db->execute("UPDATE `orders` SET `customer_marked_paid_at` = NOW(), `expires_at` = NOW() - INTERVAL 1 MINUTE WHERE `id` = ?", 'i', [$c1Id]);
+    $fulfillment->expireOrder($c1Id);
+    $c1After = orderRow($c1['order_number']);
+    check('a claimed order that expires is flagged, not just cancelled', $c1After['order_status'] === 'cancelled' && (int) $c1After['requires_attention'] === 1 && str_contains((string) $c1After['attention_reason'], 'said they sent the transfer'), json_encode($c1After['attention_reason']));
+    expectThrows('refunding before any money is recorded still says so', fn () => $fulfillment->recordRefund($c1Id, 100, 'No money yet', 'completed', false, null), 'no successful payment');
+    $c1Stock = stockOf($variantA);
+    $c1Confirm = http('POST', "{$api}/admin/orders/{$c1['order_number']}/confirm-payment", json_encode(['reference' => 'LATE-' . $stamp]), $h, $jar);
+    check('the admin can still confirm the transfer', $c1Confirm['status'] === 200 && str_contains((string) ($c1Confirm['json']['message'] ?? ''), 'late payment'), $c1Confirm['text']);
+    $c1Paid = orderRow($c1['order_number']);
+    check('the order stays cancelled, flagged, with the money recorded', $c1Paid['order_status'] === 'cancelled' && $c1Paid['payment_status'] === 'successful' && (int) $c1Paid['requires_attention'] === 1);
+    check('the stock was not taken again', stockOf($variantA) === $c1Stock);
+    check('the flag offers only what the admin can really do', !str_contains((string) $c1Paid['attention_reason'], 'reinstate') && str_contains((string) $c1Paid['attention_reason'], 'cannot be reopened'), (string) $c1Paid['attention_reason']);
+    $c1Report = http('GET', "{$api}/admin/analytics/report?range=today", null, [], $jar);
+    check('the money shows in reports as owed', in_array($c1['order_number'], array_column($c1Report['json']['data']['owed_refunds'] ?? [], 'order_number'), true));
+    expectThrows('it cannot be confirmed twice', fn () => $finalizer->recordManualPayment($c1Id, 'LATE2-' . $stamp, null), 'Only orders awaiting');
+    expectThrows('a cancelled order nobody claimed cannot be confirmed', fn () => $finalizer->recordManualPayment((int) orderRow($o1['order_number'])['id'], 'NOCLAIM-' . $stamp, null), 'Only orders awaiting');
+    $fulfillment->recordRefund($c1Id, (float) $c1Paid['grand_total'], 'Order had expired', 'completed', false, null);
+    $c1Done = orderRow($c1['order_number']);
+    check('refunding it clears the flag; the order stays cancelled', $c1Done['order_status'] === 'cancelled' && $c1Done['payment_status'] === 'refunded' && (int) $c1Done['requires_attention'] === 0);
+
+    // -----------------------------------------------------------------------
+    echo "== The scheduled expiry when the gateway can't be asked\n";
+    $envDir = sys_get_temp_dir() . '/shopco-expiry-' . getmypid();
+    @mkdir($envDir, 0700, true);
+    $envFile = "{$envDir}/env";
+    file_put_contents($envFile, implode("\n", array_merge(
+        array_filter(file((string) getenv('SHOPCO_ENV_FILE'), FILE_IGNORE_NEW_LINES) ?: [], static fn (string $l): bool => !in_array(strstr($l, '=', true), ['KORA_API_BASE_URL', 'MONNIFY_API_BASE_URL'], true)),
+        ['KORA_API_BASE_URL=http://127.0.0.1:1', 'MONNIFY_API_BASE_URL=http://127.0.0.1:1']
+    )) . "\n");
+    $sweep = static function () use ($envFile): string {
+        $proc = proc_open([PHP_BINARY, BASE_PATH . '/scripts/expire_pending_orders.php'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, BASE_PATH, array_merge(getenv(), ['SHOPCO_ENV_FILE' => $envFile]));
+        $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+        proc_close($proc);
+        return $out;
+    };
+    $e1 = $placeOrder($line);
+    $koraMock->initializeCheckout($e1['order_number']);
+    $db->execute("UPDATE `orders` SET `expires_at` = NOW() - INTERVAL 1 MINUTE WHERE `order_number` = ?", 's', [$e1['order_number']]);
+    $sweepOut = $sweep();
+    check('a failed gateway check leaves the order for a later run', orderRow($e1['order_number'])['order_status'] === 'pending_payment' && str_contains($sweepOut, "{$e1['order_number']}: left for the next run"), $sweepOut);
+    $db->execute("UPDATE `orders` SET `expires_at` = NOW() - INTERVAL ? MINUTE WHERE `order_number` = ?", 'is', [FulfillmentService::GATEWAY_GRACE_MINUTES + 1, $e1['order_number']]);
+    $sweepOut = $sweep();
+    check('past the grace period it expires anyway', orderRow($e1['order_number'])['order_status'] === 'cancelled', $sweepOut);
+    @unlink($envFile);
+    @rmdir($envDir);
+
+    // -----------------------------------------------------------------------
+    echo "== A removed variant can be added back\n";
+    $backBody = static function (array $extra) use ($db, $productId): array {
+        $rows = $db->fetchAll("SELECT `id`, `sku`, `size`, `color_name`, `color_hex`, `stock_quantity` FROM `product_variants` WHERE `product_id` = ? AND `is_active` = 1", 'i', [$productId]);
+        return ['variants' => array_merge(array_map(static fn (array $v): array => ['id' => (int) $v['id'], 'sku' => $v['sku'], 'size' => $v['size'], 'color_name' => $v['color_name'], 'color_hex' => $v['color_hex']], $rows), $extra)];
+    };
+    $archived = $db->fetchOne("SELECT `is_active`, `stock_quantity` FROM `product_variants` WHERE `id` = ?", 'i', [$variantB]);
+    check('the variant is archived and has other stock', (int) $archived['is_active'] === 0 && (int) $archived['stock_quantity'] !== 7, json_encode($archived));
+    $back = $put($backBody([['sku' => '', 'size' => 'Large', 'color_name' => 'White', 'color_hex' => '#ffffff', 'stock_quantity' => 7]]));
+    $revived = $db->fetchOne("SELECT `is_active`, `stock_quantity` FROM `product_variants` WHERE `id` = ?", 'i', [$variantB]);
+    check('added back with no id: revived with the new stock', $back['status'] === 200 && (int) $revived['is_active'] === 1 && (int) $revived['stock_quantity'] === 7, $back['text']);
+    $backLog = $db->fetchOne("SELECT `previous_stock`, `new_stock`, `reason` FROM `inventory_logs` WHERE `variant_id` = ? ORDER BY `id` DESC LIMIT 1", 'i', [$variantB]);
+    check('and the change is logged', (int) $backLog['new_stock'] === 7 && (int) $backLog['previous_stock'] === (int) $archived['stock_quantity'] && $backLog['reason'] === 'Variant added back', json_encode($backLog));
+    $db->execute("UPDATE `product_variants` SET `is_active` = 0 WHERE `id` = ?", 'i', [$variantB]);
+    $back = $put($backBody([['id' => $variantB, 'sku' => '', 'size' => 'Large', 'color_name' => 'White', 'color_hex' => '#ffffff', 'stock_quantity' => 9]]));
+    check('added back by its id: the same', $back['status'] === 200 && stockOf($variantB) === 9, $back['text']);
+    $currentB = stockOf($variantB);
+    $stale = $put($backBody([['id' => $variantB, 'sku' => '', 'size' => 'Large', 'color_name' => 'White', 'color_hex' => '#ffffff', 'stock_quantity' => 50, 'original_stock_quantity' => $currentB - 1]]));
+    check('an active variant keeps its stale-form protection', $stale['status'] === 422 && stockOf($variantB) === $currentB, $stale['text']);
     @unlink($jar);
 } catch (Throwable $e) {
     $fail++;

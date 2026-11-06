@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Database\Database;
+use App\Support\Input;
 use InvalidArgumentException;
 
 /**
@@ -136,6 +137,9 @@ class FulfillmentService
             }
 
             $this->transition($db, $order, 'cancelled', 'Payment window expired. Reserved stock released automatically.', null, false);
+            if (!empty($order['customer_marked_paid_at'])) {
+                $this->flagAttention($db, $orderId, 'The customer said they sent the transfer, but the payment window ended and the order was cancelled. Check your bank: if the money arrived, confirm the payment (it is kept as a late payment) and refund it.');
+            }
             return true;
         });
     }
@@ -224,20 +228,29 @@ class FulfillmentService
      */
     public function assignShipment(int $orderId, array $data, ?int $adminId = null): array
     {
-        $carrier = trim((string) ($data['carrier'] ?? ''));
+        $carrier = Input::text($data['carrier'] ?? '');
         if ($carrier === '') {
             throw new InvalidArgumentException("Carrier name is required (e.g. GIG Logistics, DHL Express, FedEx, Speedaf).");
         }
 
-        $trackingNumber = isset($data['tracking_number']) ? (trim((string) $data['tracking_number']) ?: null) : null;
-        $trackingUrl = isset($data['tracking_url']) ? (trim((string) $data['tracking_url']) ?: null) : null;
-        $shipmentStatus = isset($data['status']) ? trim(strtolower((string) $data['status'])) : 'label_created';
+        $trackingNumber = isset($data['tracking_number']) ? (Input::text($data['tracking_number']) ?: null) : null;
+        $trackingUrl = isset($data['tracking_url']) ? (Input::text($data['tracking_url']) ?: null) : null;
+        $shipmentStatus = isset($data['status']) ? strtolower(Input::text($data['status'])) : 'label_created';
         if ($shipmentStatus === 'shipped') {
             $shipmentStatus = 'in_transit';
         }
-        $shippedAt = !empty($data['shipped_at']) ? $this->normalizeDateTime((string) $data['shipped_at'], 'shipped_at') : null;
-        $deliveredAt = !empty($data['delivered_at']) ? $this->normalizeDateTime((string) $data['delivered_at'], 'delivered_at') : null;
+        $shippedAt = !empty($data['shipped_at']) ? $this->normalizeDateTime(Input::text($data['shipped_at']), 'shipped_at') : null;
+        $deliveredAt = !empty($data['delivered_at']) ? $this->normalizeDateTime(Input::text($data['delivered_at']), 'delivered_at') : null;
 
+        if (mb_strlen($carrier) > 100) {
+            throw new InvalidArgumentException('Carrier name can be at most 100 characters.');
+        }
+        if ($trackingNumber !== null && mb_strlen($trackingNumber) > 100) {
+            throw new InvalidArgumentException('Tracking number can be at most 100 characters.');
+        }
+        if ($trackingUrl !== null && mb_strlen($trackingUrl) > 500) {
+            throw new InvalidArgumentException('Tracking URL can be at most 500 characters.');
+        }
         if ($trackingUrl !== null && !preg_match('#^https?://#i', $trackingUrl)) {
             throw new InvalidArgumentException('Tracking URL must start with http:// or https://');
         }
@@ -354,7 +367,8 @@ class FulfillmentService
     }
 
     /**
-     * Record a refund against an order's successful payment.
+     * Record a refund against the money on an order, one payment at a time: the stray money first
+     * (see moneyOnOrder), capped at what that payment has left.
      * 'completed' means the money has already been returned (e.g. from the gateway dashboard);
      * 'pending' records an approved refund that will be completed later.
      *
@@ -371,6 +385,12 @@ class FulfillmentService
         if ($reason === '') {
             throw new InvalidArgumentException('A refund reason is required.');
         }
+        if (mb_strlen($reason) > 1000) {
+            throw new InvalidArgumentException('A refund reason can be at most 1,000 characters.');
+        }
+        if ($providerRefundReference !== null && mb_strlen($providerRefundReference) > 100) {
+            throw new InvalidArgumentException('The refund reference can be at most 100 characters.');
+        }
         if (!in_array($status, ['pending', 'completed'], true)) {
             throw new InvalidArgumentException("Refund status must be 'pending' or 'completed'.");
         }
@@ -379,28 +399,20 @@ class FulfillmentService
             $adminId = $this->resolveUserId($adminId, $db);
             $order = $this->lockOrder($db, $orderId);
 
-            $payment = $db->fetchOne(
-                "SELECT * FROM `payments` WHERE `order_id` = ? AND `status` IN ('successful', 'partially_refunded')
-                 ORDER BY `verified_at` ASC, `id` ASC LIMIT 1 FOR UPDATE",
-                'i',
-                [$orderId]
-            );
-            if ($payment === null) {
+            $open = array_values(array_filter($this->moneyOnOrder($db, $orderId, true), static fn (array $p): bool => $p['status'] !== 'refunded'));
+            if ($open === []) {
                 throw new InvalidArgumentException('This order has no successful payment to refund.');
             }
+            $withBalance = array_values(array_filter($open, static fn (array $p): bool => $p['left'] > 0.005));
+            $payment = $withBalance[0] ?? $open[0];
 
-            $already = $db->fetchOne(
-                "SELECT COALESCE(SUM(`amount`), 0) AS total FROM `refunds` WHERE `payment_id` = ? AND `status` IN ('pending', 'completed')",
-                'i',
-                [(int) $payment['id']]
-            );
-            $refundable = round((float) $payment['amount'] - (float) $already['total'], 2);
-            if ($amount > $refundable + 0.001) {
+            if ($amount > $payment['left'] + 0.001) {
                 throw new InvalidArgumentException(sprintf(
-                    'Refund exceeds the refundable balance. Paid %s, already refunded or pending %s, maximum now %s.',
-                    number_format((float) $payment['amount'], 2),
-                    number_format((float) $already['total'], 2),
-                    number_format(max(0, $refundable), 2)
+                    'Refund exceeds the refundable balance. Paid %s, already refunded or pending %s, maximum now %s.%s',
+                    number_format($payment['received'], 2),
+                    number_format($payment['refunded'] + $payment['pending_refunds'], 2),
+                    number_format(max(0, $payment['left']), 2),
+                    count($withBalance) > 1 ? ' This order has more than one payment: refund them one at a time.' : ''
                 ));
             }
 
@@ -464,11 +476,93 @@ class FulfillmentService
     }
 
     /**
+     * Clear an order's attention flag once the admin has dealt with it, for the flags no later
+     * action clears by itself (an overpayment refunded, a claim that was never paid). The note and
+     * the old reason stay in the order's history and the audit log.
+     */
+    public function resolveAttention(int $orderId, string $note, ?int $adminId): array
+    {
+        $this->db->transaction(function (Database $db) use ($orderId, $note, $adminId): void {
+            $adminId = $this->resolveUserId($adminId, $db);
+            $order = $this->lockOrder($db, $orderId);
+            if (!(int) $order['requires_attention']) {
+                throw new InvalidArgumentException('This order is not flagged for attention.');
+            }
+
+            $db->executeUpdate(
+                "UPDATE `orders` SET `requires_attention` = 0, `attention_reason` = NULL, `updated_at` = NOW() WHERE `id` = ?",
+                'i',
+                [$orderId]
+            );
+            $db->insert(
+                "INSERT INTO `order_status_history` (`order_id`, `previous_status`, `new_status`, `comment`, `changed_by_user_id`) VALUES (?, ?, ?, ?, ?)",
+                'isssi',
+                [$orderId, $order['order_status'], $order['order_status'], "Attention resolved: {$note} (Was flagged: {$order['attention_reason']})", $adminId]
+            );
+            AuditService::record($adminId, 'order.attention_resolved', 'order', (string) $orderId, [
+                'requires_attention' => true,
+                'attention_reason' => $order['attention_reason'],
+            ], [
+                'requires_attention' => false,
+                'note' => $note,
+            ]);
+        });
+
+        return $this->loadOrderSnapshot($orderId);
+    }
+
+    /**
+     * Every payment on an order that brought money in, with how much of it is still refundable,
+     * in the order refunds take it: underpaid money first (it never paid for the order), then the
+     * newest confirmed payment, so a duplicate is refunded before the payment that paid the order.
+     *
+     * @return list<array<string, mixed>> payment rows plus received, refunded, pending_refunds, left
+     */
+    public function moneyOnOrder(Database $db, int $orderId, bool $lock = false): array
+    {
+        $payments = $db->fetchAll(
+            "SELECT * FROM `payments`
+             WHERE `order_id` = ? AND (`status` IN ('successful', 'partially_refunded', 'refunded')
+                   OR (`status` IN ('pending', 'failed', 'cancelled') AND `amount_received` > 0))
+             ORDER BY (`verified_at` IS NULL) DESC, `verified_at` DESC, `id` DESC" . ($lock ? ' FOR UPDATE' : ''),
+            'i',
+            [$orderId]
+        );
+        foreach ($payments as &$payment) {
+            $refunds = $db->fetchOne(
+                "SELECT COALESCE(SUM(CASE WHEN `status` = 'completed' THEN `amount` END), 0) AS completed,
+                        COALESCE(SUM(CASE WHEN `status` = 'pending' THEN `amount` END), 0) AS pending
+                 FROM `refunds` WHERE `payment_id` = ?",
+                'i',
+                [(int) $payment['id']]
+            );
+            $payment['received'] = self::receivedOn($payment);
+            $payment['refunded'] = (float) $refunds['completed'];
+            $payment['pending_refunds'] = (float) $refunds['pending'];
+            $payment['left'] = round($payment['received'] - $payment['refunded'] - $payment['pending_refunds'], 2);
+        }
+        unset($payment);
+        return $payments;
+    }
+
+    /** What a refund can return on a payment: its amount, or less if the customer underpaid. */
+    private static function receivedOn(array $payment): float
+    {
+        $received = $payment['amount_received'] ?? null;
+        return $received !== null && (float) $received < (float) $payment['amount'] ? (float) $received : (float) $payment['amount'];
+    }
+
+    /**
      * Load complete order snapshot with items, status history, payments, refunds and shipment.
      */
     public function loadOrderSnapshot(int $orderId): array
     {
-        $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `id` = ?", 'i', [$orderId]);
+        $order = $this->db->fetchOne(
+            "SELECT o.*, COALESCE(u.`email`, NULLIF(o.`guest_email`, '')) AS `customer_email`
+             FROM `orders` o LEFT JOIN `users` u ON u.`id` = o.`user_id` WHERE o.`id` = ?",
+            'i',
+            [$orderId]
+        );
         if ($order === null) {
             throw new InvalidArgumentException("Order ID {$orderId} not found.");
         }
@@ -592,14 +686,8 @@ class FulfillmentService
                     'i',
                     [$orderId]
                 );
-            } elseif ($order['payment_status'] === 'successful') {
-                $db->executeUpdate(
-                    "UPDATE `orders` SET `requires_attention` = 1,
-                            `attention_reason` = LEFT(CONCAT_WS(' | ', NULLIF(`attention_reason`, ''), 'Cancelled after payment: record a refund for the customer.'), 500)
-                     WHERE `id` = ?",
-                    'i',
-                    [$orderId]
-                );
+            } elseif (in_array($order['payment_status'], ['successful', 'partially_refunded'], true)) {
+                $this->flagAttention($db, $orderId, 'Cancelled after payment: record a refund for the customer.');
             }
         }
 
@@ -718,13 +806,18 @@ class FulfillmentService
             'i',
             [(int) $payment['id']]
         );
-        $fullyRefunded = (float) $completed['total'] >= (float) $payment['amount'] - 0.01;
+        $fullyRefunded = (float) $completed['total'] >= self::receivedOn($payment) - 0.01;
         $refundStatus = $fullyRefunded ? 'refunded' : 'partially_refunded';
 
         $db->executeUpdate("UPDATE `payments` SET `status` = ?, `updated_at` = NOW() WHERE `id` = ?", 'si', [$refundStatus, (int) $payment['id']]);
 
+        // The order is refunded only when none of its money is left: refunding a duplicate leaves
+        // the good payment paying for it. An order that was never paid (an underpayment returned
+        // while it waits for payment or after it was cancelled) keeps its status.
+        $moneyLeft = array_filter($this->moneyOnOrder($db, (int) $order['id']), static fn (array $p): bool => $p['status'] !== 'refunded') !== [];
         $previousStatus = $order['order_status'];
-        $newOrderStatus = ($fullyRefunded && $previousStatus !== 'cancelled') ? 'refunded' : $previousStatus;
+        $newOrderStatus = (!$moneyLeft && !in_array($previousStatus, ['cancelled', 'pending_payment'], true)) ? 'refunded' : $previousStatus;
+        $orderPaymentStatus = $this->orderPaymentStatus($db, $order);
 
         // Put goods back on sale only for a full refund where the items are not with the customer
         // (unshipped, returned, or a refund request the admin chose to restock). The admin may tick
@@ -737,11 +830,11 @@ class FulfillmentService
             [(int) $order['id'], $refundId]
         ) !== null;
         $restocked = 0;
-        if ($asked && $fullyRefunded && in_array($previousStatus, ['paid', 'processing', 'returned', 'refund_pending'], true)) {
+        if ($asked && !$moneyLeft && in_array($previousStatus, ['paid', 'processing', 'returned', 'refund_pending'], true)) {
             $this->releaseReservation($db, ['id' => $order['id'], 'applied_promo_code' => null]);
             $restocked = 1;
             $db->executeUpdate("UPDATE `refunds` SET `restocked` = 0 WHERE `order_id` = ? AND `id` <> ? AND `restocked` = 2", 'ii', [(int) $order['id'], $refundId]);
-        } elseif ($restock && !$fullyRefunded) {
+        } elseif ($restock && $moneyLeft) {
             $restocked = 2; // still wanted, once the rest of the money is refunded
         }
         $db->executeUpdate("UPDATE `refunds` SET `restocked` = ? WHERE `id` = ?", 'ii', [$restocked, $refundId]);
@@ -751,7 +844,7 @@ class FulfillmentService
                     `requires_attention` = IF(?, 0, `requires_attention`), `updated_at` = NOW()
              WHERE `id` = ?",
             'ssii',
-            [$newOrderStatus, $refundStatus, $fullyRefunded ? 1 : 0, (int) $order['id']]
+            [$newOrderStatus, $orderPaymentStatus, $moneyLeft ? 0 : 1, (int) $order['id']]
         );
         ProductSales::refreshForOrder($db, (int) $order['id']);
 
@@ -763,7 +856,7 @@ class FulfillmentService
                 (int) $order['id'],
                 $previousStatus,
                 $newOrderStatus,
-                sprintf('Refund of %s %s completed%s. Reason: %s', $refund['currency'], number_format((float) $refund['amount'], 2), $restocked ? ' and items restocked' : '', $refund['reason']),
+                sprintf('Refund of %s %s completed%s. Reason: %s', $refund['currency'], number_format((float) $refund['amount'], 2), $restocked === 1 ? ' and items restocked' : '', $refund['reason']),
                 $adminId,
             ]
         );
@@ -774,11 +867,11 @@ class FulfillmentService
         ], [
             'refund_id' => $refundId,
             'order_status' => $newOrderStatus,
-            'payment_status' => $refundStatus,
-            'restocked' => (bool) $restocked,
+            'payment_status' => $orderPaymentStatus,
+            'restocked' => $restocked === 1,
         ]);
 
-        $mailOrder = array_merge($order, ['order_status' => $newOrderStatus, 'payment_status' => $refundStatus]);
+        $mailOrder = array_merge($order, ['order_status' => $newOrderStatus, 'payment_status' => $orderPaymentStatus]);
         $mailExtra = [
             'reason' => (string) $refund['reason'],
             'amount' => (float) $refund['amount'],
@@ -788,6 +881,38 @@ class FulfillmentService
         $db->beforeCommit(static function () use ($mailOrder, $mailExtra): void {
             MailService::getInstance()->sendCancellationOrRefund($mailOrder, 'refund', $mailExtra);
         });
+    }
+
+    /**
+     * The order's payment status after a refund, from its confirmed payments. With none (only
+     * underpaid money, which never paid for the order) it stays as it was.
+     */
+    private function orderPaymentStatus(Database $db, array $order): string
+    {
+        $statuses = array_column($db->fetchAll(
+            "SELECT `status` FROM `payments` WHERE `order_id` = ? AND (`verified_at` IS NOT NULL OR `status` = 'successful')",
+            'i',
+            [(int) $order['id']]
+        ), 'status');
+        if ($statuses === []) {
+            return (string) $order['payment_status'];
+        }
+        if (in_array('partially_refunded', $statuses, true)) {
+            return 'partially_refunded';
+        }
+        return in_array('successful', $statuses, true) ? 'successful' : 'refunded';
+    }
+
+    /** Append a note to the order's attention flag, like PaymentFinalizer::flagAttention. */
+    private function flagAttention(Database $db, int $orderId, string $reason): void
+    {
+        $db->executeUpdate(
+            "UPDATE `orders` SET `requires_attention` = 1,
+                    `attention_reason` = LEFT(CONCAT_WS(' | ', NULLIF(`attention_reason`, ''), ?), 500)
+             WHERE `id` = ?",
+            'si',
+            [$reason, $orderId]
+        );
     }
 
     private function normalizeDateTime(string $value, string $field): string

@@ -97,6 +97,31 @@ $reportGross = (float) TestKit::get($A('GET', '/admin/analytics/report?range=30d
 $t->ok('overview and report agree on 30-day gross', abs($overviewGross - $reportGross) < 0.01, "overview {$overviewGross} vs report {$reportGross}");
 
 // -----------------------------------------------------------------------------
+$t->section('Net sales mean the same on the overview and in the report');
+$overviewKpis = (array) TestKit::get($A('GET', '/admin/dashboard/overview?period=30'), 'data.kpis');
+$report30 = (array) TestKit::get($A('GET', '/admin/analytics/report?range=30days'), 'data.summary');
+$t->ok('a paid order was cancelled with no refund', (float) ($report30['owed_refunds'] ?? 0) > 0);
+$t->check('the overview subtracts refunds owed too', round((float) $report30['net_sales'], 2), round((float) ($overviewKpis['net_sales'] ?? -1), 2));
+$t->check('and shows how much is owed', round((float) $report30['owed_refunds'], 2), round((float) ($overviewKpis['owed_refunds'] ?? -1), 2));
+
+// -----------------------------------------------------------------------------
+$t->section('Product and category sales leave out cancelled and refunded orders');
+if ($cancelled !== null) {
+    $paidLines = "FROM `order_items` oi JOIN `orders` o ON o.id = oi.order_id
+                  WHERE o.order_status NOT IN ('cancelled', 'refunded')
+                    AND EXISTS (SELECT 1 FROM `payments` p WHERE p.order_id = o.id AND p.status IN ('successful', 'partially_refunded', 'refunded') AND p.verified_at IS NOT NULL)";
+    $cancelledProduct = (int) $t->scalar("SELECT `product_id` FROM `order_items` WHERE `order_id` = ?", 'i', [$cancelled[2]]);
+    $expectedProduct = (float) $t->scalar("SELECT COALESCE(SUM(oi.line_total), 0) {$paidLines} AND oi.product_id = ?", 'i', [$cancelledProduct]);
+    $productRow = array_values(array_filter((array) ($data['top_products'] ?? []), static fn (array $p): bool => (int) $p['product_id'] === $cancelledProduct))[0] ?? [];
+    $t->check('report: product sales exclude the cancelled order', round($expectedProduct, 2), round((float) ($productRow['revenue'] ?? -1), 2));
+    $t->check('report: category sales add up to the same orders', round((float) $t->scalar("SELECT COALESCE(SUM(oi.line_total), 0) {$paidLines}"), 2), round(array_sum(array_map('floatval', array_column((array) ($data['category_breakdown'] ?? []), 'revenue'))), 2));
+    $overviewTop = array_values(array_filter((array) TestKit::get($A('GET', '/admin/dashboard/overview?period=30'), 'data.top_products'), static fn (array $p): bool => (int) $p['id'] === $cancelledProduct))[0] ?? [];
+    $t->check('overview: product sales exclude the cancelled order', round($expectedProduct, 2), round((float) ($overviewTop['total_revenue'] ?? -1), 2));
+    $t->ok('the report says these are before discounts', str_contains((string) ($data['formulas']['category_breakdown'] ?? ''), 'before discounts') && str_contains((string) ($data['formulas']['top_products'] ?? ''), 'before discounts'));
+    $t->ok('and so does the CSV', str_contains($A('GET', '/admin/analytics/export?range=all')['body'], 'Item sales before discounts (NGN)'));
+}
+
+// -----------------------------------------------------------------------------
 $t->section('CSV exports');
 $csv = $A('GET', '/admin/analytics/export?range=all');
 $t->check('analytics CSV downloads', 'text/csv; charset=UTF-8', $csv['headers']['content-type'] ?? null);
@@ -164,6 +189,20 @@ if ($magic !== null) {
 }
 $t->check('legacy broadcasts never pending', 0, (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `template` = 'marketing_broadcast' AND `status` = 'pending' AND JSON_EXTRACT(`payload`, '$.unsubscribe_url') IS NULL"));
 $t->ok('system status reports oldest queued email', array_key_exists('oldest_due_minutes', (array) TestKit::get($A('GET', '/admin/system-status'), 'data.mail')));
+
+// -----------------------------------------------------------------------------
+$t->section('Underpaid money sent back is in no sales figure');
+$under = $placeOrder();
+if ($under !== null) {
+    $underRef = 'REP-UNDER-' . bin2hex(random_bytes(4));
+    $t->sql("INSERT INTO `payments` (`order_id`, `provider`, `provider_reference`, `amount`, `currency`, `status`) VALUES (?, 'kora', ?, ?, 'NGN', 'pending')", 'isd', [$under[2], $underRef, $under[1]]);
+    (new App\Services\PaymentFinalizer($t->db))->finalizeSuccess($underRef, ['amount' => 100, 'currency' => 'NGN', 'label' => 'Kora']);
+    $beforeUnder = (array) TestKit::get($A('GET', '/admin/analytics/report?range=30days'), 'data.summary');
+    $t->check('the refund is recorded', 201, $A('POST', '/admin/refunds', ['json' => ['order_number' => $under[0], 'amount' => 100, 'reason' => 'Underpaid', 'status' => 'completed', 'restock' => false]])['status']);
+    $afterUnder = (array) TestKit::get($A('GET', '/admin/analytics/report?range=30days'), 'data.summary');
+    $t->check('net sales and refunds are unchanged', [$beforeUnder['net_sales'], $beforeUnder['total_refunded']], [$afterUnder['net_sales'], $afterUnder['total_refunded']]);
+    $t->check('the overview agrees', round((float) $afterUnder['net_sales'], 2), round((float) TestKit::get($A('GET', '/admin/dashboard/overview?period=30'), 'data.kpis.net_sales'), 2));
+}
 
 // -----------------------------------------------------------------------------
 $t->section('Sign-out is audited');
