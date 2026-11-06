@@ -1138,7 +1138,7 @@ class AdminOperationsController
             'environment' => Env::isProduction() ? 'production' : 'development',
             'runtime' => [
                 'php' => PHP_VERSION,
-                'missing_extensions' => $missing(['mysqli', 'curl', 'mbstring', 'openssl', 'json', 'fileinfo', 'simplexml', 'ctype']),
+                'missing_extensions' => $missing(['mysqli', 'curl', 'mbstring', 'openssl', 'json', 'simplexml', 'ctype']),
                 // Only scripts/backup.php needs these.
                 'missing_backup_extensions' => $missing(['zlib', 'phar']),
                 'opcache' => function_exists('opcache_get_status') && is_array(@opcache_get_status(false)),

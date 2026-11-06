@@ -17,7 +17,7 @@ $add = static function (string $what, ?bool $ok, string $detail) use (&$rows): v
 
 $add('PHP 8.2 or newer', version_compare(PHP_VERSION, '8.2.0', '>='), PHP_VERSION);
 $missing = array_values(array_filter(
-    ['mysqli', 'curl', 'mbstring', 'openssl', 'json', 'fileinfo', 'simplexml', 'ctype', 'zlib'],
+    ['mysqli', 'curl', 'mbstring', 'openssl', 'json', 'simplexml', 'ctype', 'zlib'],
     static fn (string $e): bool => !extension_loaded($e)
 ));
 $add('PHP extensions', $missing === [], $missing === [] ? 'all present' : 'missing: ' . implode(', ', $missing));

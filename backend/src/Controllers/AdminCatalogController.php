@@ -432,10 +432,11 @@ class AdminCatalogController
             'image/webp' => 'webp',
         ];
 
-        $finfo = new \finfo(FILEINFO_MIME_TYPE);
-        $mime = $finfo->file($file['tmp_name']);
+        // getimagesize() reads the file's own bytes and is always in PHP. Some shared hosts have no
+        // fileinfo extension, so uploads must not depend on it.
+        $mime = (string) (@getimagesize($file['tmp_name'])['mime'] ?? '');
 
-        if (!isset($allowedMimes[$mime]) || @getimagesize($file['tmp_name']) === false) {
+        if (!isset($allowedMimes[$mime])) {
             Response::error('Invalid image format. Allowed formats: JPEG, PNG, WebP.', 422, 'INVALID_IMAGE_TYPE');
         }
 

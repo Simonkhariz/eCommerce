@@ -9,7 +9,6 @@
     "ext-curl": "*",
     "ext-mbstring": "*",
     "ext-openssl": "*",
-    "ext-fileinfo": "*",
     "ext-simplexml": "*",
     "ext-ctype": "*"
   },

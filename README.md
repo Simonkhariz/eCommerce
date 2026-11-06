@@ -23,7 +23,7 @@ is ever exposed to JavaScript.
 
 ## Run it locally
 
-Requirements: Node 20.9+ (Next.js 16 needs it), PHP 8.2+ (extensions `mysqli`, `curl`, `mbstring`, `openssl`, `fileinfo`),
+Requirements: Node 20.9+ (Next.js 16 needs it), PHP 8.2+ (extensions `mysqli`, `curl`, `mbstring`, `openssl`),
 MySQL running (XAMPP is fine).
 
 ```bash

@@ -23,7 +23,7 @@ Hosts' websites often don't state these. Send it to their sales chat and keep th
 > I want to run a Node.js app and a PHP site on the same plan. Please confirm for the plan I'd buy:
 > 1. Does it have "Setup Node.js App" (the Node.js selector), and can I choose **Node.js 20 or newer**?
 > 2. Can I run a Next.js app from my own `server.js`, without running npm install on your server?
-> 3. Is **PHP 8.2 or newer** available, with mysqli, curl, mbstring, openssl, fileinfo and opcache?
+> 3. Is **PHP 8.2 or newer** available, with mysqli, curl, mbstring, openssl and opcache?
 > 4. Is the database **MySQL 8 or MariaDB 10.4 or newer**?
 > 5. Can I add a subdomain and choose its **document root**, including a folder outside public_html?
 > 6. What are the limits per account: **memory, processes (NPROC), entry processes and inodes**?
@@ -125,7 +125,7 @@ check that list. It writes `backend/storage/backups/for-host-<date>.sql.gz`.
 
 1. Upload `shopco-api.zip` to a new folder `shopco-api` in your home folder, **not** inside `public_html`,
    then **Extract** it.
-2. In **Select PHP Version**, choose 8.2 or newer and tick: mysqli, curl, mbstring, openssl, fileinfo,
+2. In **Select PHP Version**, choose 8.2 or newer and tick: mysqli, curl, mbstring, openssl,
    simplexml, ctype, zlib, opcache. Set `upload_max_filesize` to 8M, `post_max_size` to 10M.
 3. Rename `env.cpanel.example` to `.env`, and fill in every `<...>` value. Make a random
    `REVALIDATE_SECRET` on your PC: `php -r "echo bin2hex(random_bytes(24));"`.

@@ -61,7 +61,7 @@ backend/
 ## 3. Local Setup & Configuration
 
 ### Prerequisites
-- **PHP 8.2+** with extensions: `mysqli`, `curl`, `mbstring`, `openssl`, `json`, `fileinfo`.
+- **PHP 8.2+** with extensions: `mysqli`, `curl`, `mbstring`, `openssl`, `json`.
 - **XAMPP** (or standalone Apache + MySQL).
 
 ### Step 1: Configure Environment Variables

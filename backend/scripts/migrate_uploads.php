@@ -219,7 +219,7 @@ function copyOne(ObjectStorage $source, ObjectStorage $target, string $key, ?str
     if ($bytes === null) {
         throw new RuntimeException('not found at the source');
     }
-    $type = (string) (new finfo(FILEINFO_MIME_TYPE))->buffer($bytes);
+    $type = (string) (@getimagesizefromstring($bytes)['mime'] ?? 'unknown');
     if (!in_array($type, PICTURE_TYPES, true)) {
         return ['status' => 'skipped', 'size' => strlen($bytes), 'sha256' => '', 'content_type' => $type, 'checks' => [], 'error' => "not a picture ({$type})"];
     }

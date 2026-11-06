@@ -10,7 +10,7 @@ setting was changed.
 | Part | Requirement | Where it comes from |
 |---|---|---|
 | Storefront | Node.js 20.9 or newer (Next.js 16); `npm ci` on the server itself (sharp is built per system) | `node_modules/next/package.json` engines; `package.json` engines |
-| API | PHP 8.2+ with mysqli, curl, mbstring, openssl, json, fileinfo, simplexml, ctype | `backend/composer.json`; admin → System status → PHP lists any that are missing |
+| API | PHP 8.2+ with mysqli, curl, mbstring, openssl, json, simplexml, ctype | `backend/composer.json`; admin → System status → PHP lists any that are missing |
 | Backups | zlib (and phar when pictures are on the server's disk) | `scripts/backup.php` stops with the reason if missing |
 | PHP settings | `upload_max_filesize` and `post_max_size` at least 6M (pictures up to 5 MB; many hosts default to 2M); `max_execution_time` 120; OPcache on (halved response times in the load test) | System status shows the upload limit and OPcache |
 | Database | MySQL 8 or MariaDB 10.4+, InnoDB, utf8mb4 | Migrations use only syntax both accept; the session time zone is set as an offset (`+01:00`), so the server needs no time-zone tables |

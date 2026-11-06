@@ -77,6 +77,29 @@ $t->check('PNG uploaded', 201, $res['status']);
 $t->check('PNG text chunk removed', false, str_contains((string) file_get_contents($saved($res)), 'Secret Street'));
 
 // -----------------------------------------------------------------------------
+$t->section('Only real JPEG, PNG and WebP pictures are accepted (no PHP extension needed)');
+$fake = static function (string $name, string $bytes, string $claimedMime) use ($t, $upload): int {
+    $path = sys_get_temp_dir() . '/shopco-fake-' . getmypid() . '-' . $name;
+    file_put_contents($path, $bytes);
+    $t->cleanup(fn () => @unlink($path));
+    return $upload($path, $claimedMime)['status'];
+};
+$t->check('text renamed to .jpg is refused, whatever the browser claims', 422, $fake('note.jpg', 'just some text', 'image/jpeg'));
+$t->check('PHP code renamed to .png is refused', 422, $fake('shell.png', '<?php echo 1;', 'image/png'));
+$t->check('SVG is refused (it can carry script)', 422, $fake('logo.jpg', '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>', 'image/jpeg'));
+$t->check('a real GIF is refused: not an allowed format', 422, $fake('a.jpg', (string) base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'), 'image/jpeg'));
+$t->check('only the first bytes of a JPEG are refused', 422, $fake('cut.jpg', "\xFF\xD8\xFF\xE0", 'image/jpeg'));
+$res = $upload("{$fixtures}/plain.png", 'image/jpeg');
+$t->check('a real PNG the browser calls a JPEG is stored as a PNG', [201, 'png'], [$res['status'], pathinfo((string) ($res['json']['data']['file_name'] ?? ''), PATHINFO_EXTENSION)]);
+$usesFinfo = [];
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(BASE_PATH . '/src', FilesystemIterator::SKIP_DOTS)) as $source) {
+    if (str_contains((string) file_get_contents($source->getPathname()), 'finfo(')) {
+        $usesFinfo[] = $source->getFilename();
+    }
+}
+$t->check('the API never needs the fileinfo extension, which some hosts lack', [], $usesFinfo);
+
+// -----------------------------------------------------------------------------
 $t->section('Unused pictures: listed for review, removed only by a confirmed clean-up');
 $t->sql("DELETE FROM `store_settings` WHERE `key_name` LIKE 'retention_%'");
 array_map('unlink', glob("{$uploadDir}/*") ?: []);
