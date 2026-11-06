@@ -207,15 +207,11 @@ class CatalogController
         $topSelling = $this->productRepo->getTopSelling(self::HOME_ROW_LIMIT, $shown);
         $categories = $this->categoryRepo->getAllActive();
 
-        // Active promotions (validated by date and max_uses) and banners
+        // Only the code the owner chose to advertise: others may be private. Then the banners.
         $db = Database::getInstance();
         $promotions = $db->fetchAll(
-            "SELECT code, description, discount_type, discount_percent, discount_amount, min_order_amount, max_discount_amount FROM promotions 
-             WHERE is_active = 1 
-               AND (starts_at IS NULL OR starts_at <= NOW()) 
-               AND (expires_at IS NULL OR expires_at >= NOW()) 
-               AND (max_uses <= 0 OR used_count < max_uses)
-             ORDER BY id DESC LIMIT 1" // only the one the page advertises: others may be private codes
+            "SELECT code, description, discount_type, discount_percent, discount_amount, min_order_amount, max_discount_amount FROM promotions
+             WHERE " . \App\Services\CouponRules::ADVERTISED_SQL
         );
         $banners = $db->fetchAll(
             "SELECT id, title, subtitle, cta_text, cta_url, image_url, display_order FROM banners 

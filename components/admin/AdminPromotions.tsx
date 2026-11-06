@@ -69,6 +69,7 @@ interface FormState {
   starts_at: string;
   expires_at: string;
   is_active: boolean;
+  show_on_homepage: boolean;
 }
 
 const EMPTY_FORM: FormState = {
@@ -83,6 +84,7 @@ const EMPTY_FORM: FormState = {
   starts_at: '',
   expires_at: '',
   is_active: true,
+  show_on_homepage: false,
 };
 
 export function AdminPromotions() {
@@ -106,6 +108,7 @@ export function AdminPromotions() {
     max_discount_amount: p.max_discount_amount,
     max_uses: p.max_uses,
     is_active: p.is_active,
+    show_on_homepage: p.show_on_homepage,
     starts_at: dateOnly(p.starts_at) || null,
     expires_at: dateOnly(p.expires_at) || null,
     ...changes,
@@ -193,6 +196,11 @@ export function AdminPromotions() {
                     <td>
                       <span className="block font-mono text-[13px] font-semibold text-[#111827]">{p.code}</span>
                       {p.description && <span className="block max-w-[280px] truncate text-xs text-[#6b7280]">{p.description}</span>}
+                      {p.on_homepage_now ? (
+                        <span className="mt-1 block text-xs font-medium text-emerald-700">Showing on the homepage</span>
+                      ) : (
+                        p.show_on_homepage && <span className="mt-1 block text-xs text-[#6b7280]">Ticked for the homepage, not showing now</span>
+                      )}
                     </td>
                     <td className="tabular-nums">{p.label || `${p.discount_percent}% off`}</td>
                     <td className="whitespace-nowrap tabular-nums">
@@ -267,6 +275,7 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
               starts_at: dateOnly(promotion.starts_at),
               expires_at: dateOnly(promotion.expires_at),
               is_active: promotion.is_active,
+              show_on_homepage: promotion.show_on_homepage,
             }
       );
     }
@@ -311,6 +320,7 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
         max_discount_amount: fixed ? null : maxDiscount,
         max_uses: maxUses ?? 0,
         is_active: form.is_active,
+        show_on_homepage: form.show_on_homepage,
         starts_at: form.starts_at || null,
         expires_at: form.expires_at || null,
       });
@@ -408,6 +418,14 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
         </Field>
         <div className="sm:col-span-2">
           <Checkbox label="Active" hint="Paused codes are refused at checkout." checked={form.is_active} onChange={(v) => set('is_active', v)} />
+        </div>
+        <div className="sm:col-span-2">
+          <Checkbox
+            label="Show on homepage"
+            hint="Every visitor sees this code while it is live. Leave off for a private code. If several are ticked, only the newest live one shows."
+            checked={form.show_on_homepage}
+            onChange={(v) => set('show_on_homepage', v)}
+          />
         </div>
         {existing && existing.used_count > 0 && (
           <p className="text-xs text-[#6b7280] sm:col-span-2">

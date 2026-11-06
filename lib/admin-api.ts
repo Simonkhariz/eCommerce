@@ -484,6 +484,10 @@ export interface Promotion {
   max_uses: number;
   used_count: number;
   is_active: boolean;
+  /** The owner chose to advertise this code on the homepage. */
+  show_on_homepage: boolean;
+  /** This is the code the homepage shows right now. */
+  on_homepage_now: boolean;
   starts_at: string | null;
   expires_at: string | null;
   created_at: string;
@@ -500,6 +504,7 @@ export interface PromotionInput {
   /** 0 = unlimited */
   max_uses: number;
   is_active: boolean;
+  show_on_homepage: boolean;
   /** YYYY-MM-DD or null */
   starts_at: string | null;
   /** YYYY-MM-DD or null (the code works until the end of that day) */

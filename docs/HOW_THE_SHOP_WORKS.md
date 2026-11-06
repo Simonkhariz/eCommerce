@@ -59,7 +59,7 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **Daily database backups,** copied off the server to cloud storage, with a careful restore that
     works even on hosts without SSH.
 
-The backend has 1,655 automated checks in 22 test suites, the storefront 79 unit tests, and the
+The backend has 1,671 automated checks in 22 test suites, the storefront 79 unit tests, and the
 system has passed a full load test.
 
 ---
@@ -124,10 +124,11 @@ most once a minute, or immediately after the owner changes something. Top to bot
    shopper hovers or uses the keyboard), with arrows and a progress bar. More can be saved in admin;
    the first 5 active ones show. With none, a built-in hero picture appears.
    - Each banner has a title, subtitle, button and picture.
-   - The newest live promo code is **advertised to every visitor** in a pill, in its full wording,
-     e.g. *"Special offer: use code … for 10% off (up to ₦10,000) on orders of ₦20,000+"*. On phones
-     the wording wraps, so the minimum spend stays readable. **Only this one code is sent to visitors;**
-     other live codes stay private.
+   - A promo code the owner ticks **"Show on homepage"** is advertised to every visitor in a pill,
+     in its full wording, e.g. *"Special offer: use code … for 10% off (up to ₦10,000) on orders of
+     ₦20,000+"*. On phones the wording wraps, so the minimum spend stays readable. If several live
+     codes are ticked, the newest shows. With none ticked, there is no pill. **Only this one code is
+     sent to visitors;** every other code stays private.
    - Real store numbers: products in store, categories, states delivered to.
 2. **Brand strip:** a scrolling line of brand names set by the owner (hidden if none).
 3. **Flash sale offers:** up to 4 deal products with a live countdown when the owner set an end
@@ -855,6 +856,10 @@ past its deadline (section 6.2).
   - Optional start and end dates (a code runs to the end of its last day), and a maximum number of
     uses, up to 1,000,000 (or unlimited).
   - Can be paused.
+  - **Show on homepage:** off by default, so a new code stays private until the owner ticks it. The
+    list says which code is "Showing on the homepage". A ticked code that is paused, expired, used up,
+    not started yet, or behind a newer ticked code says "Ticked for the homepage, not showing now" and
+    comes back by itself when it is next in line.
   - **A code that has been used can't be renamed,** because orders refer to it by its text and a
     cancelled order gives its use back. Create a new code instead.
   - Statuses: Live, Paused, Scheduled, Expired, Used up.
@@ -1446,7 +1451,7 @@ proposal.
 
 **Proof in numbers:**
 
-- **1,655 automated backend checks** in 22 test suites. They run against a throw-away database
+- **1,671 automated backend checks** in 22 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data, buckets and Redis are never touched.
 - Plus 79 storefront unit tests, type checks, lint and a production build. They are run by hand
   before changes are finished; there is no automatic build server yet.
@@ -1569,7 +1574,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive once." |
 | 5 | A clean-up button behind a password field and an emailed code | "No clean-up without your password and an emailed code." |
 | 6 | A calendar with a backup box every night, flying to a cloud | "Daily backups, copied off the server, with a careful restore." |
-| 7 | A counter climbing: 1,655 ✓ | "Over 1,600 automated backend checks." |
+| 7 | A counter climbing: 1,671 ✓ | "Over 1,600 automated backend checks." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
@@ -1586,7 +1591,8 @@ Animated, not screen-recorded. Use the real numbers from section 8.
   - **set a WhatsApp number in Store settings before Video A scene 8,** or the "Pay via WhatsApp"
     button doesn't appear;
   - load demo products with photos and several sizes and colours;
-  - add one live promo code, a flash deal with an end time, banners and a few approved reviews;
+  - add one live promo code with "Show on homepage" ticked, a flash deal with an end time, banners
+    and a few approved reviews;
   - prepare one order of each kind: awaiting payment, WhatsApp "customer says paid", paid, and
     shipped.
 - **Show both phone and desktop:** the shop is designed phone-first (sticky add-to-cart bar,
@@ -1778,3 +1784,4 @@ When something changes, update the matching section in the same commit:
 | 6 Nov 2026 | Picture uploads no longer need PHP's fileinfo extension, which some shared hosts lack: the file's own bytes are read with `getimagesize`, and the same JPEG, PNG and WebP limit applies |
 | 6 Nov 2026 | Full review of the shop, admin and customer API, and fixes for what it found. **Money:** refunds go one payment at a time, newest first; underpaid and overpaid money can be refunded; an order becomes Refunded only when no money remains. **Flags:** "Mark as resolved" with a note; reported transfers that expire are flagged, can be recorded as late payments and stay out of the clean-up (migration 022 flagged older ones); a failed gateway check gets a grace period. **Reports:** one net sales definition on Overview and Analytics, sales count money received, item sales and units leave out cancelled and refunded orders, All time is all time. **Admin:** limits on prices, stock, uses, display order and text; numeric web addresses, renaming used coupons and overlapping zones refused; dialogs, uploads, paging and slow actions. **Security:** sign-in and payment notice limits, private catalogue data, technical text kept from customers, bad input refused. **Storefront:** checkout validation, kept details, sign-out and session handling, own reservations, Lagos-time deadlines, WhatsApp only with a number, page titles, receipts and the price filter. **Backups:** write failures are caught. Backend checks now 1,655 in 22 suites; storefront tests 77. Real Kora, Monnify and email delivery are still not run (section 11) |
 | 6 Nov 2026 | Final live checks of the review. Buttons a shopper taps at once show as not ready until the page can respond. Tabs keep up with sign-in and sign-out in other tabs. Phones are saved in one format (+234...) and found in admin search however they are typed. Receipts show the payment that stands, not a refunded duplicate. Delivery details stay until an order is paid. Refund forms start at the overpaid extra. Visitors no longer log an error on every page by asking whether they are signed in. |
+| 6 Nov 2026 | The owner chooses the homepage coupon with a "Show on homepage" tick; a new code stays private until ticked. Migration 023 ticks the code that was showing, so the homepage looks the same after the update |

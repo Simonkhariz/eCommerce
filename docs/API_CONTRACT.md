@@ -522,7 +522,7 @@ All `/api/v1/admin/*` endpoints need the admin session cookie (`shopco_admin`); 
 | `GET` | `/admin/refunds/eligibility?order_number=` | Paid, refunded, pending and refundable amounts, the payment reference and whether items can be restocked. |
 | `POST` | `/admin/refunds` | `{order_number, amount, reason, status: completed\|pending, restock, provider_refund_reference?}`. Records a refund (capped at the refundable amount); it does not move money. |
 | `PATCH` | `/admin/refunds/{id}` | `{status: completed\|rejected}` for a pending refund. |
-| `POST`/`PUT` | `/admin/promotions[/{id}]` | `code` (3-30 of A-Z 0-9 _ -), `discount_percent` 1-90, `max_uses` (0 = unlimited), `starts_at` / `expires_at` as `YYYY-MM-DD` (start of day / end of day). |
+| `POST`/`PUT` | `/admin/promotions[/{id}]` | `code` (3-30 of A-Z 0-9 _ -), `discount_percent` 1-90, `max_uses` (0 = unlimited), `starts_at` / `expires_at` as `YYYY-MM-DD` (start of day / end of day), `show_on_homepage` (default false; the homepage's `promotions` holds only the newest live ticked code). |
 | `DELETE` | `/admin/promotions/{id}` | Deletes an unused code; a code used on orders is deactivated instead (`deleted: false`). |
 | `POST`/`PUT` | `/admin/storefront/banners[/{id}]` | Title and image required; `cta_url` must be a store path (`/…`) or an `https://` URL. |
 | `PATCH` | `/admin/customers/{id}/status` | `{status: active\|suspended}`. Suspending signs the customer out everywhere. |

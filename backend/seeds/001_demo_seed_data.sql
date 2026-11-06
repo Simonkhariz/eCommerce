@@ -60,10 +60,10 @@ INSERT INTO `shipping_zones` (`name`, `code`, `description`, `states_covered`, `
 ON DUPLICATE KEY UPDATE `fee` = VALUES(`fee`);
 
 -- 3. Promotions & Coupon Codes
-INSERT INTO `promotions` (`code`, `description`, `discount_percent`, `max_uses`, `is_active`) VALUES
-('SHOP20', '20% off for verified new customers', 20, 1000, 1),
-('PANTO10', '10% promotional storewide discount', 10, 500, 1),
-('ENUGUFIRST', '15% inaugural launch coupon for Enugu shoppers', 15, 250, 1)
+INSERT INTO `promotions` (`code`, `description`, `discount_percent`, `max_uses`, `is_active`, `show_on_homepage`) VALUES
+('SHOP20', '20% off for verified new customers', 20, 1000, 1, 0),
+('PANTO10', '10% promotional storewide discount', 10, 500, 1, 0),
+('ENUGUFIRST', '15% inaugural launch coupon for Enugu shoppers', 15, 250, 1, 1)
 ON DUPLICATE KEY UPDATE `discount_percent` = VALUES(`discount_percent`);
 
 -- 4. Categories

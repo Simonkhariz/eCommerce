@@ -111,13 +111,66 @@ $t->sql('UPDATE `products` SET `units_sold` = ? WHERE `id` = ?', 'ii', [7, $ids[
 $t->check('ranked by units sold', [$ids[14], $ids[15], $ids[13]], $rowIds($home(), 'top_selling'));
 $t->check('and products with no sales never fill it', 3, count($rowIds($home(), 'top_selling')));
 
-$t->section('Only the coupon the page advertises is public');
-$codes = [$t->uniq('PUBLIC-A'), $t->uniq('PRIVATE-B')];
-$t->cleanup(fn () => $t->sql('DELETE FROM `promotions` WHERE `code` IN (?, ?)', 'ss', $codes));
-foreach ($codes as $code) {
-    $t->sql("INSERT INTO `promotions` (`code`, `description`, `discount_percent`, `is_active`) VALUES (?, 'Test', 5, 1)", 's', [$code]);
-}
-$shownCodes = array_column((array) ($home()['promotions'] ?? []), 'code');
-$t->check('the newest live code is the only one sent to visitors', [$codes[1]], $shownCodes);
+// -----------------------------------------------------------------------------
+$t->section('The admin chooses which coupon the homepage advertises');
+$originalTicks = array_column($t->db->fetchAll('SELECT `id` FROM `promotions` WHERE `show_on_homepage` = 1'), 'id');
+$t->cleanup(function () use ($t, $originalTicks): void {
+    foreach ($originalTicks as $id) {
+        $t->sql('UPDATE `promotions` SET `show_on_homepage` = 1 WHERE `id` = ?', 'i', [(int) $id]);
+    }
+});
+$t->sql('UPDATE `promotions` SET `show_on_homepage` = 0');
+$older = strtoupper(bin2hex(random_bytes(4)));
+$newer = strtoupper(bin2hex(random_bytes(4)));
+$t->cleanup(fn () => $t->sql('DELETE FROM `promotions` WHERE `code` IN (?, ?)', 'ss', [$older, $newer]));
+$shownCodes = static fn (): array => array_column((array) ($home()['promotions'] ?? []), 'code');
+$adminSend = static function (string $method, string $path, array $json = []) use ($t, $admin): array {
+    return $t->http($method, $path, ['jar' => $admin['jar'], 'csrf' => $admin['csrf'], 'json' => $json]);
+};
+$promoBody = static fn (string $code, array $over = []): array => $over + ['code' => $code, 'description' => 'Test', 'discount_percent' => 5];
+$olderId = (int) TestKit::get($adminSend('POST', '/admin/promotions', $promoBody($older)), 'data.id');
+$newerId = (int) TestKit::get($adminSend('POST', '/admin/promotions', $promoBody($newer)), 'data.id');
+$t->ok('both codes were created', $olderId > 0 && $newerId > 0);
+$t->check('a new code is private: nothing is advertised', [], $shownCodes());
+
+$t->check('ticking saves', 200, $adminSend('PUT', "/admin/promotions/{$olderId}", ['show_on_homepage' => true])['status']);
+$t->check('the ticked code shows straight away, not the newer private one', [$older], $shownCodes());
+
+$adminRow = static function (int $id) use ($t, $admin): array {
+    $items = (array) TestKit::get($t->http('GET', '/admin/promotions?per_page=100', ['jar' => $admin['jar']]), 'data.items');
+    return (array) (array_column($items, null, 'id')[$id] ?? []);
+};
+$row = $adminRow($olderId);
+$t->check('the admin list says it is showing', [true, true], [$row['show_on_homepage'] ?? null, $row['on_homepage_now'] ?? null]);
+$t->check('and that the other is not', [false, false], [$adminRow($newerId)['show_on_homepage'] ?? null, $adminRow($newerId)['on_homepage_now'] ?? null]);
+
+$adminSend('PUT', "/admin/promotions/{$newerId}", ['show_on_homepage' => true]);
+$t->check('with two ticked, only the newest is sent', [$newer], $shownCodes());
+$row = $adminRow($olderId);
+$t->check('the older one stays ticked, not showing', [true, false], [$row['show_on_homepage'] ?? null, $row['on_homepage_now'] ?? null]);
+
+$adminSend('PUT', "/admin/promotions/{$newerId}", ['is_active' => false]);
+$t->check('a paused code steps aside for the next ticked one', [$older], $shownCodes());
+$t->check('pausing keeps the tick', 1, (int) $t->scalar('SELECT `show_on_homepage` FROM `promotions` WHERE `id` = ?', 'i', [$newerId]));
+$adminSend('PUT', "/admin/promotions/{$newerId}", ['is_active' => true]);
+
+$adminSend('PUT', "/admin/promotions/{$newerId}", ['description' => 'Edited, tick not sent']);
+$t->check('an edit that leaves the tick out keeps it', [$newer], $shownCodes());
+
+$adminSend('PUT', "/admin/promotions/{$newerId}", ['show_on_homepage' => false]);
+$adminSend('PUT', "/admin/promotions/{$olderId}", ['expires_at' => '2020-01-01']);
+$t->check('an expired code is not advertised, even when ticked', [], $shownCodes());
+$adminSend('PUT', "/admin/promotions/{$olderId}", ['expires_at' => null, 'starts_at' => '2099-01-01']);
+$t->check('nor is one that has not started', [], $shownCodes());
+$adminSend('PUT', "/admin/promotions/{$olderId}", ['starts_at' => null, 'max_uses' => 3]);
+$t->check('it shows once it is live', [$older], $shownCodes());
+$t->sql('UPDATE `promotions` SET `used_count` = 3 WHERE `id` = ?', 'i', [$olderId]);
+$t->check('nor one that is used up', [], $shownCodes());
+$t->sql('UPDATE `promotions` SET `used_count` = 0 WHERE `id` = ?', 'i', [$olderId]);
+
+$adminSend('PUT', "/admin/promotions/{$olderId}", ['show_on_homepage' => false]);
+$t->check('unticking takes it off the page', [], $shownCodes());
+$check = $t->http('POST', '/checkout/validate-promo', ['json' => ['code' => $newer, 'subtotal' => 10000]]);
+$t->check('a private code still works at checkout', 200, $check['status']);
 
 exit($t->finish());

@@ -466,8 +466,11 @@ class AdminOperationsController
             'ii',
             [$perPage, $offset]
         );
+        $advertisedId = (int) ($this->db->fetchOne('SELECT `id` FROM `promotions` WHERE ' . \App\Services\CouponRules::ADVERTISED_SQL)['id'] ?? 0);
         foreach ($promotions as &$p) {
             $p['is_active'] = (bool) $p['is_active'];
+            $p['show_on_homepage'] = (bool) $p['show_on_homepage'];
+            $p['on_homepage_now'] = (int) $p['id'] === $advertisedId;
             $p['discount_percent'] = (int) $p['discount_percent'];
             $p['discount_type'] = \App\Services\CouponRules::type($p);
             $p['discount_amount'] = $p['discount_amount'] === null ? null : (float) $p['discount_amount'];
@@ -506,6 +509,8 @@ class AdminOperationsController
             ? (in_array($body['max_uses'], [null, ''], true) ? 0 : Input::wholeNumber($body['max_uses'], 0, Input::MAX_PROMO_USES))
             : (int) ($existing['max_uses'] ?? 0);
         $isActive = array_key_exists('is_active', $body) ? (int) (bool) $body['is_active'] : (int) ($existing['is_active'] ?? 1);
+        // Private unless the owner ticks it.
+        $showOnHomepage = array_key_exists('show_on_homepage', $body) ? (int) (bool) $body['show_on_homepage'] : (int) ($existing['show_on_homepage'] ?? 0);
 
         $date = static function ($value, string $time): ?string {
             if ($value === null || $value === '') {
@@ -574,7 +579,7 @@ class AdminOperationsController
             Response::error('Please fix the highlighted fields.', 422, 'VALIDATION_ERROR', $errors);
         }
 
-        return compact('code', 'description', 'type', 'percent', 'amount', 'minOrder', 'maxDiscount', 'maxUses', 'isActive', 'startsAt', 'expiresAt');
+        return compact('code', 'description', 'type', 'percent', 'amount', 'minOrder', 'maxDiscount', 'maxUses', 'isActive', 'showOnHomepage', 'startsAt', 'expiresAt');
     }
 
     public function createPromotion(): void
@@ -586,10 +591,10 @@ class AdminOperationsController
         }
 
         $id = (int) $this->db->insert(
-            "INSERT INTO `promotions` (`code`, `description`, `discount_type`, `discount_percent`, `discount_amount`, `min_order_amount`, `max_discount_amount`, `max_uses`, `is_active`, `starts_at`, `expires_at`)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            'sssidddiiss',
-            [$in['code'], $in['description'], $in['type'], $in['percent'], $in['amount'], $in['minOrder'], $in['maxDiscount'], $in['maxUses'], $in['isActive'], $in['startsAt'], $in['expiresAt']]
+            "INSERT INTO `promotions` (`code`, `description`, `discount_type`, `discount_percent`, `discount_amount`, `min_order_amount`, `max_discount_amount`, `max_uses`, `is_active`, `show_on_homepage`, `starts_at`, `expires_at`)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            'sssidddiiiss',
+            [$in['code'], $in['description'], $in['type'], $in['percent'], $in['amount'], $in['minOrder'], $in['maxDiscount'], $in['maxUses'], $in['isActive'], $in['showOnHomepage'], $in['startsAt'], $in['expiresAt']]
         );
 
         AuditService::record($this->adminId(), 'promotion.create', 'promotion', (string) $id, null, $in);
@@ -618,10 +623,10 @@ class AdminOperationsController
         $this->db->executeUpdate(
             "UPDATE `promotions`
              SET `code` = ?, `description` = ?, `discount_type` = ?, `discount_percent` = ?, `discount_amount` = ?, `min_order_amount` = ?,
-                 `max_discount_amount` = ?, `max_uses` = ?, `is_active` = ?, `starts_at` = ?, `expires_at` = ?
+                 `max_discount_amount` = ?, `max_uses` = ?, `is_active` = ?, `show_on_homepage` = ?, `starts_at` = ?, `expires_at` = ?
              WHERE `id` = ?",
-            'sssidddiissi',
-            [$in['code'], $in['description'], $in['type'], $in['percent'], $in['amount'], $in['minOrder'], $in['maxDiscount'], $in['maxUses'], $in['isActive'], $in['startsAt'], $in['expiresAt'], $id]
+            'sssidddiiissi',
+            [$in['code'], $in['description'], $in['type'], $in['percent'], $in['amount'], $in['minOrder'], $in['maxDiscount'], $in['maxUses'], $in['isActive'], $in['showOnHomepage'], $in['startsAt'], $in['expiresAt'], $id]
         );
 
         AuditService::record($this->adminId(), 'promotion.update', 'promotion', (string) $id, $promo, $in);

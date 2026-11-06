@@ -16,6 +16,16 @@ namespace App\Services;
  */
 final class CouponRules
 {
+    /**
+     * Which code the homepage advertises: the newest live one the owner ticked. Every other code
+     * stays private. Used by the homepage and by the admin list's "showing now" note.
+     */
+    public const ADVERTISED_SQL = "`show_on_homepage` = 1 AND `is_active` = 1
+        AND (`starts_at` IS NULL OR `starts_at` <= NOW())
+        AND (`expires_at` IS NULL OR `expires_at` >= NOW())
+        AND (`max_uses` <= 0 OR `used_count` < `max_uses`)
+        ORDER BY `id` DESC LIMIT 1";
+
     /** @param array<string, mixed> $promo a promotions row */
     public static function type(array $promo): string
     {
