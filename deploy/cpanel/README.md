@@ -189,7 +189,8 @@ Turn on dev mode (admin → **Store settings**), then open **System status**:
 
 - **Visitor addresses must show your own public address** (compare with a "what is my IP" site). If it
   shows the host's address, every visitor is being counted as one person, so 10 orders in 10 minutes
-  from the whole shop would be refused. Add the address it shows to `TRUSTED_PROXIES` in `.env`. Test
+  from the whole shop would be refused, and 50 failed sign-ins by anyone would lock everyone out of
+  signing in for 15 minutes, you included. Add the address it shows to `TRUSTED_PROXIES` in `.env`. Test
   from two different connections, such as Wi-Fi and mobile data, and if both show the same address,
   tell me; the host's proxy may need handling. (In the rehearsal, once the storefront's address
   was trusted, the real visitor's address came through, and faked ones were ignored.)

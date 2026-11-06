@@ -403,7 +403,7 @@ class FulfillmentService
             $adminId = $this->resolveUserId($adminId, $db);
             $order = $this->lockOrder($db, $orderId);
 
-            $open = array_values(array_filter($this->moneyOnOrder($db, $orderId, true), static fn (array $p): bool => $p['status'] !== 'refunded'));
+            $open = array_values(array_filter($this->moneyOnOrder($db, $orderId, true), static fn (array $p): bool => !$p['settled']));
             if ($open === []) {
                 throw new InvalidArgumentException('This order has no successful payment to refund.');
             }
@@ -520,7 +520,7 @@ class FulfillmentService
      * in the order refunds take it: underpaid money first (it never paid for the order), then the
      * newest confirmed payment, so a duplicate is refunded before the payment that paid the order.
      *
-     * @return list<array<string, mixed>> payment rows plus received, refunded, pending_refunds, left
+     * @return list<array<string, mixed>> payment rows plus received, refunded, pending_refunds, left, settled (nothing more to refund)
      */
     public function moneyOnOrder(Database $db, int $orderId, bool $lock = false): array
     {
@@ -544,9 +544,17 @@ class FulfillmentService
             $payment['refunded'] = (float) $refunds['completed'];
             $payment['pending_refunds'] = (float) $refunds['pending'];
             $payment['left'] = round($payment['received'] - $payment['refunded'] - $payment['pending_refunds'], 2);
+            $payment['settled'] = $payment['status'] === 'refunded'
+                || (!self::isConfirmed($payment) && $payment['received'] - $payment['refunded'] <= 0.005);
         }
         unset($payment);
         return $payments;
+    }
+
+    /** Did this payment pay for the order? Underpaid money on an attempt never did. */
+    private static function isConfirmed(array $payment): bool
+    {
+        return $payment['verified_at'] !== null || in_array($payment['status'], ['successful', 'partially_refunded', 'refunded'], true);
     }
 
     /**
@@ -628,10 +636,13 @@ class FulfillmentService
         $order['payments'] = $payments;
         // Primary payment: the successful one if any, else the latest attempt.
         $order['payment'] = null;
-        foreach ($payments as $p) {
-            if (in_array($p['status'], ['successful', 'partially_refunded', 'refunded'], true)) {
-                $order['payment'] = $p;
-                break;
+        // A refunded duplicate must not hide the payment that really paid for the order.
+        foreach (['successful', 'partially_refunded', 'refunded'] as $wanted) {
+            foreach ($payments as $p) {
+                if ($p['status'] === $wanted) {
+                    $order['payment'] = $p;
+                    break 2;
+                }
             }
         }
         $order['payment'] = $order['payment'] ?? ($payments[0] ?? null);
@@ -815,14 +826,21 @@ class FulfillmentService
             [(int) $payment['id']]
         );
         $fullyRefunded = (float) $completed['total'] >= self::receivedOn($payment) - 0.01;
-        $refundStatus = $fullyRefunded ? 'refunded' : 'partially_refunded';
+        if (self::isConfirmed($payment)) {
+            $refundStatus = $fullyRefunded ? 'refunded' : 'partially_refunded';
+        } else {
+            // Underpaid money never paid for the order. "refunded" means paid to everything that
+            // reads a payment (the customer's page would celebrate), so the attempt keeps its
+            // status; once all of it has gone back, an open attempt is closed as failed.
+            $refundStatus = $fullyRefunded && $payment['status'] === 'pending' ? 'failed' : (string) $payment['status'];
+        }
 
         $db->executeUpdate("UPDATE `payments` SET `status` = ?, `updated_at` = NOW() WHERE `id` = ?", 'si', [$refundStatus, (int) $payment['id']]);
 
         // The order is refunded only when none of its money is left: refunding a duplicate leaves
         // the good payment paying for it. An order that was never paid (an underpayment returned
         // while it waits for payment or after it was cancelled) keeps its status.
-        $moneyLeft = array_filter($this->moneyOnOrder($db, (int) $order['id']), static fn (array $p): bool => $p['status'] !== 'refunded') !== [];
+        $moneyLeft = array_filter($this->moneyOnOrder($db, (int) $order['id']), static fn (array $p): bool => !$p['settled']) !== [];
         $previousStatus = $order['order_status'];
         $newOrderStatus = (!$moneyLeft && !in_array($previousStatus, ['cancelled', 'pending_payment'], true)) ? 'refunded' : $previousStatus;
         $orderPaymentStatus = $this->orderPaymentStatus($db, $order);

@@ -874,10 +874,13 @@ try {
     $u1Row = orderRow($u1['order_number']);
     check('all of it refunded: the flag clears, the order still waits for payment', $u1Row['order_status'] === 'pending_payment' && $u1Row['payment_status'] === 'pending' && (int) $u1Row['requires_attention'] === 0, json_encode([$u1Row['order_status'], $u1Row['payment_status']]));
     check('its stock stays held until the order expires', stockOf($variantA) === $u1Stock);
-    check('the attempt is marked refunded', $payStatus($u1Ref) === 'refunded');
+    check('the attempt closes as failed, never as refunded: that would read as paid', $payStatus($u1Ref) === 'failed');
+    $u1Live = (new App\Services\LiveStatus($db))->snapshot($u1Id);
+    check('the customer is not told it was paid', $u1Live['status'] === 'failed' && $u1Live['final'] === false, json_encode($u1Live));
+    expectThrows('with all of it returned, nothing more can be refunded', fn () => $fulfillment->recordRefund($u1Id, 1, 'Again', 'completed', false, null), 'no successful payment');
     $db->execute("UPDATE `orders` SET `expires_at` = NOW() - INTERVAL 1 MINUTE WHERE `id` = ?", 'i', [$u1Id]);
     $fulfillment->expireOrder($u1Id);
-    check('when it expires the stock goes back and the refund record stays', stockOf($variantA) === $u1Stock + 2 && $payStatus($u1Ref) === 'refunded');
+    check('when it expires the stock goes back and the refund record stays', stockOf($variantA) === $u1Stock + 2 && (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `refunds` WHERE `order_id` = ?", 'i', [$u1Id])['c'] === 2);
 
     // Underpaid, then paid in full another way: the stray money is refunded before the good payment.
     $u2 = $placeOrder($line);
@@ -890,7 +893,8 @@ try {
     check('the order is paid, the stray attempt closed but its money remembered', orderRow($u2['order_number'])['order_status'] === 'paid' && $payStatus($u2Stray) === 'cancelled');
     $fulfillment->recordRefund($u2Id, 700, 'Stray money', 'completed', false, null);
     $u2After = orderRow($u2['order_number']);
-    check('the stray money goes first; the order stays paid', $payStatus($u2Stray) === 'refunded' && $payStatus($u2Good) === 'successful' && $u2After['order_status'] === 'paid' && $u2After['payment_status'] === 'successful', json_encode([$payStatus($u2Stray), $payStatus($u2Good), $u2After['order_status'], $u2After['payment_status']]));
+    check('the stray money goes first; the order stays paid', $payStatus($u2Stray) === 'cancelled' && $payStatus($u2Good) === 'successful' && $u2After['order_status'] === 'paid' && $u2After['payment_status'] === 'successful', json_encode([$payStatus($u2Stray), $payStatus($u2Good), $u2After['order_status'], $u2After['payment_status']]));
+    check('and is settled: the next refund goes to the good payment', array_values(array_filter($fulfillment->moneyOnOrder($db, $u2Id), static fn (array $p): bool => !$p['settled']))[0]['provider_reference'] === $u2Good);
 
     // -----------------------------------------------------------------------
     echo "== \"I've sent the transfer\", then the order expires\n";

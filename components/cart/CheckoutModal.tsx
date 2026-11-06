@@ -151,13 +151,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
   // Read on the browser only; nothing here is drawn until checkout is opened, so the first
   // render still matches the server's.
   const [formData, setFormData] = useState<CheckoutForm>(formFromDraft);
+  // Whose details the form holds: another account signing in must not see or send them.
+  const [formOwner, setFormOwner] = useState<string | null>(() => {
+    const owner = readCheckoutDraft()?.ownerId;
+    return typeof owner === 'string' ? owner : null;
+  });
 
   // Kept for this tab only, without the delivery option (chosen again from the live quote).
   useEffect(() => {
     const details = { ...formData, selectedZoneId: undefined };
-    if (Object.values(details).some(Boolean)) saveCheckoutDraft(details);
+    if (Object.values(details).some(Boolean)) saveCheckoutDraft({ ...details, ownerId: formOwner });
     else clearCheckoutDraft();
-  }, [formData]);
+  }, [formData, formOwner]);
 
   // Prefill from the signed-in customer and their default address, once per account and
   // address, never overwriting what was typed. Adjusted while rendering (React's pattern for
@@ -168,15 +173,21 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
   if (prefillKey !== prefilledFor) {
     setPrefilledFor(prefillKey);
     if (user) {
-      setFormData((prev) => ({
-        ...prev,
-        fullName: prev.fullName || defaultAddr?.recipient_name || user.full_name || '',
-        email: prev.email || user.email || '',
-        phone: prev.phone || defaultAddr?.phone || user.phone || '',
-        address: prev.address || defaultAddr?.street_address || '',
-        city: prev.city || defaultAddr?.city || '',
-        state: prev.state || (defaultAddr?.state && NIGERIAN_STATES.includes(defaultAddr.state) ? defaultAddr.state : ''),
-      }));
+      const userId = String(user.id);
+      const otherAccount = formOwner !== null && formOwner !== userId;
+      setFormOwner(userId);
+      setFormData((current) => {
+        const prev = otherAccount ? EMPTY_FORM : current;
+        return {
+          ...prev,
+          fullName: prev.fullName || defaultAddr?.recipient_name || user.full_name || '',
+          email: prev.email || user.email || '',
+          phone: prev.phone || defaultAddr?.phone || user.phone || '',
+          address: prev.address || defaultAddr?.street_address || '',
+          city: prev.city || defaultAddr?.city || '',
+          state: prev.state || (defaultAddr?.state && NIGERIAN_STATES.includes(defaultAddr.state) ? defaultAddr.state : ''),
+        };
+      });
     } else if (prefilledFor) {
       // Signed out: that cleared the kept details, so the next person gets an empty form. A
       // session that merely expired keeps what was typed.
@@ -608,7 +619,8 @@ function CheckoutSession({
         return;
       }
     } catch (err) {
-      if (!(err instanceof ApiError && (err.statusCode === 403 || err.statusCode === 404))) {
+      // A refused security token says nothing about the order, which still holds its stock.
+      if (!(err instanceof ApiError && err.statusCode === 404)) {
         setPaymentError(errorMessage(err, 'We could not reach the store just now. Please try again in a moment.'));
         return;
       }

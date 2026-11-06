@@ -166,7 +166,7 @@ class AdminOperationsController
     // =========================================================================
 
     /** Money actually received from a customer (verified payments, before refunds). */
-    private const PAID_ORDER_CONDITION = "o.payment_status IN ('successful', 'partially_refunded')";
+    private const PAID_ORDER_CONDITION = "o.payment_status IN ('successful', 'partially_refunded') AND o.order_status NOT IN ('cancelled', 'refunded')";
 
     /**
      * GET /api/v1/admin/customers?search=&status=
@@ -231,7 +231,7 @@ class AdminOperationsController
         );
         $summary = $this->db->fetchOne(
             "SELECT COUNT(*) AS total_orders,
-                    COALESCE(SUM(CASE WHEN o.payment_status IN ('successful', 'partially_refunded') THEN o.grand_total ELSE 0 END), 0) AS total_spend
+                    COALESCE(SUM(CASE WHEN " . self::PAID_ORDER_CONDITION . " THEN o.grand_total ELSE 0 END), 0) AS total_spend
              FROM `orders` o WHERE o.user_id = ?",
             'i',
             [$id]

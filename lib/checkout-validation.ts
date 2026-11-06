@@ -19,7 +19,7 @@ export function validateCheckoutDetails(form: { fullName: string; phone: string;
   if ((form.fullName.match(/\p{L}/gu) ?? []).length < 2) {
     errors.fullName = 'Enter your full name (at least 2 letters).';
   }
-  if (!/^(?:0\d{10}|\+234\d{10})$/.test(cleanPhone(form.phone))) {
+  if (!/^(?:0\d{10}|\+?2340?\d{10})$/.test(cleanPhone(form.phone))) {
     errors.phone = 'Enter a Nigerian phone number: 11 digits starting with 0, or +234 and 10 digits.';
   }
   if (form.address.trim().length < 3) {

@@ -74,10 +74,11 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
   };
 
   // A form without a submit button doesn't submit on Enter when it has two boxes.
-  const applyOnEnter = (e: React.KeyboardEvent) => {
+  const applyOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    applyPrice();
+    // Leaving the box applies the price (onBlur); a box left focused would ignore the Back button.
+    e.currentTarget.blur();
   };
 
   const categories = facets?.categories ?? [];

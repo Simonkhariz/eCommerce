@@ -258,7 +258,7 @@ $placeWith = static fn (array $change, array $extra = []): array => $t->http('PO
 $ordersBefore = (int) $t->scalar('SELECT COUNT(*) FROM `orders`');
 foreach ([
     'full_name' => ['.', 'A', '12 34', 'A.'],
-    'phone' => ['1', '0803123456', '080312345678', '803 123 4567', '+23408031234567', '+44 20 7946 0958', 'abc'],
+    'phone' => ['1', '0803123456', '080312345678', '803 123 4567', '+23480312345', '+44 20 7946 0958', 'abc'],
     'address_line1' => ['.', 'ab', '  a '],
     'city' => ['.', 'ab'],
 ] as $field => $badValues) {

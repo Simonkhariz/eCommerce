@@ -294,7 +294,7 @@ class MailService
         }
 
         $paid = $this->db->fetchOne(
-            "SELECT COALESCE(SUM(`amount`), 0) AS paid FROM `payments`
+            "SELECT COALESCE(SUM(COALESCE(`amount_received`, `amount`)), 0) AS paid FROM `payments`
              WHERE `order_id` = ? AND `status` IN ('successful', 'partially_refunded')",
             'i',
             [$data['order_id']]

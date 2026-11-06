@@ -147,6 +147,8 @@ $ids = [];
 foreach (['a', 'b', 'c'] as $n) {
     $ids[] = $queue("busy-{$n}@{$domain}");
 }
+// Anything earlier suites left due must not take the refusal instead of these three.
+$t->sql('UPDATE `email_outbox` SET `next_attempt_at` = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE `status` = \'pending\' AND `id` NOT IN (' . implode(',', $ids) . ') AND (`next_attempt_at` IS NULL OR `next_attempt_at` <= NOW())');
 $before = count($requests());
 $summary = $mail->processQueue(10);
 $t->check('the batch stops at the first "too many requests"', 1, count($requests()) - $before);

@@ -453,6 +453,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // An order placed from this cart can be paid away from the payment return page: a WhatsApp
   // transfer the store confirms later, or a gateway tab closed before it redirected back.
   const lastPendingCheck = useRef(0);
+  const revalidateRef = useRef<() => Promise<void>>(async () => {});
   const checkPendingOrder = useCallback(async (force = false): Promise<PendingOrderOutcome> => {
     const pending = readPendingOrder();
     if (!pending) return 'none';
@@ -470,6 +471,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       if (orderStatus === 'cancelled') {
         clearPendingOrder(pending.orderNumber);
+        // A check running alongside this one may have counted the order's reservation as stock.
+        void revalidateRef.current();
         return 'cancelled';
       }
       return 'pending';
@@ -598,6 +601,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsRevalidating(false);
     }
   }, []);
+  useEffect(() => {
+    revalidateRef.current = revalidateCart;
+  }, [revalidateCart]);
 
   // Check prices and stock once the cart has loaded.
   const revalidatedFor = useRef<string | null>(null);

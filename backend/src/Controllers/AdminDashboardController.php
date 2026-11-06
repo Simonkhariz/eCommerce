@@ -368,7 +368,9 @@ class AdminDashboardController
         );
 
         $units = (int) ($this->db->fetchOne(
-            "SELECT COALESCE(SUM(quantity), 0) AS units FROM `order_items` WHERE order_id IN ({$paidInWindow})",
+            "SELECT COALESCE(SUM(oi.quantity), 0) AS units FROM `order_items` oi
+             JOIN `orders` o ON o.id = oi.order_id AND o.order_status NOT IN ('cancelled', 'refunded')
+             WHERE oi.order_id IN ({$paidInWindow})",
             'ss',
             $w
         )['units'] ?? 0);

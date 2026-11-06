@@ -22,9 +22,12 @@ test('a name needs two letters, not two characters', () => {
   assert.equal(validateCheckoutDetails({ ...good, fullName: 'Al' }).fullName, undefined);
 });
 
-test('a Nigerian phone number is 0 and 10 digits, or +234 and 10 digits', () => {
-  for (const phone of ['0803123456', '080312345678', '8031234567', '+23408031234567', '2348031234567', '+1 555 123 4567', '0803123456a']) {
+test('a Nigerian phone number is 0 and 10 digits, or 234 and 10 digits', () => {
+  for (const phone of ['0803123456', '080312345678', '8031234567', '+1 555 123 4567', '0803123456a', '+23480312345', '+44 20 7946 0958']) {
     assert.ok(validateCheckoutDetails({ ...good, phone }).phone, phone);
+  }
+  for (const phone of ['2348031234567', '234 803 123 4567', '+234 0803 123 4567', '+2348031234567']) {
+    assert.equal(validateCheckoutDetails({ ...good, phone }).phone, undefined, phone);
   }
   assert.equal(cleanPhone(' (0803) 123-4567 '), '08031234567');
 });
