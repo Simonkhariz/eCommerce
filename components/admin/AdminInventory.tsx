@@ -245,6 +245,7 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
         open={!!target}
         onClose={() => setTarget(null)}
         busy={saving}
+        persistent
         size="sm"
         title="Adjust stock"
         description={target ? `${target.product_name} · ${variantLabel(target.size, target.color_name)} · ${target.sku}` : undefined}

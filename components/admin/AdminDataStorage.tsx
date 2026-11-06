@@ -133,6 +133,11 @@ function recordTotal(counts: Record<string, number>): number {
   return Object.entries(counts).reduce((sum, [key, n]) => (key === 'inactive_customers' ? sum : sum + n), 0);
 }
 
+/** "1 record", "2 records". */
+function recordCount(n: number): string {
+  return `${n.toLocaleString()} record${n === 1 ? '' : 's'}`;
+}
+
 /**
  * Admin → Data & storage: keep periods, database size and speed, and the exact records that
  * are past their keep period. Nothing is removed automatically: the admin reviews the records
@@ -314,7 +319,7 @@ function ReviewPanel({ data, onChanged }: { data: DataOverview; onChanged: () =>
       <div className="flex flex-wrap items-center gap-3 border-t border-[#f3f4f6] px-4 py-3">
         <Button variant="danger" onClick={() => setConfirming(true)} disabled={total === 0}>
           <ShieldCheck className="size-3.5" aria-hidden="true" />
-          Clean up {total > 0 ? `${total.toLocaleString()} records` : ''}…
+          Clean up {total > 0 ? recordCount(total) : ''}…
         </Button>
         <p className="text-xs text-[#6b7280]">You&apos;ll be asked for your password and a one-time code from your email.</p>
       </div>
@@ -451,7 +456,8 @@ function CleanupDialog({ data, onClose, onDone }: { data: DataOverview; onClose:
     setErrors({});
     try {
       const { removed } = await adminRunCleanup(challenge.confirmation_id, code);
-      toast.success(`Clean-up finished: ${recordTotal(removed).toLocaleString()} old records removed. All admins have been emailed.`);
+      const count = recordTotal(removed);
+      toast.success(`Clean-up finished: ${count.toLocaleString()} old record${count === 1 ? '' : 's'} removed. All admins have been emailed.`);
       onDone();
     } catch (err) {
       fail(err, 'code');
@@ -478,11 +484,12 @@ function CleanupDialog({ data, onClose, onDone }: { data: DataOverview; onClose:
       open
       onClose={onClose}
       busy={busy}
+      persistent
       title={challenge ? 'Enter the code from your email' : 'Confirm it’s you'}
       description={
         challenge
           ? undefined
-          : `${total.toLocaleString()} records you reviewed (as of ${formatDateTime(data.health.as_of)}) will be permanently removed.`
+          : `${recordCount(total)} you reviewed (as of ${formatDateTime(data.health.as_of)}) will be permanently removed.`
       }
       footer={
         <>

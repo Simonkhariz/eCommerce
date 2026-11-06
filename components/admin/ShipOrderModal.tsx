@@ -70,6 +70,7 @@ export function ShipOrderModal({ orderNumber, onClose, onShipped }: ShipOrderMod
       open={!!orderNumber}
       onClose={onClose}
       busy={saving}
+      persistent
       title={`Ship ${orderNumber ?? ''}`}
       description="Enter the courier details after handing the parcel over."
       footer={

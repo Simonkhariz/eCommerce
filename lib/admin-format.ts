@@ -7,6 +7,9 @@ import type { StatusTone } from '@/lib/order-status';
 
 export { formatPrice };
 
+/** What the sales figures per product and category mean (see the API's report formulas). */
+export const ITEM_SALES_NOTE = 'Item prices before discounts and delivery. Cancelled and refunded orders are left out.';
+
 /** Numbers from MySQL arrive as strings; treat anything unparsable as 0. */
 export function num(value: unknown): number {
   const n = typeof value === 'number' ? value : parseFloat(String(value ?? ''));

@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { AnalyticsReport, adminDownloadExport, adminGetAnalyticsReport, errorMessage } from '@/lib/admin-api';
-import { formatDate, formatPrice, gatewayLabel, humanize, num } from '@/lib/admin-format';
+import { ITEM_SALES_NOTE, formatDate, formatPrice, gatewayLabel, humanize, num } from '@/lib/admin-format';
 import {
   Button,
   DataState,
@@ -288,12 +288,14 @@ function Report({ report }: { report: AnalyticsReport }) {
           {topProducts.length === 0 ? (
             <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No paid sales in this range.</p>
           ) : (
+            <>
+            <p className="px-4 py-2 text-xs text-[#6b7280]">{ITEM_SALES_NOTE}</p>
             <Table minWidth={420}>
               <thead>
                 <tr>
                   <th scope="col">Product</th>
                   <th scope="col" className="text-right">Units</th>
-                  <th scope="col" className="text-right">Revenue</th>
+                  <th scope="col" className="text-right">Item sales</th>
                 </tr>
               </thead>
               <tbody>
@@ -306,6 +308,7 @@ function Report({ report }: { report: AnalyticsReport }) {
                 ))}
               </tbody>
             </Table>
+            </>
           )}
         </Panel>
 
@@ -313,13 +316,15 @@ function Report({ report }: { report: AnalyticsReport }) {
           {categories.length === 0 ? (
             <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No paid sales in this range.</p>
           ) : (
+            <>
+            <p className="px-4 py-2 text-xs text-[#6b7280]">{ITEM_SALES_NOTE}</p>
             <Table minWidth={420}>
               <thead>
                 <tr>
                   <th scope="col">Category</th>
                   <th scope="col" className="text-right">Units</th>
                   <th scope="col" className="text-right">Orders</th>
-                  <th scope="col" className="text-right">Revenue</th>
+                  <th scope="col" className="text-right">Item sales</th>
                 </tr>
               </thead>
               <tbody>
@@ -333,6 +338,7 @@ function Report({ report }: { report: AnalyticsReport }) {
                 ))}
               </tbody>
             </Table>
+            </>
           )}
         </Panel>
       </div>

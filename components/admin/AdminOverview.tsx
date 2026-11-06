@@ -20,7 +20,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { adminGetOverview, DashboardOverview } from '@/lib/admin-api';
-import { formatDate, formatDateTime, formatPrice, formatRelative, gatewayLabel, humanize, num, orderStatus, paymentStatus } from '@/lib/admin-format';
+import { ITEM_SALES_NOTE, formatDate, formatDateTime, formatPrice, formatRelative, gatewayLabel, humanize, num, orderStatus, paymentStatus } from '@/lib/admin-format';
 import type { StatusTone } from '@/lib/order-status';
 import { AdminIcon } from '@/components/admin/AdminIcon';
 import { useAdminSession } from '@/components/admin/AdminAuthGate';
@@ -349,7 +349,7 @@ function KpiCards({ data }: { data: DashboardOverview }) {
         title="Net sales"
         icon={<Wallet className="size-4" aria-hidden="true" />}
         value={formatPrice(num(kpis.net_sales))}
-        hint={`${formatPrice(num(kpis.gross_sales))} received, ${formatPrice(num(kpis.total_refunded))} refunded`}
+        hint={`${formatPrice(num(kpis.gross_sales))} received, ${formatPrice(num(kpis.total_refunded))} refunded${num(kpis.owed_refunds) > 0 ? `, ${formatPrice(num(kpis.owed_refunds))} owed on cancelled orders` : ''}`}
         delta={deltas.net_sales}
         days={period.days}
         series={buckets.map((b) => b.sales)}
@@ -438,6 +438,7 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
           </div>
           <dl className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
             <MiniStat label="Refunded" value={formatPrice(num(data.kpis.total_refunded))} />
+            {num(data.kpis.owed_refunds) > 0 && <MiniStat label="Refunds owed" value={formatPrice(num(data.kpis.owed_refunds))} />}
             <MiniStat label="Orders placed" value={num(data.kpis.total_orders).toLocaleString()} delta={data.deltas.total_orders} />
             <MiniStat label="New customers" value={num(data.kpis.new_customers).toLocaleString()} delta={data.deltas.new_customers} />
           </dl>
@@ -1052,6 +1053,8 @@ function TopProducts({ data }: { data: DashboardOverview }) {
           <p className="text-xs text-[#6b7280]">Products from orders with a verified payment are ranked by units sold.</p>
         </div>
       ) : (
+        <>
+        <p className="px-3.5 pt-3 text-xs text-[#6b7280]">{ITEM_SALES_NOTE}</p>
         <ol className="flex flex-col gap-3 px-3.5 py-3.5">
           {rows.map((p, i) => {
             const units = num(p.total_units_sold);
@@ -1078,6 +1081,7 @@ function TopProducts({ data }: { data: DashboardOverview }) {
             );
           })}
         </ol>
+        </>
       )}
     </Shell>
   );
