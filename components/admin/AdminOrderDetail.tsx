@@ -23,6 +23,7 @@ import {
   orderStatus,
   paymentStatus,
 } from '@/lib/admin-format';
+import { canRecordLatePayment } from '@/lib/admin-logic';
 import {
   Button,
   DetailList,
@@ -89,6 +90,7 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
   const zone = order.shipping_zone_snapshot;
   const transitions = order.allowed_transitions ?? [];
   const canRefund = order.payment_status === 'successful' || order.payment_status === 'partially_refunded';
+  const latePayment = canRecordLatePayment(order);
 
   const handleError = (err: unknown) => {
     if (redirectIfSignedOut(err)) return;
@@ -178,6 +180,11 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
             {order.order_status === 'pending_payment' && (
               <Button variant="primary" onClick={() => setPaymentOpen(true)} disabled={busy}>
                 Record manual payment
+              </Button>
+            )}
+            {latePayment && (
+              <Button onClick={() => setPaymentOpen(true)} disabled={busy}>
+                Record late payment
               </Button>
             )}
             {order.requires_attention && (
@@ -491,6 +498,7 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
       <ManualPaymentModal
         open={paymentOpen}
         order={order}
+        late={latePayment}
         onClose={() => setPaymentOpen(false)}
         onDone={(updated) => {
           setData(updated);
@@ -579,6 +587,7 @@ function ResolveAttentionModal({
       open={open}
       onClose={onClose}
       busy={saving}
+      persistent
       size="sm"
       title="Mark as resolved?"
       description={order.attention_reason || undefined}
@@ -646,6 +655,7 @@ function StatusChangeModal({
       open={!!target}
       onClose={onClose}
       busy={saving}
+      persistent
       size="sm"
       title={target ? `${ORDER_TRANSITION_LABELS[target] ?? humanize(target)}?` : ''}
       description={target ? STATUS_CHANGE_HELP[target] : undefined}

@@ -4,7 +4,7 @@ import React, { useRef, useState } from 'react';
 import Image from 'next/image';
 import { ImageOff, Plus, Upload } from 'lucide-react';
 import { canOptimizeImage } from '@/lib/image';
-import { wholeNumber } from '@/lib/admin-logic';
+import { isNumericSlug, slugify, wholeNumber } from '@/lib/admin-logic';
 import { apiUploadProductImage } from '@/lib/api-client';
 import { AdminCategory, adminDeactivateCategory, adminGetCategories, adminSaveCategory, errorMessage, fieldErrors } from '@/lib/admin-api';
 import {
@@ -26,14 +26,6 @@ import {
   useConfirm,
   useToast,
 } from '@/components/admin/ui';
-
-export function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
 
 interface CategoryForm {
   name: string;
@@ -91,7 +83,7 @@ export function AdminCategories() {
   };
 
   const setName = (name: string) =>
-    setForm((f) => ({ ...f, name, slug: slugTouched ? f.slug : slugify(name) }));
+    setForm((f) => ({ ...f, name, slug: slugTouched ? f.slug : slugify(name, 'category') }));
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -115,6 +107,7 @@ export function AdminCategories() {
     const local: Record<string, string> = {};
     if (form.name.trim().length < 2) local.name = 'Use at least 2 characters.';
     if (!/^[a-z0-9-]+$/.test(form.slug.trim())) local.slug = 'Lowercase letters, numbers and dashes only.';
+    else if (isNumericSlug(form.slug.trim())) local.slug = `A slug cannot be only a number: add a word, e.g. category-${form.slug.trim()}.`;
     const displayOrder = wholeNumber(form.display_order.trim() || '0');
     if (displayOrder === null || displayOrder < 0) local.display_order = 'Use a whole number, 0 or more.';
     setErrors(local);

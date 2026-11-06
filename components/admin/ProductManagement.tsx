@@ -16,8 +16,7 @@ import {
 } from '@/lib/api-client';
 import { adminGetCategories, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { formatPrice, num } from '@/lib/admin-format';
-import { splitUploads, uploadFailureMessage, wholeNumber } from '@/lib/admin-logic';
-import { slugify } from '@/components/admin/AdminCategories';
+import { isNumericSlug, slugify, splitUploads, uploadFailureMessage, wholeNumber } from '@/lib/admin-logic';
 import { ShareProductModal, type ShareableProduct } from '@/components/admin/ShareProductModal';
 import { AdminImage } from '@/components/admin/AdminImage';
 import {
@@ -321,6 +320,7 @@ export function ProductManagement() {
     const e: Record<string, string> = {};
     if (form.name.trim().length < 3) e.name = 'Use at least 3 characters.';
     if (!/^[a-z0-9-]+$/.test(form.slug.trim())) e.slug = 'Lowercase letters, numbers and dashes only.';
+    else if (isNumericSlug(form.slug.trim())) e.slug = `A slug cannot be only a number: add a word, e.g. product-${form.slug.trim()}.`;
     const base = parseFloat(form.base_price);
     if (!(base > 0)) e.base_price = 'Enter a price above 0.';
     if (form.original_price.trim() !== '' && !(parseFloat(form.original_price) > base)) {
@@ -649,7 +649,7 @@ export function ProductManagement() {
                   value={form.name}
                   onChange={(e) => {
                     const name = e.target.value;
-                    setForm((f) => ({ ...f, name, slug: slugTouched ? f.slug : slugify(name) }));
+                    setForm((f) => ({ ...f, name, slug: slugTouched ? f.slug : slugify(name, 'product') }));
                   }}
                 />
               )}

@@ -2,13 +2,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  canRecordLatePayment,
   createModalStack,
+  isNumericSlug,
   pastEndPage,
   queryString,
   searchBoxOnUrlChange,
+  slugify,
   splitUploads,
   uploadFailureMessage,
   wholeNumber,
+  zoneOverlaps,
 } from '../lib/admin-logic.ts';
 import { formatPrice } from '../lib/currency.ts';
 
@@ -138,4 +142,32 @@ test('uploads: one bad file keeps the good ones and is named', async () => {
     uploadFailureMessage([...failed, { name: 'worse.bmp', reason: 'x' }]),
     'Not uploaded: bad.gif, worse.bmp. Not an image.'
   );
+});
+
+test('slugs: a name that is only a number gets a word in front', () => {
+  assert.equal(slugify('501', 'product'), 'product-501');
+  assert.equal(slugify('2E3', 'category'), 'category-2e3');
+  assert.equal(slugify(' 501 ', 'category'), 'category-501');
+  assert.equal(slugify('Levi 501', 'product'), 'levi-501');
+  assert.equal(slugify('5-pack', 'product'), '5-pack');
+  assert.equal(slugify('!!!', 'product'), '');
+  assert.equal(isNumericSlug('501'), true);
+  assert.equal(isNumericSlug('-5'), true);
+  assert.equal(isNumericSlug('5e-3'), true);
+  assert.equal(isNumericSlug('1-2'), false);
+  assert.equal(isNumericSlug('e5'), false);
+});
+
+test('late payment: only a claimed transfer on a cancelled order with no money recorded', () => {
+  const order = (order_status, payment_status, customer_marked_paid_at = '2026-11-01 10:00:00') => ({ order_status, payment_status, customer_marked_paid_at });
+  for (const status of ['pending', 'failed', 'cancelled']) assert.equal(canRecordLatePayment(order('cancelled', status)), true);
+  assert.equal(canRecordLatePayment(order('cancelled', 'pending', null)), false);
+  assert.equal(canRecordLatePayment(order('cancelled', 'successful')), false);
+  assert.equal(canRecordLatePayment(order('pending_payment', 'pending')), false);
+});
+
+test('zones: overlaps count active zones only', () => {
+  const zone = (name, states_covered, is_active = true) => ({ name, states_covered, is_active });
+  assert.deepEqual(zoneOverlaps([zone('A', ['Lagos', 'Ogun']), zone('B', ['Lagos', 'Oyo']), zone('C', ['Ogun'], false)]), [{ state: 'Lagos', zones: ['A', 'B'] }]);
+  assert.deepEqual(zoneOverlaps([zone('A', ['Lagos', 'Lagos']), zone('B', ['Oyo'])]), []);
 });

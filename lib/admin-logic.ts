@@ -83,6 +83,40 @@ export function createModalStack(lockPage: () => () => void) {
   };
 }
 
+/** A slug the API refuses because it would be read as an ID: 501, 2e3 (PHP's is_numeric). */
+export function isNumericSlug(slug: string): boolean {
+  return /^-?\d+(e-?\d+)?$/.test(slug);
+}
+
+/** A web address from a name, with the prefix when the name alone would be only a number. */
+export function slugify(value: string, prefix: 'product' | 'category'): string {
+  const slug = value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return isNumericSlug(slug) ? `${prefix}-${slug}` : slug;
+}
+
+/**
+ * The customer said they sent a transfer but the order was cancelled before anyone checked. The
+ * money can still be recorded (the order stays cancelled); same rule as PaymentFinalizer.
+ */
+export function canRecordLatePayment(order: { order_status: string; payment_status: string; customer_marked_paid_at?: string | null }): boolean {
+  return order.order_status === 'cancelled' && !!order.customer_marked_paid_at && ['pending', 'failed', 'cancelled'].includes(order.payment_status);
+}
+
+/** States listed by more than one active zone (only older data: the API now refuses a new overlap). */
+export function zoneOverlaps(zones: Array<{ name: string; is_active: boolean; states_covered: string[] }>): Array<{ state: string; zones: string[] }> {
+  const byState = new Map<string, string[]>();
+  zones
+    .filter((z) => z.is_active)
+    .forEach((z) => {
+      new Set(z.states_covered).forEach((state) => byState.set(state, [...(byState.get(state) ?? []), z.name]));
+    });
+  return Array.from(byState, ([state, names]) => ({ state, zones: names })).filter((o) => o.zones.length > 1);
+}
+
 /** Sort the results of uploading several files at once: what worked, and what failed by name. */
 export function splitUploads<F extends { name: string }, R>(
   files: F[],

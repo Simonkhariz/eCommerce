@@ -171,13 +171,20 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
     };
   }, [initialOrder]);
 
+  // A refund takes one payment at a time, so the next one can be less than what is left in all.
+  const onePaymentAtATime = !!eligibility && eligibility.refundable_total > eligibility.refundable_amount + 0.005;
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!eligibility) return;
     const amount = parseFloat(form.amount);
     const local: Record<string, string> = {};
     if (!Number.isFinite(amount) || amount <= 0) local.amount = 'Enter an amount greater than 0.';
-    else if (amount > eligibility.refundable_amount + 0.001) local.amount = `At most ${formatPrice(eligibility.refundable_amount)} can be refunded.`;
+    else if (amount > eligibility.refundable_amount + 0.001) {
+      local.amount = onePaymentAtATime
+        ? `At most ${formatPrice(eligibility.refundable_amount)} in one refund: this order has more than one payment, so refund them one at a time.`
+        : `At most ${formatPrice(eligibility.refundable_amount)} can be refunded.`;
+    }
     if (!form.reason.trim()) local.reason = 'Give a reason (kept on the order record).';
     setErrors(local);
     if (Object.keys(local).length) return;
@@ -199,6 +206,9 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
           ) : (
             <p>This is a partial refund: the order’s items go back to stock once the order is fully refunded.</p>
           ))}
+          {!completesRefund(amount) && (
+            <p>Money stays on this order after this refund, so its status does not change. If it is flagged as needing attention, the flag stays on until you mark it as resolved on the order page.</p>
+          )}
           <p className="text-[#6b7280]">This records the refund. It does not send money.</p>
         </div>
       ),
@@ -292,7 +302,7 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
               { label: 'Paid', value: formatPrice(eligibility.paid_amount) },
               { label: 'Already refunded', value: formatPrice(eligibility.refunded_amount) },
               { label: 'Pending refunds', value: formatPrice(eligibility.pending_refund_amount) },
-              { label: 'Can still be refunded', value: <strong>{formatPrice(eligibility.refundable_amount)}</strong> },
+              { label: 'Can still be refunded', value: <strong>{formatPrice(eligibility.refundable_total)}</strong> },
             ]}
           />
 
@@ -300,11 +310,22 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
             <Notice>
               {eligibility.paid_amount <= 0
                 ? 'This order has no successful payment, so there is nothing to refund.'
-                : 'The full payment has already been refunded or is waiting on a pending refund.'}
+                : eligibility.pending_refund_amount > 0
+                  ? 'Everything paid has been refunded or is waiting on a pending refund, so there is nothing more to refund.'
+                  : 'This order is fully refunded: nothing is left to refund.'}
             </Notice>
           ) : (
             <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2" noValidate>
-              <Field label="Amount (₦)" required error={errors.amount} hint={`Up to ${formatPrice(eligibility.refundable_amount)}.`}>
+              <Field
+                label="Amount (₦)"
+                required
+                error={errors.amount}
+                hint={
+                  onePaymentAtATime
+                    ? `Up to ${formatPrice(eligibility.refundable_amount)} in this refund: this order has more than one payment, refunded one at a time, newest first.`
+                    : `Up to ${formatPrice(eligibility.refundable_amount)}.`
+                }
+              >
                 {(p) => (
                   <TextInput
                     {...p}

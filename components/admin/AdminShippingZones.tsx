@@ -13,6 +13,7 @@ import {
   fieldErrors,
 } from '@/lib/admin-api';
 import { formatPrice } from '@/lib/admin-format';
+import { zoneOverlaps } from '@/lib/admin-logic';
 import {
   Button,
   Checkbox,
@@ -71,6 +72,7 @@ export function AdminShippingZones() {
   const hasFallback = activeZones.some((z) => z.states_covered.includes(FALLBACK));
   const covered = new Set(activeZones.flatMap((z) => z.states_covered));
   const uncovered = hasFallback ? [] : states.filter((s) => !covered.has(s));
+  const overlaps = zoneOverlaps(zones);
 
   const remove = async (zone: ShippingZone) => {
     const ok = await confirm({
@@ -116,6 +118,14 @@ export function AdminShippingZones() {
         {data && uncovered.length > 0 && (
           <Notice tone="warning">
             Customers in these states cannot check out because no active zone covers them: {uncovered.join(', ')}.
+          </Notice>
+        )}
+        {overlaps.length > 0 && (
+          <Notice tone="warning">
+            More than one active zone covers{' '}
+            {overlaps.map((o) => `${stateLabel(o.state)} (${o.zones.join(', ')})`).join('; ')}. Checkout charges only the first zone, and an active zone with
+            an overlap can&apos;t be saved. To fix it, press Edit on one of them and untick Active, or use Delete. Once it is off you can take the state out
+            and switch the zone back on.
           </Notice>
         )}
       </div>

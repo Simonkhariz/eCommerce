@@ -194,6 +194,8 @@ export interface DashboardOverview {
     gross_sales: number;
     net_sales: number;
     total_refunded: number;
+    /** Paid in the period, then cancelled, not yet refunded: already taken off net sales. */
+    owed_refunds: number;
     paid_orders: number;
     aov: number;
     total_orders: number;
@@ -428,7 +430,10 @@ export interface RefundEligibility {
   paid_amount: number;
   refunded_amount: number;
   pending_refund_amount: number;
+  /** The most the next refund can be: a refund takes one payment at a time. */
   refundable_amount: number;
+  /** Everything still refundable across all the order's payments. */
+  refundable_total: number;
   payment_reference: string | null;
   gateway: string | null;
   can_restock: boolean;

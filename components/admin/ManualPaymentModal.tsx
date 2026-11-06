@@ -12,11 +12,14 @@ import { Button, Field, Modal, TextArea, TextInput, redirectIfSignedOut, useToas
 export function ManualPaymentModal({
   open,
   order,
+  late = false,
   onClose,
   onDone,
 }: {
   open: boolean;
   order: Pick<OrderDetail, 'order_number' | 'grand_total'> | null;
+  /** The order was cancelled before the transfer was checked: it stays cancelled. */
+  late?: boolean;
   onClose: () => void;
   onDone: (order: OrderDetail) => void;
 }) {
@@ -46,7 +49,7 @@ export function ManualPaymentModal({
     setSaving(true);
     try {
       const updated = await adminConfirmPayment(order.order_number, { reference: reference.trim(), note: note.trim() || undefined });
-      toast.success('Payment recorded. The order is now paid.');
+      toast.success(late ? 'Late payment recorded. The order stays cancelled: refund the customer or mark it as resolved.' : 'Payment recorded. The order is now paid.');
       setReference('');
       setNote('');
       setError(undefined);
@@ -65,10 +68,18 @@ export function ManualPaymentModal({
       open={open}
       onClose={onClose}
       busy={saving}
-      title={order ? `Record payment for ${order.order_number}` : 'Record payment'}
+      persistent
+      title={order ? `Record ${late ? 'late ' : ''}payment for ${order.order_number}` : 'Record payment'}
       description={
         <>
           Only record a payment after you have seen <strong>{formatPrice(num(order?.grand_total))}</strong> arrive in the store&apos;s account.
+          {late && (
+            <>
+              {' '}
+              It is recorded as a late payment: <strong>the order stays cancelled</strong> and its items stay back on sale. Afterwards, refund the
+              customer or mark the order as resolved.
+            </>
+          )}
         </>
       }
       footer={
@@ -77,7 +88,7 @@ export function ManualPaymentModal({
             Cancel
           </Button>
           <Button type="submit" form="manual-payment-form" variant="primary" loading={saving}>
-            Record payment
+            {late ? 'Record late payment' : 'Record payment'}
           </Button>
         </>
       }
