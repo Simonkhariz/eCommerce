@@ -15,7 +15,7 @@ It is written for three uses:
 > **Keep this file current.** Any change to what shoppers or admins see, to a safeguard, a limit
 > or a measured number updates this file in the same commit (changelog at the end).
 
-**Last updated:** 5 November 2026, branch `scalability-phase1`.
+**Last updated:** 6 November 2026, branch `scalability-phase1`.
 
 ---
 
@@ -59,7 +59,8 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **Daily database backups,** copied off the server to cloud storage, with a careful restore that
     works even on hosts without SSH.
 
-The full system has passed 1,242 automated backend checks and a full load test.
+The backend has 1,635 automated checks in 22 test suites, the storefront 77 unit tests, and the
+system has passed a full load test.
 
 ---
 
@@ -124,7 +125,9 @@ most once a minute, or immediately after the owner changes something. Top to bot
    the first 5 active ones show. With none, a built-in hero picture appears.
    - Each banner has a title, subtitle, button and picture.
    - The newest live promo code is **advertised to every visitor** in a pill, in its full wording,
-     e.g. *"Special offer: use code … for 10% off (up to ₦10,000) on orders of ₦20,000+"*.
+     e.g. *"Special offer: use code … for 10% off (up to ₦10,000) on orders of ₦20,000+"*. On phones
+     the wording wraps, so the minimum spend stays readable. **Only this one code is sent to visitors;**
+     other live codes stay private.
    - Real store numbers: products in store, categories, states delivered to.
 2. **Brand strip:** a scrolling line of brand names set by the owner (hidden if none).
 3. **Flash sale offers:** up to 4 deal products with a live countdown when the owner set an end
@@ -158,7 +161,8 @@ Empty sections hide themselves. **The shop never shows made-up products, prices 
 
 **Footer:**
 - Newsletter sign-up.
-- Live contact details: email, WhatsApp (opens a chat with a ready message), phone.
+- Live contact details: email, WhatsApp (opens a chat with a ready message), phone. Anything the
+  owner hasn't set is left out.
 - Shop links, help links (track an order, my orders, shipping, returns, FAQ, contact), company
   pages, payment badges (Visa, Mastercard, Verve, bank transfer) and the developer credit.
 
@@ -167,7 +171,9 @@ Empty sections hide themselves. **The shop never shows made-up products, prices 
 - **Sort:** Best selling, Newest, Price low→high, Price high→low, Top rated.
 - **Filters** (a side panel on desktop, a bottom sheet on phones):
   - category (with counts);
-  - price range;
+  - price range: applied when the shopper presses Enter or leaves the box, and only if a number
+    changed, so clicking through the boxes keeps the page they are on. The box being typed in is
+    never reset, and a minimum above the maximum is swapped;
   - colours: smart families, so "black" also finds charcoal and "blue" finds navy;
   - sizes (XS→4XL);
   - dress style;
@@ -178,7 +184,10 @@ Empty sections hide themselves. **The shop never shows made-up products, prices 
   repeats a product.
 - `/category?featured=true` (the Featured row's "View All") lists every featured product, with a
   "Featured" chip to remove.
-- Every filter lives in the web address: links can be shared and the Back button works.
+- Every filter lives in the web address: links can be shared and the Back button works. "On sale"
+  also answers to `?sale=true`.
+- **An address past the last page** (`?page=99`) says *"This page doesn't exist"* and offers **"Go to
+  the last page"**, rather than claiming there are no products.
 - Friendly states throughout: loading placeholders, "No matching products – try removing a
   filter", and a "Try again" button if the connection drops.
 
@@ -191,6 +200,8 @@ crossed out on sale items, a "Sold out" badge, and a heart.
 ### 4.3 The product page
 
 - **Gallery:** thumbnails, hover zoom, full-screen view with arrows.
+- **Page trail:** Shop, the category, the product. A product with no category simply has no category
+  link.
 - **Price follows the chosen option:** a size or colour can have its own price. The old price is
   crossed out with a "-N%" badge.
 - **Colour and size picker:**
@@ -202,14 +213,15 @@ crossed out on sale items, a "Sold out" badge, and a heart.
 - Quantity up to 20 (or the stock, if lower). **Add to cart**, **Buy now** (straight to the
   cart), **Save to wishlist**, and **Share** (phone share sheet, or copy link / WhatsApp /
   Facebook / X / email).
-- On phones a sticky bar keeps the price and "Add to cart" in reach.
+- On phones a sticky bar keeps the price and "Add to cart" in reach. The menu opens over it, and the
+  footer leaves room for it.
 - **Tabs:** product details, and *Rating & reviews* sorted by latest or highest rating.
 - **"You might also like":** 4 products from the same category.
 
 **Writing a review:**
 - Anyone can review, guest or signed in: 1–5 stars, name (up to 80 characters), email (never
-  published), optional title (up to 120; kept for the owner, not shown to shoppers), and the review
-  text (10–2,000 characters).
+  published), optional title (up to 120; shown above the review on the product page and in "What
+  customers say"), and the review text (10–2,000 characters).
 - Reviews appear only after the owner approves them. After a rejection, the person may review again.
 - The **"Verified purchase"** badge is added by the server only for a signed-in reviewer with a
   paid order for that product on their account (or under their confirmed email). A typed email
@@ -221,13 +233,21 @@ crossed out on sale items, a "Sold out" badge, and a heart.
 ### 4.4 Wishlist and cart
 
 - **Wishlist:** a slide-in drawer.
-  - Guests: saved on the device.
-  - Signed-in customers: also saved to the account and merged on sign-in.
+  - Guests: saved on the device. Opening the list brings prices and stock up to date, once per
+    visit, and a product that no longer exists leaves the list.
+  - Signed-in customers: also saved to the account and merged on sign-in. **The account's list is the
+    truth:** this device only adds changes it hadn't managed to save, so an item removed on another
+    device doesn't come back.
 - **Cart:** each line is one exact option (size and colour). Adding the same option again raises
   the quantity, up to the stock or 20 per line, whichever is lower.
   - A small pop-up confirms "Added to cart", or explains "Only N can be ordered" or "Sold out".
-  - Lines show "Only N left" at 5 or fewer, and "Maximum N per order" at the limit.
+  - Lines show "Only N left" at 5 or fewer. At the limit they show "Maximum 20 per order", or "Only N
+    in stock" when stock is what stops it.
   - The summary shows "Total before delivery"; the fee is worked out at checkout.
+  - While a saved cart loads, the page says "Loading your cart…". Anything added in that moment is
+    kept and added on top.
+  - **Prices show kobo only when an amount has them** (a percentage coupon can leave kobo), so a total
+    is never rounded away from what is owed. Whole naira looks as before.
   - Guests: the cart lives on the device.
   - Signed-in customers: the cart is also saved to the account, so it follows them across
     devices.
@@ -238,6 +258,10 @@ crossed out on sale items, a "Sold out" badge, and a heart.
   - "Black Tee (L / Black) sold out and was removed."
   - "Only 2 left of Denim Jacket (M); quantity updated."
   - "Hoodie price dropped to ₦18,000."
+  - "Go to checkout" reads "Checking your cart…" and waits for that answer.
+  - **The shopper's own reservation counts as available.** An unpaid order holds its items out of
+    stock, but they are that shopper's, so the check doesn't remove them from the cart the order came
+    from.
 - **Promo codes** are applied in the cart:
   - "Code SAVE10 applied (10% off)".
   - The code is checked again whenever the cart changes, and removed with a notice if it stops
@@ -250,14 +274,26 @@ crossed out on sale items, a "Sold out" badge, and a heart.
 "Go to checkout" opens a checkout window right on the cart page.
 
 1. The shopper fills in full name, phone, email, street address, **state** (36 states + FCT),
-   city, and an optional delivery note (up to 300 characters). An order can hold up to 30 different
-   items.
+   city, and an optional delivery note (up to 300 characters in this box; the server's own limit for
+   order notes is 2,000). An order can hold up to 30 different items.
+   - **Details are checked before the order is placed, and the server applies the same rules:**
+     - full name: at least 2 letters;
+     - a Nigerian phone number: 0 and 10 more digits (0803 123 4567), or 234 and 10 digits, with or
+       without the +, and with or without the 0 some people keep after it (+234 0803…). Spaces, dashes
+       and brackets don't matter;
+     - street address and city: at least 3 characters each.
+
+     A problem shows under its own field and the cursor moves to the first one. If the server refuses
+     something, its message appears on the same field.
    - **"Use my current location"** (optional): the phone asks permission, then a map pin is saved
      with the order so the rider can open it on Google Maps. The page shows how accurate it is, with
      a **Remove** link. The typed address is still what the order relies on.
    - Signed-in customers get their details pre-filled, and a default address if the account has one
      (there is no shopper screen to save addresses yet, section 11).
-   - What the shopper types is kept if they close and reopen the window.
+   - What the shopper types is kept if they close and reopen the window, and **over a refresh in the
+     same tab**. It is never carried to another account: when a different customer signs in, they get
+     an empty form filled from their own details. Signing out clears it, and a session that merely
+     expired keeps it.
 2. As soon as a state is chosen, the server **re-prices every item from the database, checks
    stock, finds the delivery zone and fee, applies the promo code** and returns the totals.
    - Example: "Delivery to Lagos: Lagos Express · 1–2 days".
@@ -267,6 +303,9 @@ crossed out on sale items, a "Sold out" badge, and a heart.
      before the "All other states" catch-all.
    - A state the store doesn't serve is refused clearly. **A free delivery is never applied by
      mistake.**
+   - If the totals can't be worked out, the window offers **"Try again"**. A product that is no longer
+     on sale is described only as *"An item in your cart is no longer available"*, so its name and
+     status stay private.
 3. **"Continue to payment"** places the order. The note says *"Your items are reserved for 60
    minutes while you pay."*
 
@@ -289,7 +328,7 @@ happen at all:**
 the button twice, or retrying after the connection dropped, returns **the same order**: never a
 second order, never stock held twice. If the shopper changes the address or the cart before
 retrying, the retry is a new order with the new details (never the earlier one returned with old
-details).
+details). Two tries at the same moment for the last unit also return the one order, not "sold out".
 
 **A promo code that stops working** (expired or used up while the shopper fills in the form) is
 explained in the checkout window with a **"Remove code {CODE} and continue without it"** button. A
@@ -297,18 +336,29 @@ brief network error never removes a valid code.
 
 **The cart is not emptied yet.** It is cleared only when the payment is confirmed, so a failed or
 abandoned payment can be retried on the same order. Coming back to checkout with the same cart
-resumes the unpaid order instead of creating a new one.
+resumes the unpaid order instead of creating a new one. If that order can't be checked (a network
+blip), checkout says *"We could not check the order you already started, so we have not placed
+another one"*, with "Try again", so a blip can't cause a duplicate order.
 
 **Too many orders at once:** at most 10 orders per 10 minutes from one connection (section 6.10).
 
 **Going back to change the delivery details** before paying releases that order's items at once,
-so they don't sit reserved while the shopper places the corrected order. Once a payment has been
-started the first order keeps its reservation, because money may be on its way.
+so they don't sit reserved while the shopper places the corrected order. **Once a payment has been
+started this is refused,** because money may be on its way, and the order keeps its reservation:
+*"A payment was already started for this order, so its delivery details can't be changed here. You
+can finish paying by …, or contact the store to change them."* If the store can't be reached, nothing
+changes and the shopper is asked to try again.
+
+**Messages are written for shoppers.** A database, setup or payment-provider problem is written to
+the store's log, and the shopper sees a plain message, such as *"We could not reach the payment
+provider. Your order is saved: please try again shortly or choose another payment method."*
 
 ### 4.6 Checkout: paying
 
 The window changes to **"Complete your payment"**: *"Order ORD-… is reserved until 14:35."*,
-the order summary, and for guests the access key with a Copy button.
+the order summary, and for guests the access key with a Copy button. **Deadlines are in Lagos time,**
+wherever the shopper is, and a deadline on another day carries its date (*"7 Nov, 04:10"*), so a
+next-day deadline never looks already past.
 
 The shopper sees **two buttons, not a list of gateways**:
 
@@ -319,6 +369,11 @@ The shopper sees **two buttons, not a list of gateways**:
 
 The window also offers **"Pay later"**, and **"Send the order number on WhatsApp again"** once
 WhatsApp has been opened. If no payment method is available at all, it says so.
+
+**A method is offered only when it can work:** a gateway needs its keys, and WhatsApp needs a number
+(in Store settings or on the server). There is no built-in number, so with none set the WhatsApp
+buttons and links are hidden everywhere, and the help links become "Contact the store" or "Need help?
+Contact us", which open the Contact page.
 
 After **"I've sent the transfer"** the page shows **"Awaiting confirmation"** with a loader. It
 watches for the owner's confirmation for as long as it stays open (live when live status is on,
@@ -344,6 +399,8 @@ the payment provider."*
 
 - While the payment is pending, it re-checks automatically for about 2 minutes, only while the
   tab is visible, then offers "Check again".
+- **One failed check doesn't end the wait:** the last answer stays on screen and the page keeps
+  asking every 15 seconds, unless the server refused the question (no access any more).
 - **With live payment status switched on** (optional, `docs/SSE_CONTRACT.md`), the page keeps a
   connection open and shows "paid" about a second after the payment is recorded, with far fewer
   checks. If live status is off, busy or blocked by a proxy, the page quietly checks the usual
@@ -353,18 +410,23 @@ the payment provider."*
 - **Paid:** confetti and a receipt with items, totals, reference, method and delivery city.
   - The shopper can print it, save it as an image, or send the order number to the store on
     WhatsApp. (This goes to the store's own number, not to a contact the shopper picks.)
+  - **A long receipt is shown and printed in full:** every item is listed, and printing carries on to
+    the next sheet instead of cutting it off.
   - The paid items now leave the cart, exactly once. A receipt opened by order number and email
     leaves the cart alone, and that email is remembered for the open tab only.
 - **Pending:** *"Card payments usually confirm within seconds; bank transfers can take a few
   minutes."* Plus a WhatsApp help button.
 - **Failed:** *"Payment didn't go through. No money was taken for this attempt."* The order stays
-  reserved, with "Try paying again".
+  reserved, with "Try paying again". A customer who then pays by transfer can still report it, and a
+  failed card attempt doesn't hide that report.
 - **Expired:** *"This order has expired"*. The items were released, the cart is still there, and
   the shopper places the order again.
 - **Paid after it expired:** *"Payment received after the order expired… You don't need to pay
-  again."* The owner is alerted to refund or complete it.
+  again."* The owner is alerted. A cancelled order can't be reopened, so the owner refunds the money,
+  and the customer can place a new order for the items.
 - **WhatsApp orders:** "Waiting for your transfer" until "I've sent the transfer" is tapped; if the
-  deadline passes, "This order was cancelled" with **"I sent the transfer: message the store"**.
+  deadline passes, "This order was cancelled" with **"I sent the transfer: message the store"**. If
+  the customer had already reported the transfer, the owner is alerted to check the bank (section 5.4).
 - **Not started:** "Payment not started yet" when no payment was begun.
 - **If the order can't be opened:** an error page with a box for the access key.
 
@@ -390,20 +452,26 @@ Customer emails sent along the way:
 - **Emails at each stage:** order received, payment confirmed, **being prepared**, shipped (with
   the tracking number), **delivered**, and cancelled or refunded.
 
-- **Track order** (`/track-order`): enter the order number **or the courier's tracking number**,
-  plus the checkout email (or the access key). On the device used to order, no email is needed.
+- **Track order** (`/track-order`): enter the order number **or the courier's tracking number**
+  (spaces and dots in a tracking code are fine), plus the checkout email (or the access key). On the
+  device used to order, no email is needed until the customer signs out (section 4.9).
   - A "Recent order" chip offers the last order made on this device.
   - The page shows a status pill and a 5-step progress bar: *Order placed → Payment confirmed →
     Processing → In transit → Delivered*. Orders off that path get a status box instead, with labels
-    such as "Payment window closed", "Cancelled – refund due" and "Refund in progress".
+    such as "Payment window closed", "Cancelled – refund due", "Cancelled – part refunded" and "Refund
+    in progress".
   - Once shipped: the courier card with a copyable tracking code and a "Track on the courier's
-    site" link.
+    site" link. Its wording follows the shipment's real status, from "Preparing for dispatch" (label
+    created) to "Out for delivery" and "Delivered".
   - It also shows items, totals, destination and payment details.
   - An unpaid order shows **"Pay now"**.
+  - **A reported transfer shows "Awaiting confirmation"**, with **"See payment status"** in place of
+    the pay buttons, because the store is checking it.
   - Failed lookups are limited (20 per 15 minutes), so nobody can guess other people's orders.
 - **My orders** (`/orders`, signed-in customers):
   - Every order, newest first, with status, courier and tracking, totals, "Pay now" while unpaid,
-    and "Details & tracking".
+    and "Details & tracking". A reported transfer shows "Awaiting confirmation" here too, with no
+    "Pay now".
   - **Guest orders are claimed automatically:** when a customer confirms their email by sign-in
     link, every earlier guest order with that email appears here.
 - A background check catches payments confirmed later (for example a WhatsApp transfer the owner
@@ -416,7 +484,8 @@ wishlist, and the order history.
 
 The sign-in window has three tabs:
 - **Sign in:** email and password.
-- **Register:** name, email, optional phone, and a password of at least 8 characters.
+- **Register:** name, email, optional phone (the same Nigerian phone rule as checkout; the address
+  book and profile follow it too), and a password of at least 8 characters.
 - **Email link:** a one-time link that works for 15 minutes, no password needed.
   - The answer is the same whether or not an account exists, so the form can't be used to find
     out who shops here. A new email gets an account created on the spot; admin and suspended
@@ -426,7 +495,11 @@ The sign-in window has three tabs:
 
 Protection:
 - **Sign-in attempts:** 5 failures per 15 minutes per connection and email, 20 per hour per
-  account.
+  account, and 50 per 15 minutes per connection, whichever emails it tries.
+  - Only a properly formed email address can reach an account, so accented look-alikes can't dodge
+    the limits.
+  - An unknown email takes as long to answer as a wrong password, because a password check always
+    runs, so timing doesn't show who has an account.
 - **Sign-in link requests:** 10 per connection and 3 per email in 15 minutes.
 - **New accounts:** 10 an hour per connection.
 - **Registering someone else's email first gains nothing:** a password chosen before the email is
@@ -435,6 +508,13 @@ Protection:
   account only once its email is confirmed.
 - **Sessions:** a secure cookie lasts 30 days. Every action that changes something carries a
   per-session security token (CSRF protection).
+- **When a session ends mid-visit,** the sign-in window opens by itself: *"Your session has ended.
+  Please sign in again."*
+- **Signing in on another tab** no longer breaks this one: it picks up the new session and retries
+  the request once, and never sends it if the session now belongs to a different customer.
+- **Signing out forgets this device's orders:** order access keys, the recent order, the unpaid order
+  it was tracking, lookup emails and typed delivery details are all cleared, and an order open on Track
+  order leaves the screen. Nothing is lost: the order number and checkout email still open any order.
 
 ### 4.10 Newsletter, help pages and everything else
 
@@ -450,6 +530,10 @@ Protection:
     delivery (with a **live table of current delivery fees** per zone, including "covers N items,
     then ₦… each extra item"), Returns & refunds, Privacy, and Terms.
   - Business decisions (return window, legal name) are left for the owner to fill in.
+- **Page titles and icon:** the cart, catalogue, Track order, My orders, sign-in link, payment and 404
+  pages each have their own title (*"Your cart | SHOP.CO"*), the shop has a favicon, and a missing
+  product says *"Product not found"*. Private pages ask search engines not to list them.
+- **The store's address** doesn't repeat its city or state when the street address already names them.
 - **When things go wrong:**
   - A friendly 404 page.
   - A "Something went wrong – Try again" page with a reference code.
@@ -473,7 +557,8 @@ Protection:
     at the same time.
 - **Sign in** (`/admin/login`):
   - Email and password.
-  - **Lockouts:** 5 failures per 15 minutes per connection and email, 20 per hour per account.
+  - **Lockouts:** 5 failures per 15 minutes per connection and email, 20 per hour per account, 50 per
+    15 minutes per connection.
   - A customer account trying to sign in here is turned away.
 - **Admin sessions:** last at most 12 hours and end after 2 hours of inactivity.
   - If a session ends mid-task, the next action goes to sign-in and then back to the same page.
@@ -494,31 +579,48 @@ Protection:
 - **The bell** has three rows. The first two refresh every minute while the tab is open, the
   database row every 5 minutes, and each right after the admin acts on it:
   1. **"Customers say they have paid"**: WhatsApp transfers to check.
-  2. **"Orders need attention"**: late, duplicate, underpaid, overpaid or mismatched payments.
+  2. **"Orders need attention"**: late, duplicate, underpaid, overpaid or mismatched payments, and
+     reported transfers whose order expired.
   3. **"Database & storage"**: size, speed and clean-ups.
 - **Everyday comforts:**
   - Filters are kept in the web address.
-  - Lists are paged.
+  - Lists are paged. A list past its last page (the last row of page 2 was shipped, or an old link)
+    moves to the last page instead of falsely saying there is nothing there.
   - Risky actions ask for confirmation.
   - Results appear as small notices.
   - Dialogs can't be closed mid-save.
+  - **Dialogs you type in close only with Cancel or the X:** the product, category, zone, promo code,
+    banner, ship-order, stock, payment, status note, "Mark as resolved" and clean-up dialogs. A stray
+    click beside them or the Escape key can't throw a filled form away.
+  - **Escape closes only the top dialog,** where it is allowed, and the page scrolls again once the
+    last one has closed.
+  - **Uploads hold the form:** while a picture uploads, Save and Cancel wait, and a late result never
+    lands in a different product's form.
+  - **Money shows kobo when an amount isn't whole,** and whole naira looks as before.
+  - **Slow actions get time, and honest answers:** sending a newsletter, "Send queued now" and picture
+    uploads wait up to 120 seconds, the same as the proxy. If a change gets no answer in time, the
+    message says it may or may not have gone through, so check before trying again.
+  - Typing in a search box while the list updates no longer drops characters.
   - Every change shows in the shop at once (within a minute if the instant page refresh isn't set
     up on the server; Tech switches and System status show which).
 
 ### 5.3 Overview (dashboard)
 
-- "Hello, {name}" with a 7, 30 or 90-day view.
-- **Headline cards:** Net sales (received minus refunded), Paid orders, Average order value.
-  Each has a trend line and a % change against the previous period.
-- **Sales trend chart:** verified payments per day. It can switch to a table and works by
-  keyboard.
-- **More figures:** Refunded, Orders placed and New customers.
+- "Hello, {name}" with a 7, 30 or 90-day view. If a refresh fails, a notice says so and that the
+  figures are from the last successful load, with "Try again".
+- **Headline cards:** Net sales, Paid orders, Average order value. Each has a trend line and a %
+  change against the previous period. **Net sales is worked out exactly as in Analytics:** money
+  received, minus refunds completed, minus refunds owed on cancelled orders.
+- **Sales trend chart:** verified payments per day, counting the money actually received. It can
+  switch to a table and works by keyboard.
+- **More figures:** Refunded, **Refunds owed** (when above ₦0), Orders placed and New customers.
 - **Latest updates feed:** new orders, payments not yet confirmed after 30 minutes, failed
   payments, sold-out and low-stock items, orders needing attention. It can be filtered to All,
   Orders, Payments or Stock.
 - **Workload tiles:** Needs attention, To ship, Awaiting payment, Low or sold out. Each opens the
   matching list.
-- **Panels:** Recent orders, Low stock, Top products.
+- **Panels:** Recent orders, Low stock, Top products. Top products shows item sales: item prices
+  before discounts and delivery, leaving out cancelled and refunded orders.
 
 ### 5.4 Orders
 
@@ -531,7 +633,8 @@ Protection:
 - Orders awaiting a WhatsApp transfer have quick **Confirm** and **Cancel** buttons.
 
 **Order page:** items, totals, every payment attempt, refunds, the full status history,
-customer and delivery details, shipment, and this order's admin activity.
+customer and delivery details (including the customer's email, for account orders too), shipment,
+and this order's admin activity.
 
 **The order lifecycle** (the server enforces these moves; anything else is refused):
 
@@ -558,35 +661,44 @@ stateDiagram-v2
     RefundPending --> Processing: refund declined, never sent
     RefundPending --> Delivered: refund declined, already sent
     RefundPending --> Completed: refund declined, already sent
-    RefundPending --> Refunded: refund recorded
-    Paid --> Refunded: full refund recorded
-    Processing --> Refunded: full refund recorded
-    Shipped --> Refunded: full refund recorded
-    Delivered --> Refunded: full refund recorded
-    Completed --> Refunded: full refund recorded
-    Returned --> Refunded: full refund recorded
+    RefundPending --> Refunded: no money left on the order
+    Paid --> Refunded: no money left on the order
+    Processing --> Refunded: no money left on the order
+    Shipped --> Refunded: no money left on the order
+    Delivered --> Refunded: no money left on the order
+    Completed --> Refunded: no money left on the order
+    Returned --> Refunded: no money left on the order
     Cancelled --> [*]
     Refunded --> [*]
 ```
 
 **What the owner can do on an order:**
 - **Ship order:**
-  - Enter the courier, tracking number and tracking link.
+  - Enter the courier, tracking number and tracking link. Spaces, dots and dashes are fine in a
+    tracking number. A slash is refused, because customers couldn't look the code up.
   - The order moves to Shipped and the customer is emailed the tracking details.
 - **Mark processing, completed or returned:** each with an optional note for the history.
 - **Mark delivered:** a confirmation, with no note.
 - **Start refund** moves the order to Refund pending; **Record a refund** links to the refund form.
-- **A completed full refund moves the order straight to Refunded,** from any status except Cancelled.
+- **A completed refund moves the order to Refunded only when no money is left on it.** A cancelled
+  order stays Cancelled, and an order still waiting for payment keeps waiting. Refunding a duplicate
+  payment leaves the good payment paying for the order, so the order carries on (section 5.8).
 - **Cancel:**
   - The reserved stock goes back on sale, the promo use is returned, and the customer is emailed.
-  - On a paid order the shop reminds the owner that cancelling doesn't return the money, and
-    flags the order until the refund is recorded.
+  - On a paid or partly refunded order the shop reminds the owner that cancelling doesn't return the
+    money, and flags the order until the refund is recorded.
 - **Record manual payment** (for WhatsApp or bank transfers):
   - The owner enters the bank reference (at least 4 characters) after seeing the money arrive, with
     an optional note.
   - The amount is always the order total; the owner never types an amount.
   - **One bank reference can confirm only one order.**
   - The customer gets a receipt.
+- **Record late payment** (a cancelled order whose customer had reported a transfer):
+  - The owner enters the bank reference after seeing the money arrive, as above.
+  - **The order stays cancelled and its items stay on sale.** The money is recorded as a late payment,
+    shows as a refund owed, and the order stays flagged.
+  - The owner then refunds the customer, or marks the order as resolved.
+- **Mark as resolved** (on any flagged order): see below.
 - **The two things that can't be done by changing the status:**
   - **Paid:** comes only from a confirmed payment.
   - **Refunded:** comes only from recording a refund.
@@ -595,13 +707,25 @@ stateDiagram-v2
 - underpaid (not marked paid);
 - overpaid (refund the difference);
 - duplicate payment;
-- money arriving after the order expired;
+- money arriving after the order expired (a cancelled order can't be reopened, so refund it);
+- **a reported transfer whose order expired** (the customer tapped "I've sent the transfer" and nobody
+  confirmed it in time, so check the bank);
 - currency mismatch (not applied);
-- cancelled after payment (refund owed).
+- cancelled after payment, including after a partial refund (refund owed).
+
+**Clearing a flag:**
+- A refund clears the flag once no money is left on the order. If money stays on it (the extra on an
+  overpayment has gone back, say), the flag stays on, and the refund form warns about this.
+- **"Mark as resolved"** on the order page clears any flag, with a note of 3 to 500 characters saying
+  what was done. The note and the old reason stay in the order's history and the audit log.
+- **A flagged order stays out of the data clean-up until it is resolved** (section 5.13).
+- Reported transfers that expired before this flag existed were flagged by a one-off database update
+  (migration 022). It only raises flags and removes nothing, so expect to see them in the bell once.
 
 **Unpaid orders expire on their own** at the deadline: the stock is released and the customer is
 emailed. The scheduled check asks Kora and Monnify first, so a last-minute payment is applied
-instead of cancelled.
+instead of cancelled. If it can't get an answer, the order waits for a later run, for up to 30 minutes
+past its deadline (section 6.2).
 
 ### 5.5 Shipping queue and delivery zones
 
@@ -615,7 +739,13 @@ instead of cancelled.
   - **Fee by quantity:** "Items the fee covers" and "Each extra item (₦)", e.g. ₦1,000 covers 2
     items, then ₦500 per extra item (3 items: ₦1,500).
   - An "All other states" catch-all is possible.
+  - **One active zone per state.** Checkout charges the first active zone covering a state, so a
+    second one would look active and never be used. Saving one is refused, naming the zone that
+    already covers it (the catch-all counts too).
+  - **Older overlaps get a warning and a way out:** the page lists them. Press Edit on one zone and
+    untick Active, or use Delete; once it is off, take the state out and switch it back on.
   - A warning lists states that no zone covers, since customers there can't check out.
+  - Fees go up to ₦1,000,000 (section 6.10).
   - Past orders keep the fee they were charged, even if a zone changes later.
 
 ### 5.6 Products, categories and stock
@@ -624,8 +754,10 @@ instead of cancelled.
   - Search, plus filters by category, status (Published / Draft / Archived) and stock level. The
     status can be changed from a dropdown in the list.
   - **Product editor:**
-    - name, web address (made automatically), category, dress style, description;
-    - price, and an optional "was" price shown crossed out;
+    - name, web address (made automatically), category, dress style, description. **A web address
+      can't be only a number,** because it would be read as a product ID: a typed `501` or `2e3` is
+      refused, and one made from the name "501" becomes `product-501` (`category-501` for a category);
+    - price, and an optional "was" price shown crossed out, up to ₦99,999,999.99 (section 6.10);
     - "Show in flash deals" and a deal end time;
     - "Featured on the home page": puts a published product in the home page's Featured row (the 4
       newest ticked show; all are under "View All"). To put an older product on the page, untick
@@ -633,12 +765,16 @@ instead of cancelled.
     - photos (upload several, or paste a picture address; choose the main one);
     - **sizes and colours**: each with its own SKU, optional own price, starting stock and low-stock
       alert level (5 by default). Stock on an existing option is changed in Inventory, so every
-      change has a logged reason.
+      change has a logged reason. **A removed option can be added back,** with its stock; the log
+      says "Variant added back".
+  - Stock, alert levels and similar fields take whole numbers only: 12.5 or 1e3 is refused instead of
+    being cut down.
   - New products start as Draft.
   - **Products are never deleted:** archiving hides them and keeps past orders intact.
   - A **Share** button sends a product link to a customer on WhatsApp or by email.
 - **Photo uploads are safe and light:**
   - the browser shrinks large photos first (to 2,560 pixels at most);
+  - **choosing several at once keeps the good ones,** and a message names any that failed;
   - the server accepts only real JPEG, PNG or WebP images, up to 5 MB;
   - **camera details such as GPS location are removed** before saving;
   - shoppers get WebP versions sized for their screen.
@@ -657,9 +793,10 @@ instead of cancelled.
 
 ### 5.7 Customers
 
-- Search by name, email or phone, plus filters by active, email not verified, or suspended.
-- Each customer shows lifetime orders and paid total (verified payments only), saved addresses
-  and recent orders.
+- Search by name, email or phone, plus filters by active, **Email not verified** (customers who
+  haven't confirmed their email), or suspended.
+- Each customer shows lifetime orders and paid total (verified payments only, leaving out cancelled
+  and refunded orders), saved addresses and recent orders.
 - **Suspend** signs the customer out on every device and blocks sign-in. Their orders are
   unaffected. **Reactivate** undoes it.
 - Guest orders appear on the orders themselves, not as customer accounts.
@@ -670,30 +807,45 @@ instead of cancelled.
   - Every payment attempt from Kora, Monnify, WhatsApp and manual transfers.
   - Received amounts are shown next to the expected amounts, so under- and overpayments stand
     out.
-  - Search and filters, a button to copy a reference, and a "Not used" label for attempts that were
-    never paid.
+  - Search by reference, order number or email (the checkout email or the account's), filters, a
+    button to copy a reference, and a "Not used" label for attempts that were never paid.
 - **Refunds are recorded, not sent:**
   - The owner sends the money from the Kora or Monnify dashboard (or their bank), then records it
     in the shop.
-  - The shop shows what was paid, already refunded, pending, and **what can still be
+  - The shop shows what came in, already refunded, pending, and **what can still be
     refunded**.
-  - **A refund can never exceed what was paid**, even if two people record refunds at the same
-    moment.
-  - Each refund can carry its own reference. A pending refund can be **rejected**, which makes that
-    amount refundable again. "Check order" opens the order behind it.
+  - **A refund can never exceed the money that came in**, even if two people record refunds at the
+    same moment.
+  - **One payment at a time, newest first.** Underpaid money goes first, because it never paid for the
+    order, then the newest confirmed payment. So a duplicate is refunded before the payment that paid
+    for the order. When an order has several payments, the form says the most this one refund can be.
+  - **A refunded duplicate doesn't touch the good order:** it stays paid and carries on being
+    fulfilled, and the order's flag stays on until it is resolved.
+  - **Underpaid money can be refunded,** up to what came in. It never counts as paid or as a sale.
+    The attempt keeps its status while money remains, and closes as failed once all of it has gone
+    back, so the customer's page can never read it as paid. The order keeps waiting for payment, or
+    stays cancelled.
+  - **Overpaid money can be refunded in full,** because a refund can return everything that came in,
+    not just the order's total.
+  - **The order becomes Refunded only when no money remains on it** (section 5.4).
+  - Each refund needs a reason (up to 1,000 characters) and can carry its own reference (up to 100). A
+    pending refund can be **rejected**, which makes that amount refundable again. "Check order" opens
+    the order behind it.
   - Refunds can be pending or completed, and can return the goods to stock. "Return to stock" can
-    be ticked on any of an order's refunds; the goods go back once, when the order is fully
-    refunded.
+    be ticked on any of an order's refunds; the goods go back once, when no money is left on the
+    order. The history only mentions a restock when one really happened.
+  - The order page links to the refund form for paid orders and for orders holding underpaid money.
   - **Declining a refund request** (moving the order back from "Refund pending") also closes any
     refund still pending for it, so it can't be completed by mistake later.
-  - A completed refund updates the order, payment and reports, and emails the customer.
+  - A completed refund updates the order, payment and reports, and emails the customer. Underpaid
+    money sent back is left out of the reports, because it never counted as a sale.
 
 ### 5.9 Growth: promo codes, newsletter, banners and reviews
 
 - **Promo codes:**
   - **The code:** 3-30 letters, numbers, dashes or underscores.
-  - **A percentage (1–90%) or a fixed amount off** the items, e.g. ₦5,000 off. A fixed amount
-    needs a minimum order above it, and checkout never accepts an order that would cost ₦0
+  - **A percentage (a whole number, 1–90%) or a fixed amount off** the items, e.g. ₦5,000 off. A fixed
+    amount needs a minimum order above it, and checkout never accepts an order that would cost ₦0
     (the payment gateways can't charge nothing).
   - **Minimum order:** the code works only when the items total at least a set amount
     (e.g. ₦20,000); below it the shopper is told how much more to add.
@@ -701,8 +853,10 @@ instead of cancelled.
   - The shop describes each code the same way everywhere, e.g. "10% off (up to ₦10,000) on
     orders of ₦20,000+".
   - Optional start and end dates (a code runs to the end of its last day), and a maximum number of
-    uses (or unlimited).
+    uses, up to 1,000,000 (or unlimited).
   - Can be paused.
+  - **A code that has been used can't be renamed,** because orders refer to it by its text and a
+    cancelled order gives its use back. Create a new code instead.
   - Statuses: Live, Paused, Scheduled, Expired, Used up.
   - Uses are counted exactly once, and **given back when an order is cancelled or expires**.
   - A code that was used is switched off rather than deleted, so order history keeps it. **An unused
@@ -715,7 +869,7 @@ instead of cancelled.
   - **The same newsletter goes to each person at most once a day,** so a double click or retry
     never sends it twice.
 - **Homepage banners:**
-  - title, subtitle, button text and link, picture, order, show or hide;
+  - title, subtitle, button text and link, picture, order (a whole number, 0 to 100,000), show or hide;
   - links are checked to be shop pages or https addresses;
   - **Delete** removes a banner for good, after a confirmation (it is recorded in the audit log).
 - **Reviews:** filter by status, then Approve, Reject or Move to pending. Only approved reviews show
@@ -723,7 +877,8 @@ instead of cancelled.
 
 ### 5.10 Analytics and reports
 
-- **Date ranges:** Today, Yesterday, 7, 30 or 90 days, This year, All time, or custom dates.
+- **Date ranges:** Today, Yesterday, 7, 30 or 90 days, This year, All time (really all time, matching
+  the download), or custom dates.
 - **Headline cards:** Net sales, average order value, units sold (with repeat-customer %), and
   the share of placed orders that were paid.
 - **Tables:**
@@ -733,8 +888,15 @@ instead of cancelled.
   - sales by category;
   - payment gateways (attempts, paid, failed, received).
 - **Honest numbers:**
+  - **Net sales** = money received − refunds completed − refunds owed on cancelled orders. The
+    Overview uses the same sum, so the two pages agree.
+  - **Sales count the money actually received,** so refunding an overpayment doesn't make a sale look
+    short. Underpaid money is in no sales figure, and sending it back doesn't reduce net sales.
   - Sales count on the day the payment was verified, refunds on the day they were completed.
-  - Orders paid and then cancelled show as refunds owed until recorded.
+  - Orders paid and then cancelled show as **refunds owed** until recorded, including late payments.
+  - **Item sales** (the product and category tables) are item prices before discounts and delivery,
+    and leave out cancelled and refunded orders, so they won't add up to net sales.
+  - **Units sold** leaves out cancelled and refunded orders too.
   - A section explains every formula in plain words.
 - **CSV downloads:** the report and the orders. Cells are protected against spreadsheet formula
   tricks.
@@ -772,9 +934,13 @@ instead of cancelled.
   review, and the owner can see exactly which records.
 - **Also on the list:** picture files that no product, banner or category uses, once they are a day
   old. If a PC and a server share one bucket, don't remove these (section 6.5).
+- **If the picture storage can't be reached,** the page still opens. Pictures are left out of the check,
+  with a note saying so instead of claiming everything is within its keep period, and nothing is
+  removed. They are checked again once the storage is back.
 - **Deleting needs two checks:** the owner's password (5 wrong tries in 15 minutes), then a 6-digit
   code emailed to them (5 codes an hour).
-  - The code works once, for 10 minutes, in the same session, with 5 tries.
+  - The code works once, for 10 minutes, in the same session, with 5 tries. It is in the message only,
+    never the subject, because the Email outbox lists subjects.
   - The reviewed list must be fresh; if anything changed, the clean-up stops and the list
     reloads. Throwaway records that can only drop off the list after review (old counters,
     expired sessions, abandoned guest carts, used sign-in links) don't stop it; the run removes
@@ -782,7 +948,8 @@ instead of cancelled.
   - All admins are emailed afterwards.
 - **Always kept, whatever the settings:**
   - order totals, payments and refunds (6 years for tax);
-  - orders needing attention;
+  - orders needing attention, including reported transfers that expired, until they are resolved;
+  - cancelled orders where any money came in, even an underpayment that was never marked paid;
   - active newsletter subscriptions.
 - When customer records are kept forever, the page mentions the Nigeria Data Protection Act.
 
@@ -797,10 +964,13 @@ instead of cancelled.
 
 - **Store settings:**
   - Store name, support email and phone, WhatsApp number (saved in international format), dispatch
-    address and the brand strip (up to 20 brands, 40 characters each).
+    address and the brand strip (up to 20 brands, 40 characters each). **Without a WhatsApp number
+    here or on the server, customers aren't offered WhatsApp at all.**
   - **Payment methods on/off:** Monnify, Kora, WhatsApp. The shop refuses to switch off the last one
     that is on and allowed by the server. It doesn't check for keys, so a gateway with no keys can
-    be the last one on; the "Right now" line and the mode labels show what customers actually get.
+    be the last one on; the "Right now" line and the mode labels show what customers actually get,
+    and checkout never offers a method that can't work. Flipping a switch doesn't lose store details
+    being typed above it.
   - A warning appears when a method is turned off on the server, so this switch can't turn it on.
   - **"Configured on the server"** shows, read-only: currency, time zone, each gateway on live keys,
     test keys or not configured, email delivery, and both payment windows. Secret keys are never
@@ -889,10 +1059,12 @@ sequenceDiagram
 That gate:
 - **locks the order and payment** while it works, so two notices arriving at the same moment are
   handled one after the other;
-- **checks the signature:** a notice without a valid secret signature is refused and recorded;
+- **checks the signature:** a notice without a valid secret signature is refused, and leaves only a
+  short record, up to a limit per connection (section 6.10). With Kora, only the signed part of a
+  notice is ever processed, so extra data added around it is ignored;
 - **checks the amount and currency:**
-  - underpaid: not marked paid, and flagged;
-  - overpaid: paid, and flagged for a refund;
+  - underpaid: not marked paid, and flagged. The money that came in is recorded and can be refunded;
+  - overpaid: paid, and flagged for a refund. All the money that came in can be refunded;
   - wrong currency: not applied;
 - **ignores repeats:** a notice sent five times changes the order once;
 - **flags money that arrives late** (after expiry) or **twice** (a duplicate payment) for the
@@ -909,6 +1081,11 @@ That gate:
   exactly once**, however many processes try at the same time.
 - Expired orders are released by the scheduled job every 10 minutes, which **asks Kora and
   Monnify first**, so a payment made at the last minute is applied instead of cancelled.
+- **If that check fails,** the provider may hold a payment the shop can't see, so the order waits for
+  a later run. A provider that stays down can't hold the stock for ever: 30 minutes past its deadline,
+  the order is released anyway.
+- **A reported transfer is never quietly dropped:** if the customer tapped "I've sent the transfer"
+  and the order expires, it is cancelled and flagged for the owner to check the bank.
 - They are also released by a quick clean-up whenever an order is placed, or the admin opens the
   orders list or overview. That clean-up doesn't call the payment providers, so an order with a
   card or transfer payment still open gets **30 extra minutes** for the payment to be confirmed
@@ -931,8 +1108,8 @@ Shoppers never wait for an order email:
 1. Each email is **saved in the database outbox first.** Payment, shipping, cancellation and
    refund emails are saved in the same database step as the change they announce.
    - **Two exceptions:** sign-in links and clean-up codes go out immediately, and only a fingerprint
-     is kept. The secret is never stored, so they can't be re-sent; the customer or admin asks for
-     a new one.
+     is kept. The secret is never stored, not even in the subject line, so they can't be re-sent; the
+     customer or admin asks for a new one.
 2. Customer emails are attempted **after the shopper already has their answer**, so a slow email
    service never slows checkout. **Admin alerts** (new order, payment received, customer says they
    paid) wait for the worker or the next sweep, usually within a minute.
@@ -956,7 +1133,8 @@ Shoppers never wait for an order email:
 
 ### 6.4 Speed: caching without stale data
 
-- **Pages** are built on the server and kept for up to a minute.
+- **Pages** are built on the server and kept for up to a minute. If the API is slow, a product page
+  stops waiting after 4 seconds and the browser loads the product instead.
 - **The API** keeps a file cache of catalogue answers. It is **cleared the moment the owner
   changes anything**, and the storefront is told to rebuild its pages at once.
 - **Browsers** keep product listings for 30 seconds (and may show them up to 2 minutes longer
@@ -993,7 +1171,10 @@ Shoppers never wait for an order email:
 - **Caching:** admin uploads have unique names and are kept a year; other pictures a day. Repeat
   visits get "not changed" answers.
 - **If the bucket can't be reached,** the shop answers "picture storage unavailable" (503) for that
-  picture and logs the reason. Connecting gives up after 5 seconds, a request after 30.
+  picture and logs the reason. Connecting gives up after 5 seconds, a request after 30. Data & storage
+  and the daily database check keep working, with pictures left out and a note saying so.
+- **Uploads don't need PHP's fileinfo extension,** which some shared hosts lack. The file's own bytes
+  are read with `getimagesize`, which is always in PHP, and the same JPEG, PNG and WebP limit applies.
 - **Requests to the bucket are signed** with AWS's signature method, checked against AWS's own
   published test suite.
 - **Moving them is safe:** a copy tool runs a dry run first, then a small test batch, checks the
@@ -1010,8 +1191,8 @@ Shoppers never wait for an order email:
 | Job | How often | What it does |
 |---|---|---|
 | Email worker (`process_outbox.php`) | Every minute | Sends queued emails, paced, for up to 50 seconds |
-| Unpaid orders (`expire_pending_orders.php`) | Every 10 minutes | Asks Kora and Monnify for the final status, then releases what wasn't paid |
-| Database check (`check_database.php`) | Daily | Checks size, speed and data past its keep period, and emails the admins, at most once a week per problem level. **Removes nothing** |
+| Unpaid orders (`expire_pending_orders.php`) | Every 10 minutes | Asks Kora and Monnify for the final status, then releases what wasn't paid. If asking fails, the order waits for a later run, up to 30 minutes past its deadline |
+| Database check (`check_database.php`) | Daily | Checks size, speed and data past its keep period, and emails the admins, at most once a week per problem level. A bucket outage leaves pictures out with a note. **Removes nothing** |
 | Backup (`backup.php`) | Daily | The database in one dated folder with a checksum, plus the pictures: archived there when on the server's disk, or new and changed ones copied to a growing `pictures` folder when in a bucket |
 | Backup copy (`backup_to_bucket.php`) | Daily, right after the backup | Copies the new backup to the bucket's private `backups/` folder |
 
@@ -1037,6 +1218,10 @@ visits, and releases expired orders when checkout or the admin runs.
     both at once would lose the pictures. Keep a copy elsewhere too if that matters.
   - It works even on hosts without command-line database tools: a built-in PHP backup takes a
     consistent snapshot.
+  - **A write failure can't pass for a good backup:** if the disk fills up, the backup stops with the
+    reason, removes the cut-off database file and writes no manifest, so that folder never reads as
+    complete. The finished file is also read back and counted. The clean database file for a new host
+    is written the same way.
   - **A copy off the server every night:** each backup is checked against its checksum and
     copied to the shop's cloud bucket (Cloudflare R2), in a private folder the shop never shows. The
     manifest goes last, so a folder with one is complete. Sizes are checked in the bucket, and
@@ -1097,7 +1282,8 @@ taking real payments, a low-cost paid plan is still recommended (`docs/DEPLOYMEN
   files are left out, about 2 MB). `deploy.sh` keeps the settings and storage, applies database
   changes and restarts. Pages can fail during the few minutes of rebuilding, so don't update during
   a demo.
-- **Demo limits:** WhatsApp payment only until gateway keys are added; emails are logged until Resend
+- **Demo limits:** WhatsApp payment only until gateway keys are added (setup asks for the number, and
+  without one WhatsApp isn't offered); emails are logged until Resend
   has a domain; live payment status is off until measured there. The admin page is public, so use
   strong passwords.
 
@@ -1145,8 +1331,10 @@ uploading a new picture from the host, or a host's process limits.**
   - The API has a public address, so the setup page isn't blocked by nginx. Importing the owner's
     database closes it; on an empty database, create the administrator straight away.
   - Rate limits rely on the host's proxy passing on visitors' addresses, which must be checked in
-    System status from two connections. Otherwise all visitors count as one. In the rehearsal, once the
-    storefront's address was trusted, the real address came through and faked ones were ignored.
+    System status from two connections. Otherwise all visitors count as one, so 10 orders in 10 minutes
+    from the whole shop would be refused, and 50 failed sign-ins by anyone would lock everyone out of
+    signing in for 15 minutes, the owner included. In the rehearsal, once the storefront's address was
+    trusted, the real address came through and faked ones were ignored.
   - Cron may run every 5-15 minutes only (emails still go out after visits).
   - Picture copies are off (`BACKUP_PICTURES=false`), for disk and file limits.
   - Live payment status and Redis stay off.
@@ -1168,7 +1356,7 @@ wait.
 
 | Action | Limit |
 |---|---|
-| Failed sign-ins | 5 per address and email in 15 minutes; 20 per email in an hour |
+| Failed sign-ins | 5 per address and email in 15 minutes; 20 per email in an hour; 50 per address in 15 minutes, whichever emails it tries |
 | Sign-in links | 10 per address and 3 per email in 15 minutes; opening them, 20 in 15 minutes |
 | New accounts | 10 an hour |
 | First-run setup | 10 an hour |
@@ -1183,6 +1371,30 @@ wait.
 | Newsletter sign-ups | 10 an hour; unsubscribes 30 an hour |
 | Wrong admin passwords (clean-up, dev mode) | 5 in 15 minutes, per admin |
 | Clean-up codes | 5 an hour, per admin |
+| Payment notices with a wrong signature | 30, shared by Kora and Monnify. Each leaves only a short record, never its contents, with any reference cut to 100 characters, so unsigned requests can't fill the database. Correctly signed notices never count |
+
+**Limits on what can be entered.** The server checks these and answers with a clear message, usually
+against the field, instead of letting the database cut or cap a value. Bad input (over-long text, a list
+where text belongs, a zero byte in a password, an absurd page number) gets a refusal rather than a crash.
+
+| Field | Limit |
+|---|---|
+| Prices, "was" prices, option prices, coupon amounts | Up to ₦99,999,999.99 |
+| Delivery fee, each extra item | ₦0 to ₦1,000,000 |
+| Stock, low-stock alert level, one stock adjustment | Whole numbers up to 1,000,000 |
+| Coupon percentage | Whole number, 1 to 90 |
+| Coupon maximum uses | 0 (unlimited), or a whole number up to 1,000,000 |
+| Display order (categories, banners) | Whole number, 0 to 100,000 |
+| Products | Name 3 to 255 characters (repeated spaces collapse); web address 255; SKU 100; description about 65,000; style, size and colour 50; picture address 500; picture description 255 |
+| Categories | Name 2 to 100 characters; web address 100; picture address 500 |
+| Banners | Title and subtitle 255 characters; button text 50; link 255; picture address 500 |
+| Delivery zones | Name 100 characters; code 2 to 30; delivery estimate 50 |
+| Promo codes | Code 3 to 30 characters; description 255 |
+| Shipping | Courier and tracking number 100 characters (no slash in a tracking number); tracking link 500 |
+| Refunds and flags | Reason 1,000 characters; refund reference 100; "Mark as resolved" note 3 to 500 |
+| Store settings, admin account | Settings 255 characters; name 255; phone 50 |
+| Checkout | Name 2 letters to 255 characters; street 3 to 500; city 3 to 100; order notes 2,000 |
+| Address book | Label 50 characters; recipient and street 255; phone 50; city, state and country 100; postal code 20 |
 
 ---
 
@@ -1208,7 +1420,11 @@ proposal.
 | Cross-site tricks (CSRF) | Another site acts as the signed-in user | Per-session security token on every change; secure, same-site cookies scripts can't read | Tests |
 | Faked visitor addresses | Rate limits dodged with a made-up address | Proxy addresses read from the trusted end only; trusted proxies listed by the owner | Tests |
 | Cache filling the disk | Endless made-up filter values | Normalised keys, uncached odd queries, 5,000-entry cap | Tests |
-| Information leaks | Health page reveals versions and database names | Public health check says only up or down; details are admin-only | Tests |
+| Information leaks | Health page reveals versions and database names; a cart check reveals an unpublished product; visitors see every live coupon | Public health check says only up or down, details are admin-only; cart checks and quotes say nothing about unpublished products; public product answers leave out units sold and low-stock levels; only the advertised coupon is sent; SQL, setup and provider text stays in the log | Tests |
+| Flooding with fake payment notices | Unsigned requests fill the database | Limited per connection, with only a short record kept; with Kora, only the signed data is processed | Tests |
+| Finding out who has an account | Timing or look-alike emails reveal or dodge sign-in limits | A password check always runs; only proper email addresses reach an account; 50 failures per connection | Tests |
+| Absurd or malformed admin input | A database cuts or caps a value silently, or a page crashes | Limits and whole-number checks on the server, with a clear refusal (section 6.10) | Tests |
+| A full disk during a backup | A cut-off backup looks fine | Every write is checked, the file is read back, and no manifest is written on failure | Tests |
 | Malicious picture uploads | Fake images, huge files, hidden location data | Real-type check, 5 MB limit, location data removed, safe file names | Tests and load test (50 uploads at once) |
 | Accidental data deletion | An automatic clean-up wipes customers | Nothing is deleted automatically; clean-ups need a password plus emailed code plus a fresh review list. Everyday deletes (a banner, a delivery zone, an unused promo code) ask for confirmation and go in the audit log; products and categories are archived or deactivated instead | Tests |
 | Data loss | Server lost | Daily database backups copied off the server, careful restore into a new database, runbooks | Restore tested every test run |
@@ -1219,15 +1435,20 @@ proposal.
 | Admin mistakes | "Who changed this price?" | Full audit log with before and after values | Tests |
 | Wrong status changes | An order marked paid by hand | The server enforces the order lifecycle; "paid" only via a payment, "refunded" only via a refund | Tests |
 | Refunding too much | Two refunds at once exceed the payment | Refundable balance checked with the payment locked | Tests |
+| Refunding the wrong money | Sending back a duplicate cancels the good order | One payment at a time, newest first; the order becomes Refunded only when no money is left | Tests |
+| Returned underpaid money | A customer's page celebrates an unpaid order, or the money counts as a sale | The attempt keeps its status and closes as failed once all is returned; it is in no sales figure | Tests |
+| A reported transfer lost at expiry | The customer paid, the order lapses, and old data is cleaned away | Expiry flags it, the money can be recorded as a late payment, and it stays out of the clean-up until resolved | Tests |
+| A payment provider down at the deadline | A paid order is cancelled because nobody could ask | The order waits up to 30 minutes past its deadline for a later check | Tests |
+| Money figures that disagree | Overview and Analytics show different net sales | One shared definition, counting money received and subtracting refunds owed | Tests |
 | Redis outage | Shop down with the cache | 0.15-second limit, then the file cache; no stale pages after recovery | Tests (hang, outage, restart, wrong password) |
 | Disconnecting visitors | Work cut off mid-email | Work after the response runs to the end even if the visitor leaves | Code review |
-| Long admin actions behind a proxy | Proxy cuts off, the admin retries, everything doubles | 120-second proxy limit, and repeat-safe actions | Code review and tests |
+| Long admin actions behind a proxy | Proxy cuts off, the admin retries, everything doubles | 120-second proxy limit, the browser waits as long for slow actions, a change with no answer says its outcome is unknown, and repeat-safe actions | Code review and tests |
 
 **Proof in numbers:**
 
-- **1,242 automated backend checks** in 22 test suites. They run against a throw-away database
+- **1,635 automated backend checks** in 22 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data, buckets and Redis are never touched.
-- Plus 22 storefront unit tests, type checks, lint and a production build. They are run by hand
+- Plus 77 storefront unit tests, type checks, lint and a production build. They are run by hand
   before changes are finished; there is no automatic build server yet.
 - **The release gate passed every check** on 30 October 2026, on an isolated copy with stand-ins for
   the payment and email services and nothing deployed. Later full reviews found and fixed more
@@ -1330,7 +1551,7 @@ has out of the box (section 9.4).
 | 5 | An order arrives | Orders list → order page: items, payment confirmed | "Orders arrive paid and verified. No guesswork." |
 | 6 | WhatsApp transfer | Bell: "Customers say they have paid" → Record manual payment with the bank reference | "Confirm bank transfers with the reference. One reference, one order." |
 | 7 | Ship | Ship dialog: courier and tracking number; toast "customer emailed" | "Ship in seconds. Your customer gets the tracking details automatically." |
-| 8 | Refund | Refunds: "Can still be refunded ₦…", record it | "Record refunds safely. The shop never lets you refund more than was paid." |
+| 8 | Refund | Refunds: "Can still be refunded ₦…", record it | "Record refunds safely. The shop never lets you refund more than came in." |
 | 9 | Grow | Promo code "Live"; newsletter "Send to 1,240 subscribers?"; banner editor | "Run promotions, newsletters and homepage banners yourself." |
 | 10 | Know | Analytics: date range, sales by category, CSV download | "Honest reports, counted from verified payments." |
 | 11 | Peace of mind | Audit log row expanding before/after; turn on dev mode in Store settings; System status all green; Data & storage "Nothing is ever removed automatically" | "Every change logged, the system's health in one page, and no clean-up without your password and a code." |
@@ -1348,7 +1569,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive once." |
 | 5 | A clean-up button behind a password field and an emailed code | "No clean-up without your password and an emailed code." |
 | 6 | A calendar with a backup box every night, flying to a cloud | "Daily backups, copied off the server, with a careful restore." |
-| 7 | A counter climbing: 1,242 ✓ | "Over 1,100 automated checks." |
+| 7 | A counter climbing: 1,635 ✓ | "Over 1,600 automated backend checks." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
@@ -1362,6 +1583,8 @@ Animated, not screen-recorded. Use the real numbers from section 8.
   - **record the setup scene (Video B scene 1) on a PC or through an SSH tunnel with an empty
     database,** because the public Oracle address refuses that page;
   - **turn on dev mode before Video B scene 11,** or System status and Data & storage stay closed;
+  - **set a WhatsApp number in Store settings before Video A scene 8,** or the "Pay via WhatsApp"
+    button doesn't appear;
   - load demo products with photos and several sizes and colours;
   - add one live promo code, a flash deal with an end time, banners and a few approved reviews;
   - prepare one order of each kind: awaiting payment, WhatsApp "customer says paid", paid, and
@@ -1385,7 +1608,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 > orders, refunds, promotions, newsletters and reports. It is engineered like a much larger
 > system: no overselling, every payment applied exactly once, no lost order emails, daily backups
 > copied off the server, full audit trail. It has been load-tested at thousands of orders with zero
-> errors, and checked by over 1,100 automated tests.
+> errors, and checked by over 1,600 automated backend tests.
 
 ### 10.2 Selling points
 
@@ -1425,6 +1648,8 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | What if two people buy the last item? | Only one gets it; the other is told it's sold out. Tested with 100 buyers at once |
 | What if the payment provider sends the same notice several times? | The order is paid once and one receipt is sent. Tested with 990 notices |
 | What if a customer pays and closes the page? | The provider's notice and the scheduled check still confirm it, and the customer is emailed |
+| What if a customer pays too little, too much or twice? | The order is flagged with a plain explanation. Too little never marks it paid, and all of the money that came in can be refunded, one payment at a time. Reports count what was really received |
+| What if a customer says they paid but the order expires first? | The order is flagged for the owner to check the bank, and it stays out of any clean-up until resolved. If the money arrived it is recorded as a late payment and refunded; the customer can place a new order |
 | How are delivery fees set? | Per group of states, by the owner, optionally growing with the number of items. States not covered are refused, never charged a guess |
 | Can I choose which products are on the home page? | Yes. Tick "Featured" on a product and it goes in the Featured row, which shows 4 at a time, with the rest under "View All". Flash deals, new arrivals and top sellers fill themselves, and a product never appears twice on the page |
 | Is the cart in the browser safe? | Yes. It only remembers what the shopper picked; every price, stock level, discount and delivery fee is worked out again on the server when the order is placed, so changing the browser copy can't change what anyone pays. Signed-in customers' carts are also saved to their account |
@@ -1454,7 +1679,7 @@ Honest list, so proposals never overclaim:
 | Automatic test runs on a build server | **Planned.** Tests are run by hand today |
 | Several admin accounts, roles and invitations | **Planned.** One administrator level today, with no invite screen |
 | Admin password reset by email and two-step sign-in for admins | **Planned.** Clean-ups already require an emailed code |
-| Customer screens for saved addresses and profile | **Planned** (the API exists; checkout pre-fills the default address) |
+| Customer screens for saved addresses and profile | **Planned** (the API exists and follows checkout's phone rule; checkout pre-fills the default address) |
 | Self-service returns form | **Planned.** Returns are arranged by contacting the store |
 | Newsletter double opt-in (confirm by email) | **Planned** |
 | Storefront on Vercel with the API elsewhere | Needs a signed storefront header first (**Planned**) |
@@ -1485,6 +1710,7 @@ Honest list, so proposals never overclaim:
 | Term | Meaning |
 |---|---|
 | **Admin panel** | The owner's private area at `/admin` |
+| **Attention flag** | A mark on an order that needs the owner, with a plain reason; it clears when no money is left or with "Mark as resolved" |
 | **Audit log** | The record of every admin change |
 | **cPanel** | The control panel of most shared hosting |
 | **Access key** | The private code a guest gets to open their order from another device |
@@ -1494,6 +1720,9 @@ Honest list, so proposals never overclaim:
 | **Delivery zone** | A group of states with one delivery fee and estimate |
 | **Dev mode** | A password-protected setting that opens the technical admin pages |
 | **Idempotency key** | A unique key that makes repeating an action safe (same result, no duplicate) |
+| **Item sales** | Item prices on paid orders, before discounts and delivery, leaving out cancelled and refunded orders |
+| **Late payment** | Money recorded on an order that was already cancelled; the order stays cancelled and the money is refunded |
+| **Net sales** | Money received, minus refunds completed, minus refunds owed on cancelled orders |
 | **nginx** | The web server that receives visitors and passes them to the shop |
 | **OPcache** | A PHP setting that keeps compiled code ready; it halved response times in the load test |
 | **Outbox** | The database list of emails waiting to be sent |
@@ -1547,3 +1776,4 @@ When something changes, update the matching section in the same commit:
 | 5 Nov 2026 | Every product row on the storefront now stops at 4 products, including Featured |
 | 6 Nov 2026 | Hosting rehearsed on Linux with Apache, Passenger, MySQL 8 and the real zip files, before buying a host. Fixed: database updates that failed on MySQL, zip permissions that shared hosts refuse. New: clean database export for a new host, entry folder for DirectAdmin, `-NoImageResizing`, and "Before you buy" in the hosting guide |
 | 6 Nov 2026 | Picture uploads no longer need PHP's fileinfo extension, which some shared hosts lack: the file's own bytes are read with `getimagesize`, and the same JPEG, PNG and WebP limit applies |
+| 6 Nov 2026 | Full review of the shop, admin and customer API, and fixes for what it found. **Money:** refunds go one payment at a time, newest first; underpaid and overpaid money can be refunded; an order becomes Refunded only when no money remains. **Flags:** "Mark as resolved" with a note; reported transfers that expire are flagged, can be recorded as late payments and stay out of the clean-up (migration 022 flagged older ones); a failed gateway check gets a grace period. **Reports:** one net sales definition on Overview and Analytics, sales count money received, item sales and units leave out cancelled and refunded orders, All time is all time. **Admin:** limits on prices, stock, uses, display order and text; numeric web addresses, renaming used coupons and overlapping zones refused; dialogs, uploads, paging and slow actions. **Security:** sign-in and payment notice limits, private catalogue data, technical text kept from customers, bad input refused. **Storefront:** checkout validation, kept details, sign-out and session handling, own reservations, Lagos-time deadlines, WhatsApp only with a number, page titles, receipts and the price filter. **Backups:** write failures are caught. Backend checks now 1,635 in 22 suites; storefront tests 77. Real Kora, Monnify and email delivery are still not run (section 11) |

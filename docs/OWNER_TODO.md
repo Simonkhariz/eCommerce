@@ -22,7 +22,18 @@ Things left for the store owner after the speed, scale and bug-fix work (commits
 
 Also still open from earlier work:
 
-- [ ] Live Kora / Monnify keys and webhooks
+- [ ] Live Kora / Monnify keys and webhooks. A gateway without its keys isn't offered at checkout.
+- [ ] **Set the shop's WhatsApp number** in admin → Store settings (or `STORE_WHATSAPP_PHONE` in
+      `backend/.env`). There is no built-in number any more: without one, customers aren't offered
+      WhatsApp payment, and the WhatsApp help links are replaced by "Contact the store".
+- [ ] **After the next database update, check the bell.** Migration 022 flags older orders where the
+      customer said they sent a transfer but the order expired. For each one, check your bank: if the
+      money arrived, use "Record late payment" and refund it; if not, use "Mark as resolved" with a
+      note. It only raises flags and removes nothing, and those orders stay out of clean-ups until
+      resolved.
+- [ ] **On a live server, confirm visitor addresses** in System status → "Visitor addresses". If every
+      visitor shows the same address, 50 failed sign-ins by anyone lock everyone out of signing in for
+      15 minutes, you included.
 - [ ] Real email: Resend sending domain (DNS records + DMARC) and API key, then `MAIL_MAILER=resend`
       in `backend/.env` on the server. Step by step, with a go-live checklist: `docs/EMAIL_SETUP.md`.
       (SMTP also works if you prefer it.)

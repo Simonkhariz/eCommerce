@@ -10,16 +10,16 @@ setting was changed.
 | Part | Requirement | Where it comes from |
 |---|---|---|
 | Storefront | Node.js 20.9 or newer (Next.js 16); `npm ci` on the server itself (sharp is built per system) | `node_modules/next/package.json` engines; `package.json` engines |
-| API | PHP 8.2+ with mysqli, curl, mbstring, openssl, json, simplexml, ctype | `backend/composer.json`; admin → System status → PHP lists any that are missing |
-| Backups | zlib (and phar when pictures are on the server's disk) | `scripts/backup.php` stops with the reason if missing |
+| API | PHP 8.2+ with mysqli, curl, mbstring, openssl, json, simplexml, ctype. fileinfo is not needed: uploads read the file's own bytes with `getimagesize` | `backend/composer.json`; admin → System status → PHP lists any that are missing |
+| Backups | zlib (and phar when pictures are on the server's disk) | `scripts/backup.php` stops with the reason if missing, and also if a write fails (a full disk, say), leaving no manifest |
 | PHP settings | `upload_max_filesize` and `post_max_size` at least 6M (pictures up to 5 MB; many hosts default to 2M); `max_execution_time` 120; OPcache on (halved response times in the load test) | System status shows the upload limit and OPcache |
 | Database | MySQL 8 or MariaDB 10.4+, InnoDB, utf8mb4 | Migrations use only syntax both accept; the session time zone is set as an offset (`+01:00`), so the server needs no time-zone tables |
 | Web server | Apache (the `.htaccess` files are ready) or nginx + PHP-FPM; document root `backend/public` only | `php -S` serves one request at a time (load test: a single slow request held up every other one for 4.6 s) |
 | HTTPS | Required in production: sign-in cookies are always `Secure` when `APP_ENV=production` | `SessionCookie::isSecure` |
 | Scheduled jobs | Every minute (email), every 10 minutes (unpaid orders), daily (database check, backup) | Root README "Background jobs". If the host only allows every 5 or 15 minutes, email still goes out: the API retries due emails after requests |
 | Email | Resend (domain verified) or SMTP; outbound HTTPS to api.resend.com or the SMTP port | `docs/EMAIL_SETUP.md`; Resend allows 10 requests a second per account |
-| Payments | Kora must reach `APP_URL/api/v1/webhooks/kora` over public HTTPS; Monnify's webhook URL is set in its dashboard; outbound HTTPS to both | System status warns when `APP_URL` is not public HTTPS |
-| Pictures | Server disk (default) or an S3-compatible bucket (Cloudflare R2 chosen, not set up) | `docs/STORAGE.md` |
+| Payments | Kora must reach `APP_URL/api/v1/webhooks/kora` over public HTTPS; Monnify's webhook URL is set in its dashboard; outbound HTTPS to both. A gateway without keys, or WhatsApp without a number (Store settings or `STORE_WHATSAPP_PHONE`), isn't offered at checkout | System status warns when `APP_URL` is not public HTTPS |
+| Pictures | Server disk (default) or an S3-compatible bucket (Cloudflare R2 chosen, in use on the development shop) | `docs/STORAGE.md` |
 | Redis | Optional (`REDIS_URL`; a hosted one such as Upstash must be in the server's region, `docs/REDIS.md`): shares the catalogue cache between servers; no PHP extension needed (TCP, TLS or a Unix socket, as many cPanel hosts give it). Without it, or when it is down, the file cache is used | `docs/REDIS.md` |
 | Live payment status (SSE) | Optional, off by default (`SSE_ENABLED`). Each open stream holds one PHP worker and one database connection for up to 110 s, capped by `SSE_MAX_STREAMS` (measured exactly so in Prompt 35). Size it at about half of PHP-FPM `pm.max_children` and MySQL connections on a VPS, and about a quarter of entry processes and database connections on shared cPanel (4–5 on a typical plan). Never with `php -S`. Re-measure on staging before switching it on (`docs/SSE_CONTRACT.md` §13) | `docs/SSE_CONTRACT.md` |
 
@@ -52,7 +52,9 @@ MySQL 8; not yet run on a real host or LiteSpeed. Constraints:
 - Cron is under "Cron Jobs"; some hosts allow every 5 or 15 minutes only (email still works,
   less promptly; see above).
 - The Node.js App must run behind the host's proxy that sets `X-Forwarded-For`, and the proxy's
-  address must be in `TRUSTED_PROXIES`. Confirm with System status → "Visitor addresses".
+  address must be in `TRUSTED_PROXIES`. Confirm with System status → "Visitor addresses". Otherwise
+  all visitors count as one: 10 orders in 10 minutes from the whole shop would be refused, and 50
+  failed sign-ins by anyone would lock everyone out of signing in for 15 minutes, admins included.
 - Long admin actions are limited by the host's PHP time limit (often 30 s). A newsletter is
   queued in one transaction (11 s for 20,000 in the load test): if it is cut off, nothing is
   queued and sending again is safe; if it finished, sending again queues nobody twice.
@@ -63,7 +65,8 @@ MySQL 8; not yet run on a real host or LiteSpeed. Constraints:
 Works, with one real limit: every request reaches the API from Vercel's servers, whose addresses
 are many and change, so they cannot be listed in `TRUSTED_PROXIES`. The API then sees Vercel's
 address instead of each visitor's, and visitors share rate limits (10 orders per 10 minutes per
-address, sign-in attempts, promo-code tries). On a busy shop that would refuse real customers.
+address, 50 failed sign-ins per 15 minutes per address, promo-code tries). On a busy shop that would
+refuse real customers.
 Before choosing this, the shop needs a signed header from the storefront that the API trusts in
 place of the address list: a small change, not built yet. Also:
 
@@ -124,7 +127,7 @@ Ubuntu 24.04 server). It is option A on one free server:
 | The client address was taken from the leftmost `X-Forwarded-For` entry | Anyone could send a made-up address and step around every rate limit (sign-in, checkout, promo codes) | Read from the right, skipping only trusted proxies; `TRUSTED_PROXIES` accepts ranges (IPv4 and IPv6); System status shows the address the API sees. `SecurityTest` |
 | The public `/health` showed the PHP version, database name, environment and extensions | Free information for attackers | Only up/down and a timestamp; details moved to System status |
 | A picture over the host's PHP upload limit said "error code: 1", or "no image file provided" when over `post_max_size` | Admin cannot tell why uploads fail on a new host | Plain message with the server's limit and what to ask the host; System status shows the limit |
-| Calls through the storefront to the API were cut at 30 s | A long admin action shows an error while the server finishes it; sending a newsletter again would email everyone twice | `experimental.proxyTimeout` 120 s, and the same newsletter is queued at most once per subscriber per day |
+| Calls through the storefront to the API were cut at 30 s | A long admin action shows an error while the server finishes it; sending a newsletter again would email everyone twice | `experimental.proxyTimeout` 120 s, and the same newsletter is queued at most once per subscriber per day. The browser now also waits 120 s for a newsletter, "Send queued now" and picture uploads, and a change with no answer says its outcome is unknown |
 | `APP_URL` was described as "the API's URL" | In the recommended layout that is an internal address, so Kora's payment notifications would never arrive (payments confirmed only when customers return to the shop) | `.env.example` explains it; System status warns about it, an `http://` `FRONTEND_URL`, localhost in `CORS_ALLOWED_ORIGINS`, and sandbox payment keys, on a production server |
 | ctype was used but not declared; backups needed zlib and phar without saying so | A host without them fails with a PHP error | Declared in `composer.json`; `backup.php` names what is missing |
 
