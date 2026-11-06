@@ -271,7 +271,7 @@ class CheckoutService
 
                 $addressSnapshot = [
                     'full_name' => Input::text($shippingAddress['full_name'] ?? null),
-                    'phone' => Input::text($shippingAddress['phone'] ?? null),
+                    'phone' => PhoneNumber::stored(Input::text($shippingAddress['phone'] ?? null)),
                     'address_line1' => Input::text($shippingAddress['address_line1'] ?? null),
                     'address_line2' => Input::text($shippingAddress['address_line2'] ?? null),
                     'city' => Input::text($shippingAddress['city'] ?? null),
@@ -866,13 +866,14 @@ class CheckoutService
             $errors['phone'] = PhoneNumber::NIGERIAN_RULE;
         }
         $street = Input::text($address['address_line1'] ?? null);
-        if (mb_strlen($street) < 3) {
+        // At least 3 characters, and not only punctuation ("1 A" is a real address, "..." isn't).
+        if (mb_strlen($street) < 3 || preg_match_all('/[\p{L}\p{N}]/u', $street) < 2) {
             $errors['address_line1'] = 'Enter your street address (at least 3 characters).';
         } elseif (Input::tooLong($street, 500)) {
             $errors['address_line1'] = 'Your street address can be at most 500 characters.';
         }
         $city = Input::text($address['city'] ?? null);
-        if (mb_strlen($city) < 3) {
+        if (mb_strlen($city) < 3 || preg_match_all('/[\p{L}\p{N}]/u', $city) < 2) {
             $errors['city'] = 'Enter your city or town (at least 3 characters).';
         } elseif (Input::tooLong($city, 100)) {
             $errors['city'] = 'Your city or town can be at most 100 characters.';

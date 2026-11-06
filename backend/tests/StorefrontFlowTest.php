@@ -259,8 +259,8 @@ $ordersBefore = (int) $t->scalar('SELECT COUNT(*) FROM `orders`');
 foreach ([
     'full_name' => ['.', 'A', '12 34', 'A.'],
     'phone' => ['1', '0803123456', '080312345678', '803 123 4567', '+23480312345', '+44 20 7946 0958', 'abc'],
-    'address_line1' => ['.', 'ab', '  a '],
-    'city' => ['.', 'ab'],
+    'address_line1' => ['.', 'ab', '  a ', '...', '-- --'],
+    'city' => ['.', 'ab', '...'],
 ] as $field => $badValues) {
     foreach ($badValues as $bad) {
         $res = $placeWith([$field => $bad]);
@@ -284,6 +284,7 @@ foreach ([
     $res = $placeWith($good, ['notes' => str_repeat('n', 2000)]);
     $t->check("good details ({$good['phone']}) are accepted", 201, $res['status']);
     $ordersCreated[] = (string) TestKit::get($res, 'data.order_number');
+    $t->check('and saved in one format however typed', '+2348031234567', json_decode((string) $t->scalar('SELECT `shipping_address_snapshot` FROM `orders` WHERE `order_number` = ?', 's', [TestKit::get($res, 'data.order_number')]), true)['phone'] ?? null);
     $t->http('POST', '/checkout/orders/' . TestKit::get($res, 'data.order_number') . '/release', ['headers' => ['X-Guest-Access-Token: ' . TestKit::get($res, 'data.guest_access_token')], 'json' => []]);
 }
 $t->check('the form\'s quote needs only the state', 200, $quote('Lagos')['status']);

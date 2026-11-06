@@ -17,7 +17,7 @@ import {
   type ValidatePromoResponse,
 } from '@/lib/api-client';
 import { useAuth } from '@/context/AuthContext';
-import { clearPendingOrder, isOrderSettled, markOrderSettled, readGuestToken, readPendingOrder, signatureQuantities } from '@/lib/pending-order';
+import { clearCheckoutDraft, clearPendingOrder, isOrderSettled, markOrderSettled, readGuestToken, readPendingOrder, signatureQuantities } from '@/lib/pending-order';
 import { withAddedLines, type AddedLine } from '@/lib/cart-lines';
 
 interface ToastMessage {
@@ -423,6 +423,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!signature) return;
     markOrderSettled(orderNumber);
     clearPendingOrder(orderNumber);
+    clearCheckoutDraft(); // kept until now so the details could still be changed before paying
     const remaining = removeOrderedLines(itemsRef.current, signature);
     itemsRef.current = remaining;
     setItems(remaining);

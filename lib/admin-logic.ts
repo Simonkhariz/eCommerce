@@ -106,6 +106,24 @@ export function canRecordLatePayment(order: { order_status: string; payment_stat
   return order.order_status === 'cancelled' && !!order.customer_marked_paid_at && ['pending', 'failed', 'cancelled'].includes(order.payment_status);
 }
 
+/**
+ * The amount a refund form starts with: all that can go back, or for a customer who overpaid an
+ * order that still stands, just the extra (they keep what they bought).
+ */
+export function refundStartAmount(e: {
+  order_status: string;
+  order_total: number;
+  paid_amount: number;
+  refunded_amount: number;
+  pending_refund_amount: number;
+  refundable_amount: number;
+}): string {
+  if (e.refundable_amount <= 0) return '';
+  const extra = Math.round((e.paid_amount - e.refunded_amount - e.pending_refund_amount - e.order_total) * 100) / 100;
+  const orderStands = !['cancelled', 'refunded'].includes(e.order_status);
+  return String(orderStands && extra > 0 ? Math.min(extra, e.refundable_amount) : e.refundable_amount);
+}
+
 /** States listed by more than one active zone (only older data: the API now refuses a new overlap). */
 export function zoneOverlaps(zones: Array<{ name: string; is_active: boolean; states_covered: string[] }>): Array<{ state: string; zones: string[] }> {
   const byState = new Map<string, string[]>();

@@ -513,7 +513,7 @@ class CheckoutController
             $claimed = empty($order['customer_marked_paid_at']) ? 0 : 1;
             $payment = $this->db->fetchOne(
                 "SELECT * FROM `payments` WHERE `order_id` = ?
-                 ORDER BY (`status` IN ('successful', 'partially_refunded', 'refunded')) DESC,
+                 ORDER BY FIELD(`status`, 'refunded', 'partially_refunded', 'successful') DESC,
                           (? = 1 AND `provider` = 'whatsapp' AND `status` = 'pending') DESC,
                           `id` DESC
                  LIMIT 1",

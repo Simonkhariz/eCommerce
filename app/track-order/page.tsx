@@ -75,7 +75,7 @@ function TrackOrderContent() {
   const [copiedTracking, setCopiedTracking] = useState<boolean>(false);
 
   // Signing out leaves nothing of the order on screen for the next person.
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const viewerId = user?.id ?? null;
   const [lastViewerId, setLastViewerId] = useState(viewerId);
   if (viewerId !== lastViewerId) {
@@ -119,6 +119,9 @@ function TrackOrderContent() {
         (err) => {
           setOrder(null);
           setLookupError(orderLookupErrorMessage(err, NOT_FOUND_MESSAGE));
+          // A signed-in customer's own order "not found" can mean the session ended: this asks,
+          // and prompts them to sign in again if so.
+          if (user) void refreshUser();
         }
       )
       .finally(() => setIsLoading(false));

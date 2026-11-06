@@ -105,7 +105,7 @@ function flashDealEnd(value: string | null | undefined): Date | null {
 }
 
 /** Wide screens: one row per variant (Size, Colour, Swatch, SKU, Price, Stock, Alert, Remove). */
-const VARIANT_GRID = 'lg:grid-cols-[minmax(0,8rem)_minmax(0,7rem)_2.5rem_minmax(0,1fr)_minmax(0,7rem)_minmax(0,5rem)_minmax(0,5rem)_2rem]';
+const VARIANT_GRID = 'lg:grid-cols-[minmax(0,8rem)_minmax(0,7rem)_3.75rem_minmax(0,1fr)_minmax(0,7rem)_minmax(0,5rem)_minmax(0,5rem)_2rem]';
 const VARIANT_FIELD = 'flex min-w-0 flex-col gap-1';
 /** Field names are shown on the phone/tablet cards; the header row names them on wide screens. */
 const VARIANT_LABEL = 'text-xs text-[#6b7280] lg:sr-only';

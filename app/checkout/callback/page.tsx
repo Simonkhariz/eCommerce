@@ -634,7 +634,7 @@ function CheckoutCallbackContent() {
               <p className="text-sm text-neutral-700 mt-1">Order <strong className="font-mono text-black">{orderNumber}</strong></p>
             </div>
             <p className="text-sm text-neutral-700 max-w-sm mx-auto">
-              No money was taken for this attempt. Your order is still saved and your items are reserved for a while.
+              This attempt didn&apos;t complete. If money left your account, the store will return it. Your order is still saved and your items are reserved for a while.
             </p>
             {retryPanel}
             <Link href="/cart" className="block w-full bg-neutral-100 hover:bg-neutral-200 font-semibold py-3 rounded-full text-sm">
@@ -691,7 +691,7 @@ function CheckoutCallbackContent() {
             <h1 className="text-2xl font-extrabold text-black">Payment received after the order expired</h1>
             <p className="text-sm text-neutral-700 max-w-sm mx-auto">
               We received your payment for <strong className="font-mono">{orderNumber}</strong>, but the order had already expired.
-              The store has been alerted and will refund you or complete the order. You don&apos;t need to pay again.
+              The store has been alerted and your payment will be refunded, if it hasn&apos;t been already. To still get these items, contact the store or place a new order.
             </p>
             {hasWhatsApp ? (
               <a

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Repositories;
 
+use App\Support\PhoneNumber;
+
 use App\Support\Input;
 use App\Database\Database;
 
@@ -67,7 +69,7 @@ class AddressRepository
 
             $label = Input::text($data['label'] ?? null, 'Home');
             $recipientName = Input::text($data['recipient_name'] ?? null);
-            $phone = Input::text($data['phone'] ?? null);
+            $phone = PhoneNumber::stored(Input::text($data['phone'] ?? null));
             $streetAddress = Input::text($data['street_address'] ?? null);
             $city = Input::text($data['city'] ?? null);
             $state = Input::text($data['state'] ?? null);
@@ -115,7 +117,11 @@ class AddressRepository
             if (array_key_exists($col, $data)) {
                 $fields[] = "`{$col}` = ?";
                 $types .= $t;
-                $values[] = $t === 'i' ? (!empty($data[$col]) ? 1 : 0) : Input::text($data[$col]);
+                $values[] = match (true) {
+                    $t === 'i' => !empty($data[$col]) ? 1 : 0,
+                    $col === 'phone' => PhoneNumber::stored(Input::text($data[$col])),
+                    default => Input::text($data[$col]),
+                };
             }
         }
 

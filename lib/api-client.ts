@@ -670,6 +670,26 @@ export async function apiGetMe(scope: 'customer' | 'admin' = 'customer'): Promis
 }
 
 /**
+ * Is anyone signed in? Unlike apiGetMe, "no" is a normal answer (user: null), not a 401 in the
+ * browser's console on every page a visitor opens.
+ */
+export async function apiPeekSession(scope: 'customer' | 'admin' = 'customer'): Promise<{ user: ApiUser | null }> {
+  const res = await fetchFullFromApi<{ user: ApiUser | null; csrf_token: string | null }>(
+    `/auth/me?optional=1${scope === 'admin' ? '&scope=admin' : ''}`
+  );
+  const user = res.data?.user ?? null;
+  if (res.data?.csrf_token) {
+    if (scope === 'admin') {
+      setAdminCsrfToken(res.data.csrf_token);
+    } else {
+      setMemoryCsrfToken(res.data.csrf_token);
+      knownCustomerId = user?.id ?? null;
+    }
+  }
+  return { user };
+}
+
+/**
  * Request a passwordless magic sign-in link. The link is delivered by email only.
  */
 export async function apiRequestMagicLink(email: string): Promise<{ message: string }> {

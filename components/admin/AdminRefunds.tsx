@@ -13,6 +13,7 @@ import {
   type RefundRow,
 } from '@/lib/admin-api';
 import { formatDateTime, formatPrice, gatewayLabel, humanize, num, orderStatus, paymentStatus } from '@/lib/admin-format';
+import { refundStartAmount } from '@/lib/admin-logic';
 import type { StatusTone } from '@/lib/order-status';
 import {
   Button,
@@ -129,7 +130,7 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
     try {
       const result = await adminGetRefundEligibility(trimmed);
       setEligibility(result);
-      setForm({ ...EMPTY_FORM, amount: result.refundable_amount > 0 ? String(result.refundable_amount) : '' });
+      setForm({ ...EMPTY_FORM, amount: refundStartAmount(result) });
     } catch (err) {
       if (redirectIfSignedOut(err)) return;
       setLookupError(errorMessage(err, 'Could not look up this order.'));
@@ -158,7 +159,7 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
         (result) => {
           if (!current) return;
           setEligibility(result);
-          setForm({ ...EMPTY_FORM, amount: result.refundable_amount > 0 ? String(result.refundable_amount) : '' });
+          setForm({ ...EMPTY_FORM, amount: refundStartAmount(result) });
         },
         (err) => {
           if (redirectIfSignedOut(err) || !current) return;

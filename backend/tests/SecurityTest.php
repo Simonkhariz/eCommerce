@@ -137,7 +137,7 @@ $t->section('Profile: the phone rule, and sizes the database can hold');
 $putProfile = static fn (array $json): array => $t->http('PUT', '/customer/profile', ['jar' => 'cust', 'csrf' => $csrf, 'json' => $json]);
 $storedPhone = static fn (): ?string => $t->scalar("SELECT `phone` FROM `users` WHERE `email` = ?", 's', [$custEmail]);
 $t->check('profile phone "abc" -> 422', 422, $putProfile(['phone' => 'abc'])['status']);
-$t->check('and it is not stored', '08000000000', $storedPhone());
+$t->check('and it is not stored: the good number stays, in the saved format', '+2348000000000', $storedPhone());
 $t->check('a list as the phone -> 422', 422, $putProfile(['phone' => ['0803']])['status']);
 $t->check('an over-long phone -> 422', 422, $putProfile(['phone' => str_repeat('0', 51)])['status']);
 $t->check('an over-long name -> 422', 422, $putProfile(['full_name' => str_repeat('n', 256)])['status']);
@@ -202,6 +202,9 @@ foreach ([
     $t->check("{$what} -> 422 on {$field}", [422, true], [$res['status'], TestKit::get($res, "error.details.{$field}") !== null]);
 }
 $t->check('/auth/me?scope[]=x -> 401, not a server error', 401, $t->http('GET', '/auth/me?scope[]=x')['status']);
+$peek = $t->http('GET', '/auth/me?optional=1');
+$t->check('a visitor asking whether anyone is signed in gets a plain "no", not an error', [200, null, null], [$peek['status'], TestKit::get($peek, 'data.user'), TestKit::get($peek, 'data.csrf_token')]);
+$t->check('and the signed-in session answers the same way as always', $custEmail, TestKit::get($t->http('GET', '/auth/me?optional=1', ['jar' => 'cust']), 'data.user.email'));
 $t->check('/auth/logout?scope[]=x -> 200, not a server error', 200, $t->http('POST', '/auth/logout?scope[]=x', ['json' => []])['status']);
 $raw = (string) ($jar[$customerCookie]['value'] ?? '');
 $t->check('session stored hashed (raw cookie is not a DB id)', 0, (int) $t->scalar("SELECT COUNT(*) FROM `sessions` WHERE `id` = ?", 's', [$raw]));

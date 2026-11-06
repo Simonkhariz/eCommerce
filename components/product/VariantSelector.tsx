@@ -3,6 +3,7 @@
 import React, { useId } from 'react';
 import { ProductColor } from '@/types';
 import type { OptionState } from '@/lib/variants';
+import { useHydrated } from '@/lib/use-hydrated';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Tick02Icon,
@@ -81,6 +82,7 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
 }) => {
   // Unique per selector: the product page and a quick-add panel can both be on screen.
   const uid = useId();
+  const ready = useHydrated();
   return (
     <div className="space-y-6">
       {/* 1. Colour (radio group: arrow keys move and select) */}
@@ -221,7 +223,7 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
           <button
             type="button"
             onClick={onAddToCart}
-            disabled={!canPurchase}
+            disabled={!canPurchase || !ready}
             className="flex-1 bg-black text-white hover:bg-neutral-800 font-semibold py-4 rounded-full transition-all shadow-lg flex items-center justify-center gap-2 text-sm sm:text-base disabled:bg-neutral-300 disabled:text-neutral-700 disabled:shadow-none disabled:cursor-not-allowed"
           >
             <HugeiconsIcon icon={ShoppingBag01Icon} size={20} />
@@ -249,7 +251,7 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
         <button
           type="button"
           onClick={onBuyNow}
-          disabled={!canPurchase}
+          disabled={!canPurchase || !ready}
           className="w-full bg-[#F0F0F0] hover:bg-neutral-200 text-black font-semibold py-3.5 rounded-full transition-colors flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <HugeiconsIcon icon={FireIcon} size={16} className="text-red-500 fill-current" />

@@ -384,6 +384,7 @@ class AdminOperationsController
             'order_status' => $order['order_status'],
             'payment_status' => $order['payment_status'],
             'currency' => $order['currency'],
+            'order_total' => (float) $order['grand_total'],
             'paid_amount' => $sum('received'),
             'refunded_amount' => $sum('refunded'),
             'pending_refund_amount' => $sum('pending_refunds'),

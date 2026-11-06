@@ -22,10 +22,12 @@ export function validateCheckoutDetails(form: { fullName: string; phone: string;
   if (!/^(?:0\d{10}|\+?2340?\d{10})$/.test(cleanPhone(form.phone))) {
     errors.phone = 'Enter a Nigerian phone number: 11 digits starting with 0, or +234 and 10 digits.';
   }
-  if (form.address.trim().length < 3) {
+  // At least 3 characters, and not only punctuation ("1 A" is a real address, "..." isn't).
+  const tooShort = (text: string) => text.trim().length < 3 || (text.match(/[\p{L}\p{N}]/gu) ?? []).length < 2;
+  if (tooShort(form.address)) {
     errors.address = 'Enter your street address (at least 3 characters).';
   }
-  if (form.city.trim().length < 3) {
+  if (tooShort(form.city)) {
     errors.city = 'Enter your city or town (at least 3 characters).';
   }
   return errors;

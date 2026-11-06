@@ -73,6 +73,10 @@ class AuthController
     {
         $resolved = SessionGuard::resolve(SessionCookie::normalizeScope($_GET['scope'] ?? null));
         if ($resolved === null) {
+            // Asking "is anyone signed in?" on every page: for a visitor, "no" is not an error.
+            if (($_GET['optional'] ?? null) === '1') {
+                Response::success(['user' => null, 'csrf_token' => null, 'expires_at' => null], 'Not signed in.');
+            }
             Response::error('Unauthenticated.', 401, 'UNAUTHENTICATED');
         }
 

@@ -427,6 +427,7 @@ export interface RefundEligibility {
   order_status: OrderStatus;
   payment_status: string;
   currency: string;
+  order_total: number;
   paid_amount: number;
   refunded_amount: number;
   pending_refund_amount: number;

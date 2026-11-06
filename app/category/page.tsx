@@ -7,10 +7,24 @@ import { serverApiGet, serverApiGetFull } from '@/lib/server-api';
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-export const metadata: Metadata = {
-  title: 'Shop all products | SHOP.CO',
-  description: 'Browse every product in the SHOP.CO catalogue, with filters for category, colour, size, style and price.',
-};
+/** The tab says what the page shows: a search, a category, the deals, or everything. */
+export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }): Promise<Metadata> {
+  const filters = parseCatalogParams(urlParamsFrom(await searchParams));
+  const words = (slug: string) => slug.replace(/[-_]+/g, ' ').replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+  const heading = filters.searchQuery
+    ? `Search: ${filters.searchQuery}`
+    : filters.category
+      ? words(filters.category)
+      : filters.onSale || filters.flashDeals
+        ? 'Deals'
+        : filters.featured
+          ? 'Featured products'
+          : 'Shop all products';
+  return {
+    title: `${heading} | SHOP.CO`,
+    description: 'Browse every product in the SHOP.CO catalogue, with filters for category, colour, size, style and price.',
+  };
+}
 
 /**
  * The catalogue is sent with its first results and filter options already in the page, like

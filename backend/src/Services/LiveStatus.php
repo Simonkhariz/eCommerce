@@ -77,7 +77,7 @@ final class LiveStatus
         $order = $this->db->fetchOne("SELECT `order_number`, `order_status` FROM `orders` WHERE `id` = ?", 'i', [$orderId]);
         $payment = $this->db->fetchOne(
             "SELECT `id`, `status` FROM `payments` WHERE `order_id` = ?
-             ORDER BY (`status` IN ('successful', 'partially_refunded', 'refunded')) DESC, `id` DESC LIMIT 1",
+             ORDER BY FIELD(`status`, 'refunded', 'partially_refunded', 'successful') DESC, `id` DESC LIMIT 1",
             'i',
             [$orderId]
         );

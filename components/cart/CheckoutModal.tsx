@@ -463,7 +463,6 @@ function CheckoutSession({
 
       idempotencyKeyRef.current = null;
       idempotencySignatureRef.current = null;
-      clearCheckoutDraft();
       saveGuestToken(placed.order_number, placed.guest_access_token);
       // The cart stays as it is until payment is verified; remember which order it belongs to.
       savePendingOrder({

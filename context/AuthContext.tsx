@@ -8,7 +8,7 @@ import {
   ApiUser,
   ApiAddress,
   onCustomerSessionEvent,
-  apiGetMe,
+  apiPeekSession,
   apiLogin,
   apiRegister,
   apiLogout,
@@ -47,6 +47,16 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+/** Tells this browser's other tabs that someone signed in or out, so they don't look stale. */
+const SESSION_SIGNAL_KEY = 'shopco_session_changed';
+function signalOtherTabs(kind: 'in' | 'out'): void {
+  try {
+    localStorage.setItem(SESSION_SIGNAL_KEY, `${Date.now()}:${kind}`);
+  } catch {
+    // Storage unavailable: the other tabs catch up when next focused.
+  }
+}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const router = useRouter();
@@ -87,20 +97,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshUser = useCallback(() => {
     const startedAt = sessionChanges.current;
-    return apiGetMe()
+    return apiPeekSession()
       .then(
         (res) => {
           if (startedAt !== sessionChanges.current) return;
-          setUser(res.user);
+          // Nobody is signed in: normal for a guest; for someone who was, the session ended.
+          if (!res.user && signedInRef.current) {
+            sessionEnded();
+            return;
+          }
+          // The same answer keeps the same object, so nothing that follows the user reloads.
+          setUser((prev) => (JSON.stringify(prev) === JSON.stringify(res.user) ? prev : res.user));
           if (res.user) loadAddresses();
         },
         (err) => {
           if (startedAt !== sessionChanges.current) return;
-          // A 401 is the normal answer for a guest; it only means something ended when signed in.
           if (signedInRef.current && err instanceof ApiError && err.statusCode === 401) {
             sessionEnded();
             return;
           }
+          // A network blip while signed in isn't a sign-out.
+          if (signedInRef.current) return;
           setUser(null);
           setAddresses([]);
         }
@@ -112,6 +129,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (inAdminArea) return;
     refreshUser();
+  }, [inAdminArea, refreshUser]);
+
+  // Another tab signed in or out, or this tab comes back after a while: catch up.
+  useEffect(() => {
+    if (inAdminArea) return;
+    let lastCheck = Date.now();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== SESSION_SIGNAL_KEY || !event.newValue) return;
+      lastCheck = Date.now();
+      if (event.newValue.endsWith(':out')) {
+        sessionChanges.current += 1;
+        forgetOrdersOnThisDevice();
+        setUser(null);
+        setAddresses([]);
+        return;
+      }
+      void refreshUser();
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - lastCheck < 30000) return;
+      lastCheck = Date.now();
+      void refreshUser();
+    };
+    window.addEventListener('storage', onStorage);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
   }, [inAdminArea, refreshUser]);
 
   // What other requests find out about the session: it ended, or another tab of this browser
@@ -159,6 +207,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // account automatically when the signed-in user changes.
     setUser(res.user);
     loadAddresses();
+    signalOtherTabs('in');
   };
 
   const register = async (data: { full_name: string; email: string; password: string; phone?: string }) => {
@@ -167,6 +216,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(res.user);
     setIsAuthModalOpen(false);
     loadAddresses();
+    signalOtherTabs('in');
   };
 
   const requestMagicLink = async (email: string) => {
@@ -179,6 +229,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(res.user);
     setIsAuthModalOpen(false);
     loadAddresses();
+    signalOtherTabs('in');
     return res.password_removed === true;
   };
 
@@ -190,6 +241,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       forgetOrdersOnThisDevice();
       setUser(null);
       setAddresses([]);
+      signalOtherTabs('out');
     }
   };
 

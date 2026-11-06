@@ -3,6 +3,7 @@
 import React from 'react';
 import { Product } from '@/types';
 import { formatPrice } from '@/lib/currency';
+import { useHydrated } from '@/lib/use-hydrated';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ShoppingBag01Icon, FireIcon } from '@hugeicons/core-free-icons';
 
@@ -25,6 +26,7 @@ export const StickyMobileBar: React.FC<StickyMobileBarProps> = ({
   onAddToCart,
   onBuyNow,
 }) => {
+  const ready = useHydrated();
   return (
     // z-30: under the header (z-40), whose phone menu opens above this bar. data-sticky-purchase-bar
     // makes room for it below the footer (globals.css).
@@ -46,7 +48,7 @@ export const StickyMobileBar: React.FC<StickyMobileBarProps> = ({
         <button
           type="button"
           onClick={onAddToCart}
-          disabled={!canPurchase}
+          disabled={!canPurchase || !ready}
           className="flex-1 bg-black text-white active:bg-neutral-800 text-xs font-bold py-3 rounded-full flex items-center justify-center gap-1.5 shadow-md disabled:bg-neutral-300 disabled:text-neutral-700 disabled:shadow-none"
         >
           <HugeiconsIcon icon={ShoppingBag01Icon} size={14} aria-hidden="true" />
@@ -55,7 +57,7 @@ export const StickyMobileBar: React.FC<StickyMobileBarProps> = ({
         <button
           type="button"
           onClick={onBuyNow}
-          disabled={!canPurchase}
+          disabled={!canPurchase || !ready}
           className="bg-[#F0F0F0] active:bg-neutral-200 text-black text-xs font-bold p-3 rounded-full flex items-center justify-center shadow-sm disabled:opacity-50"
           title="Buy now"
           aria-label={canPurchase ? `Buy ${product.name} now` : 'Buy now (unavailable)'}

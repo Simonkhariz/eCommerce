@@ -16,6 +16,12 @@ test('the junk that used to be accepted is refused, each on its own field', () =
   assert.deepEqual(Object.keys(errors).sort(), ['address', 'city', 'fullName', 'phone']);
 });
 
+test('an address or city of only punctuation is refused', () => {
+  const errors = validateCheckoutDetails({ ...good, address: '...', city: '-- -' });
+  assert.deepEqual(Object.keys(errors).sort(), ['address', 'city']);
+  assert.deepEqual(validateCheckoutDetails({ ...good, address: '1 A', city: 'Aba' }), {});
+});
+
 test('a name needs two letters, not two characters', () => {
   assert.ok(validateCheckoutDetails({ ...good, fullName: 'A.' }).fullName);
   assert.ok(validateCheckoutDetails({ ...good, fullName: '12' }).fullName);

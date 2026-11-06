@@ -22,6 +22,12 @@ final class PhoneNumber
         return preg_match('/^(?:0[0-9]{10}|\+?2340?[0-9]{10})$/', $clean) === 1;
     }
 
+    /** How a customer's number is saved: one format however it was typed, so orders read alike. */
+    public static function stored(string $raw): string
+    {
+        return self::toInternational($raw) ?? $raw;
+    }
+
     /**
      * Normalise a number typed in Nigerian local format to "+234...".
      *   0803 123 4567     -> +2348031234567

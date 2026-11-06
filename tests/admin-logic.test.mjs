@@ -7,6 +7,7 @@ import {
   isNumericSlug,
   pastEndPage,
   queryString,
+  refundStartAmount,
   searchBoxOnUrlChange,
   slugify,
   splitUploads,
@@ -15,6 +16,16 @@ import {
   zoneOverlaps,
 } from '../lib/admin-logic.ts';
 import { formatPrice } from '../lib/currency.ts';
+
+test('a refund starts at the extra for an overpaid order that stands, otherwise at all that can go back', () => {
+  const base = { order_status: 'paid', order_total: 20500, paid_amount: 22500, refunded_amount: 0, pending_refund_amount: 0, refundable_amount: 22500 };
+  assert.equal(refundStartAmount(base), '2000');
+  assert.equal(refundStartAmount({ ...base, order_status: 'cancelled' }), '22500');
+  assert.equal(refundStartAmount({ ...base, paid_amount: 20500, refundable_amount: 20500 }), '20500');
+  assert.equal(refundStartAmount({ ...base, refunded_amount: 2000, refundable_amount: 20500 }), '20500');
+  assert.equal(refundStartAmount({ ...base, paid_amount: 41000, order_total: 20500, refundable_amount: 20500 }), '20500');
+  assert.equal(refundStartAmount({ ...base, refundable_amount: 0 }), '');
+});
 
 test('analytics "All time" sends range=all; other filters still drop "all"', () => {
   assert.equal(queryString({ range: 'all' }), '?range=all');

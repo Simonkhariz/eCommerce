@@ -819,6 +819,8 @@ try {
     check('the refund goes against the duplicate, not the payment that paid the order', $payStatus($d1Dup) === 'refunded' && $payStatus($d1Good) === 'successful');
     check('the good order stays paid', $d1After['order_status'] === 'paid' && $d1After['payment_status'] === 'successful', json_encode([$d1After['order_status'], $d1After['payment_status']]));
     check('the flag stays until no payment is left (or the admin resolves it)', (int) $d1After['requires_attention'] === 1);
+    $d1GoodId = (string) $db->fetchOne("SELECT `id` FROM `payments` WHERE `provider_reference` = ?", 's', [$d1Good])['id'];
+    check('the customer sees the payment that stands, not the refunded duplicate', str_starts_with((new App\Services\LiveStatus($db))->snapshot($d1Id)['id'], $d1GoodId . '-'));
     check('stock is not released while a good payment remains', stockOf($variantA) === $d1Stock, stockOf($variantA) . " vs {$d1Stock}");
     check('the wish to restock is kept for later', (int) $d1Refund['restocked'] === 2);
     $d1Comments = static fn (): string => implode(' | ', array_column($db->fetchAll("SELECT `comment` FROM `order_status_history` WHERE `order_id` = ?", 'i', [$d1Id]), 'comment'));

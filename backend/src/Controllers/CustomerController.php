@@ -74,7 +74,7 @@ class CustomerController
             $updates['full_name'] = $fullName;
         }
         if ($phone !== null) {
-            $updates['phone'] = $phone;
+            $updates['phone'] = PhoneNumber::stored($phone);
         }
 
         if (!empty($updates)) {

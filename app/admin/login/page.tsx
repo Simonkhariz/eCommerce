@@ -4,7 +4,7 @@ import React, { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Lock } from 'lucide-react';
-import { apiGetMe, apiGetSetupStatus, apiLogin, apiLogout } from '@/lib/api-client';
+import { apiPeekSession, apiGetSetupStatus, apiLogin, apiLogout } from '@/lib/api-client';
 import { isAdminRole, safeAdminNext } from '@/components/admin/AdminAuthGate';
 import { Button, Field, LoadingState, Notice, TextInput } from '@/components/admin/ui';
 
@@ -25,8 +25,8 @@ function AdminLoginForm() {
     let cancelled = false;
     (async () => {
       try {
-        const me = await apiGetMe('admin');
-        if (!cancelled && isAdminRole(me.user.role)) {
+        const me = await apiPeekSession('admin');
+        if (!cancelled && me.user && isAdminRole(me.user.role)) {
           router.replace(next);
           return;
         }

@@ -205,7 +205,7 @@ class AuthService
             'email' => $email,
             'password_hash' => $passwordHash,
             'full_name' => $name,
-            'phone' => $phone,
+            'phone' => $phone === null ? null : PhoneNumber::stored($phone),
             'role' => 'customer', // strictly customer
             'status' => 'active',
             'email_verified_at' => null,
