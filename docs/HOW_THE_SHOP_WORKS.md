@@ -59,7 +59,7 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **Daily database backups,** copied off the server to cloud storage, with a careful restore that
     works even on hosts without SSH.
 
-The backend has 1,635 automated checks in 22 test suites, the storefront 77 unit tests, and the
+The backend has 1,655 automated checks in 22 test suites, the storefront 79 unit tests, and the
 system has passed a full load test.
 
 ---
@@ -1446,9 +1446,9 @@ proposal.
 
 **Proof in numbers:**
 
-- **1,635 automated backend checks** in 22 test suites. They run against a throw-away database
+- **1,655 automated backend checks** in 22 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data, buckets and Redis are never touched.
-- Plus 77 storefront unit tests, type checks, lint and a production build. They are run by hand
+- Plus 79 storefront unit tests, type checks, lint and a production build. They are run by hand
   before changes are finished; there is no automatic build server yet.
 - **The release gate passed every check** on 30 October 2026, on an isolated copy with stand-ins for
   the payment and email services and nothing deployed. Later full reviews found and fixed more
@@ -1569,7 +1569,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive once." |
 | 5 | A clean-up button behind a password field and an emailed code | "No clean-up without your password and an emailed code." |
 | 6 | A calendar with a backup box every night, flying to a cloud | "Daily backups, copied off the server, with a careful restore." |
-| 7 | A counter climbing: 1,635 ✓ | "Over 1,600 automated backend checks." |
+| 7 | A counter climbing: 1,655 ✓ | "Over 1,600 automated backend checks." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
@@ -1776,4 +1776,5 @@ When something changes, update the matching section in the same commit:
 | 5 Nov 2026 | Every product row on the storefront now stops at 4 products, including Featured |
 | 6 Nov 2026 | Hosting rehearsed on Linux with Apache, Passenger, MySQL 8 and the real zip files, before buying a host. Fixed: database updates that failed on MySQL, zip permissions that shared hosts refuse. New: clean database export for a new host, entry folder for DirectAdmin, `-NoImageResizing`, and "Before you buy" in the hosting guide |
 | 6 Nov 2026 | Picture uploads no longer need PHP's fileinfo extension, which some shared hosts lack: the file's own bytes are read with `getimagesize`, and the same JPEG, PNG and WebP limit applies |
-| 6 Nov 2026 | Full review of the shop, admin and customer API, and fixes for what it found. **Money:** refunds go one payment at a time, newest first; underpaid and overpaid money can be refunded; an order becomes Refunded only when no money remains. **Flags:** "Mark as resolved" with a note; reported transfers that expire are flagged, can be recorded as late payments and stay out of the clean-up (migration 022 flagged older ones); a failed gateway check gets a grace period. **Reports:** one net sales definition on Overview and Analytics, sales count money received, item sales and units leave out cancelled and refunded orders, All time is all time. **Admin:** limits on prices, stock, uses, display order and text; numeric web addresses, renaming used coupons and overlapping zones refused; dialogs, uploads, paging and slow actions. **Security:** sign-in and payment notice limits, private catalogue data, technical text kept from customers, bad input refused. **Storefront:** checkout validation, kept details, sign-out and session handling, own reservations, Lagos-time deadlines, WhatsApp only with a number, page titles, receipts and the price filter. **Backups:** write failures are caught. Backend checks now 1,635 in 22 suites; storefront tests 77. Real Kora, Monnify and email delivery are still not run (section 11) |
+| 6 Nov 2026 | Full review of the shop, admin and customer API, and fixes for what it found. **Money:** refunds go one payment at a time, newest first; underpaid and overpaid money can be refunded; an order becomes Refunded only when no money remains. **Flags:** "Mark as resolved" with a note; reported transfers that expire are flagged, can be recorded as late payments and stay out of the clean-up (migration 022 flagged older ones); a failed gateway check gets a grace period. **Reports:** one net sales definition on Overview and Analytics, sales count money received, item sales and units leave out cancelled and refunded orders, All time is all time. **Admin:** limits on prices, stock, uses, display order and text; numeric web addresses, renaming used coupons and overlapping zones refused; dialogs, uploads, paging and slow actions. **Security:** sign-in and payment notice limits, private catalogue data, technical text kept from customers, bad input refused. **Storefront:** checkout validation, kept details, sign-out and session handling, own reservations, Lagos-time deadlines, WhatsApp only with a number, page titles, receipts and the price filter. **Backups:** write failures are caught. Backend checks now 1,655 in 22 suites; storefront tests 77. Real Kora, Monnify and email delivery are still not run (section 11) |
+| 6 Nov 2026 | Final live checks of the review. Buttons a shopper taps at once show as not ready until the page can respond. Tabs keep up with sign-in and sign-out in other tabs. Phones are saved in one format (+234...) and found in admin search however they are typed. Receipts show the payment that stands, not a refunded duplicate. Delivery details stay until an order is paid. Refund forms start at the overpaid extra. Visitors no longer log an error on every page by asking whether they are signed in. |

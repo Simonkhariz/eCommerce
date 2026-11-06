@@ -2,7 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useEffectEvent, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { ApiUser, apiGetMe, apiGetSetupStatus, apiLogout } from '@/lib/api-client';
+import { ApiUser, apiPeekSession, apiGetSetupStatus, apiLogout } from '@/lib/api-client';
 import { LoadingState } from '@/components/admin/ui';
 
 interface AdminSession {
@@ -51,9 +51,9 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const me = await apiGetMe('admin');
+        const me = await apiPeekSession('admin');
         if (cancelled) return;
-        if (!isAdminRole(me.user.role)) throw new Error('not admin');
+        if (!me.user || !isAdminRole(me.user.role)) throw new Error('not admin');
         setAdmin(me.user);
       } catch {
         if (cancelled) return;

@@ -188,9 +188,11 @@ class AdminOperationsController
             $params[] = $status;
         }
         if ($search !== '') {
-            $where .= " AND (u.full_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)";
-            $types .= 'sss';
-            array_push($params, "%{$search}%", "%{$search}%", "%{$search}%");
+            // A phone number is found however it was typed; otherwise this repeats the plain search.
+            $phone = \App\Support\PhoneNumber::searchDigits($search) ?? $search;
+            $where .= " AND (u.full_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ? OR u.phone LIKE ?)";
+            $types .= 'ssss';
+            array_push($params, "%{$search}%", "%{$search}%", "%{$search}%", "%{$phone}%");
         }
 
         $this->paginate(

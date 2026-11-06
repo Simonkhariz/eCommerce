@@ -678,10 +678,12 @@ class AdminDashboardController
         }
 
         if ($search !== '') {
-            $sql .= " AND (o.order_number LIKE ? OR o.guest_email LIKE ? OR u.email LIKE ? OR o.shipping_address_snapshot LIKE ?
+            // A phone number is found however it was typed; otherwise this repeats the plain search.
+            $phone = \App\Support\PhoneNumber::searchDigits($search) ?? $search;
+            $sql .= " AND (o.order_number LIKE ? OR o.guest_email LIKE ? OR u.email LIKE ? OR o.shipping_address_snapshot LIKE ? OR o.shipping_address_snapshot LIKE ?
                       OR EXISTS (SELECT 1 FROM `shipments` sh WHERE sh.order_id = o.id AND sh.tracking_number LIKE ?))";
-            $types .= 'sssss';
-            array_push($params, "%{$search}%", "%{$search}%", "%{$search}%", "%{$search}%", "%{$search}%");
+            $types .= 'ssssss';
+            array_push($params, "%{$search}%", "%{$search}%", "%{$search}%", "%{$search}%", "%{$phone}%", "%{$search}%");
         }
 
         $sql .= " ORDER BY o.created_at DESC";

@@ -22,6 +22,21 @@ final class PhoneNumber
         return preg_match('/^(?:0[0-9]{10}|\+?2340?[0-9]{10})$/', $clean) === 1;
     }
 
+    /**
+     * What to look for when an admin searches for a phone number, however they typed it: the part
+     * every saved form shares ("0803 123 4567" and "+234 803..." both give 8031234567). Null when
+     * the search isn't a phone number.
+     */
+    public static function searchDigits(string $term): ?string
+    {
+        if (!preg_match('/^[+0-9\s()-]+$/', $term)) {
+            return null;
+        }
+        $digits = preg_replace('/\D/', '', $term) ?? '';
+        $digits = preg_replace('/^(?:234)?0?/', '', $digits) ?? '';
+        return strlen($digits) >= 7 ? $digits : null;
+    }
+
     /** How a customer's number is saved: one format however it was typed, so orders read alike. */
     public static function stored(string $raw): string
     {

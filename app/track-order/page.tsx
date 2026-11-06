@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useEffectEvent, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -137,6 +137,10 @@ function TrackOrderContent() {
       setLookupError(null);
     }
   }
+  // Same as a typed lookup: "not found" for a signed-in customer may mean the session ended.
+  const checkSessionAfterFailure = useEffectEvent(() => {
+    if (user) void refreshUser();
+  });
   useEffect(() => {
     const cleanNum = queryOrder.trim().toUpperCase();
     if (!cleanNum) return;
@@ -152,6 +156,7 @@ function TrackOrderContent() {
           if (!current) return;
           setOrder(null);
           setLookupError(orderLookupErrorMessage(err, NOT_FOUND_MESSAGE));
+          checkSessionAfterFailure();
         }
       )
       .finally(() => current && setIsLoading(false));

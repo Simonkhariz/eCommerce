@@ -72,6 +72,14 @@ class AdminOrderController
             $term = "%{$search}%";
             array_push($params, $term, $term, $term, $term, $term);
             $types .= 'sssss';
+            // A phone number is found however it was typed.
+            $phone = \App\Support\PhoneNumber::searchDigits($search);
+            if ($phone !== null) {
+                array_pop($where);
+                $where[] = "(o.order_number LIKE ? OR o.guest_email LIKE ? OR cu.email LIKE ? OR o.shipping_address_snapshot LIKE ? OR s.tracking_number LIKE ? OR o.shipping_address_snapshot LIKE ?)";
+                $params[] = "%{$phone}%";
+                $types .= 's';
+            }
         }
 
         $whereSql = !empty($where) ? "WHERE " . implode(' AND ', $where) : "";

@@ -205,6 +205,21 @@ if ($under !== null) {
 }
 
 // -----------------------------------------------------------------------------
+$t->section('An order is found by phone number however it is typed');
+$phoneOrder = $placeOrder();
+if ($phoneOrder !== null) {
+    $savedPhone = (string) (json_decode((string) $t->scalar('SELECT `shipping_address_snapshot` FROM `orders` WHERE `order_number` = ?', 's', [$phoneOrder[0]]), true)['phone'] ?? '');
+    $t->ok('it was saved as +234', str_starts_with($savedPhone, '+234'), $savedPhone);
+    $core = substr($savedPhone, 4);
+    foreach (['0' . $core, '0' . substr($core, 0, 3) . ' ' . substr($core, 3, 3) . ' ' . substr($core, 6), '+234' . $core, '234 ' . $core, '+234 0' . $core] as $typed) {
+        $found = array_column((array) TestKit::get($A('GET', '/admin/orders?per_page=100&search=' . urlencode($typed)), 'data.items'), 'order_number');
+        $t->ok("found by '{$typed}'", in_array($phoneOrder[0], $found, true));
+    }
+    $t->check('a search that is not a phone number still works', $phoneOrder[0], TestKit::get($A('GET', '/admin/orders?search=' . urlencode($phoneOrder[0])), 'data.items.0.order_number'));
+    $t->ok('and the CSV export finds it too', str_contains((string) $A('GET', '/admin/orders/export?search=' . urlencode('0' . $core))['body'], $phoneOrder[0]));
+}
+
+// -----------------------------------------------------------------------------
 $t->section('Sending back an overpayment leaves the sale whole');
 $over = $placeOrder();
 if ($over !== null) {

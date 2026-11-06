@@ -65,7 +65,7 @@ export interface ModalProps {
   description?: React.ReactNode;
   children?: React.ReactNode;
   footer?: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   /** Block closing (e.g. while a request is in flight). */
   busy?: boolean;
   /**
@@ -134,7 +134,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
 
   if (!open) return null;
 
-  const width = size === 'sm' ? 'sm:max-w-md' : size === 'lg' ? 'sm:max-w-3xl' : 'sm:max-w-xl';
+  const width = size === 'sm' ? 'sm:max-w-md' : size === 'lg' ? 'sm:max-w-3xl' : size === 'xl' ? 'sm:max-w-3xl lg:max-w-5xl' : 'sm:max-w-xl';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4">

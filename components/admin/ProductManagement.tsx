@@ -618,7 +618,7 @@ export function ProductManagement() {
         onClose={() => setEditorOpen(false)}
         busy={saving || uploading}
         persistent
-        size="lg"
+        size="xl"
         title={editingId ? `Edit ${form.name || 'product'}` : 'New product'}
         description="Physical products only. Prices are in naira."
         footer={
@@ -869,7 +869,7 @@ export function ProductManagement() {
             <div className="rounded-lg border border-[#e5e7eb]">
               <div
                 aria-hidden="true"
-                className={`hidden rounded-t-lg bg-[#fafafa] px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-[#6b7280] lg:grid ${VARIANT_GRID}`}
+                className={`hidden rounded-t-lg bg-[#fafafa] px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-[#6b7280] lg:grid lg:gap-2 ${VARIANT_GRID}`}
               >
                 <span>Size</span>
                 <span>Colour</span>
