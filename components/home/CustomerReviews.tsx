@@ -22,6 +22,7 @@ export const CustomerReviews: React.FC<CustomerReviewsProps> = ({ reviews = [] }
       id: r.id,
       author: r.author?.trim() || 'Customer',
       rating: Math.min(5, Math.max(0, Math.round(Number(r.rating) || 0))),
+      title: r.title,
       comment: r.comment,
       verified: Boolean(Number(r.verified)),
       productName: r.product_name,
@@ -94,6 +95,7 @@ export const CustomerReviews: React.FC<CustomerReviewsProps> = ({ reviews = [] }
                   )}
                 </div>
 
+                {review.title && <p className="font-semibold text-sm text-black mb-1">{review.title}</p>}
                 <p className="text-neutral-700 text-sm leading-relaxed mb-3">&ldquo;{review.comment}&rdquo;</p>
 
                 {review.productName && (

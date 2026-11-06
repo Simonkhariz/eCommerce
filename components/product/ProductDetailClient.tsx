@@ -242,13 +242,17 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
           Shop
         </Link>
         <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-500 shrink-0" aria-hidden="true" />
-        <Link
-          href={`/category?cat=${encodeURIComponent(String(product.category))}`}
-          className="hover:text-black transition-colors capitalize"
-        >
-          {product.categoryName || product.category}
-        </Link>
-        <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-500 shrink-0" aria-hidden="true" />
+        {product.category && (
+          <>
+            <Link
+              href={`/category?cat=${encodeURIComponent(String(product.category))}`}
+              className="hover:text-black transition-colors capitalize"
+            >
+              {product.categoryName || product.category}
+            </Link>
+            <HugeiconsIcon icon={ArrowRight01Icon} size={14} className="text-neutral-500 shrink-0" aria-hidden="true" />
+          </>
+        )}
         <span className="text-black font-medium truncate" aria-current="page">{product.name}</span>
       </nav>
 

@@ -19,7 +19,7 @@ const ALL_STATES_AND_FCT = 37;
 const SLIDE_MS = 6000;
 
 const DEFAULT_SLIDE = {
-  title: 'FIND CLOTHES THAT MATCHES YOUR STYLE',
+  title: 'FIND CLOTHES THAT MATCH YOUR STYLE',
   subtitle:
     'Browse through our diverse range of meticulously crafted garments, designed to bring out your individuality and cater to your sense of style.',
   ctaText: 'Shop Now',
@@ -140,9 +140,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
       <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-4 sm:px-6 lg:grid lg:grid-cols-12 lg:grid-rows-[1fr_auto] lg:gap-x-10 lg:px-8">
         <div className="pt-[clamp(0.75rem,3svh,1.5rem)] sm:pt-[clamp(1.25rem,4svh,2.5rem)] lg:col-span-7 lg:row-start-1 lg:self-center lg:py-[clamp(1rem,4svh,2.5rem)]">
           {activePromo && (
-            <p className="mb-[clamp(0.75rem,2.4svh,1.5rem)] inline-flex max-w-full items-center gap-2 rounded-full bg-black px-3.5 py-1.5 text-[11px] font-semibold tracking-wide text-white shadow-sm sm:text-xs">
+            <p className="mb-[clamp(0.75rem,2.4svh,1.5rem)] inline-flex max-w-full items-center gap-2 rounded-2xl bg-black px-3.5 py-1.5 text-[11px] font-semibold tracking-wide text-white shadow-sm sm:rounded-full sm:text-xs">
               <Tag className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" aria-hidden="true" />
-              <span className="truncate">
+              {/* Wraps on phones: the end of the label is the minimum spend, which must stay readable. */}
+              <span className="min-w-0">
                 Special offer: use code <strong className="text-yellow-400">{activePromo.code}</strong> for {activePromo.label || `${activePromo.discount_percent}% off`}
               </span>
             </p>

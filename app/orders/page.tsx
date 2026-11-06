@@ -107,7 +107,7 @@ export default function CustomerOrdersPage() {
         ) : (
           <ul className="space-y-4">
             {orders.map((ord) => {
-              const status = getOrderStatusDisplay(ord.order_status, ord.payment_status, ord.expires_at);
+              const status = getOrderStatusDisplay(ord.order_status, ord.payment_status, ord.expires_at, ord.customer_marked_paid_at);
               const trackHref = `/track-order?order=${encodeURIComponent(ord.order_number)}`;
               return (
                 <li key={ord.id || ord.order_number} className="bg-white rounded-3xl p-5 sm:p-6 border border-neutral-100 shadow-sm space-y-4">
@@ -130,7 +130,8 @@ export default function CustomerOrdersPage() {
                         {status.description ? ` · ${status.description}` : ''}
                       </p>
                     </div>
-                    <div className="text-right">
+                    {/* Its own row on phones, label on the left and amount on the right. */}
+                    <div className="flex w-full items-baseline justify-between gap-2 sm:block sm:w-auto sm:text-right">
                       <p className="text-xs text-neutral-600">Total</p>
                       <p className="font-extrabold text-base text-black">{formatPrice(ord.grand_total)}</p>
                     </div>

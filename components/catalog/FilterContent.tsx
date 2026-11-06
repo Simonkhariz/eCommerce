@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { FilterState } from '@/types';
 import { CatalogFacets } from '@/lib/api-client';
+import { priceFilterFrom } from '@/lib/catalog-query';
 import { formatPrice } from '@/lib/currency';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ArrowRight01Icon, ArrowUp01Icon, Tick02Icon, SlidersHorizontalIcon } from '@hugeicons/core-free-icons';
@@ -46,14 +47,16 @@ const isLight = (hex: string) => ['#ffffff', '#fff', '#fafafa', '#f5f5f5', '#fff
 export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterChange, onReset, onDone, isMobile = false, facets }) => {
   const [minInput, setMinInput] = useState(filters.minPrice?.toString() ?? '');
   const [maxInput, setMaxInput] = useState(filters.maxPrice?.toString() ?? '');
+  const [focusedPrice, setFocusedPrice] = useState<'min' | 'max' | null>(null);
 
-  // Keep the price inputs in step with the URL (Back/Forward, chip removal).
+  // Keep the price inputs in step with the URL (Back/Forward, chip removal), except the box
+  // being typed in: the address changing because the other box was left must not reset it.
   const appliedPrice = `${filters.minPrice ?? ''}|${filters.maxPrice ?? ''}`;
   const [inputsFor, setInputsFor] = useState(appliedPrice);
   if (appliedPrice !== inputsFor) {
     setInputsFor(appliedPrice);
-    setMinInput(filters.minPrice?.toString() ?? '');
-    setMaxInput(filters.maxPrice?.toString() ?? '');
+    if (focusedPrice !== 'min') setMinInput(filters.minPrice?.toString() ?? '');
+    if (focusedPrice !== 'max') setMaxInput(filters.maxPrice?.toString() ?? '');
   }
 
   const toggleIn = (list: string[], value: string) =>
@@ -61,16 +64,20 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
       ? list.filter((v) => v.toLowerCase() !== value.toLowerCase())
       : [...list, value];
 
-  const applyPrice = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    const min = minInput.trim() === '' ? null : Math.max(0, Number(minInput));
-    const max = maxInput.trim() === '' ? null : Math.max(0, Number(maxInput));
-    if ((min !== null && Number.isNaN(min)) || (max !== null && Number.isNaN(max))) return;
-    if (min !== null && max !== null && min > max) {
-      onFilterChange({ minPrice: max, maxPrice: min });
-      return;
-    }
-    onFilterChange({ minPrice: min, maxPrice: max });
+  const applyPrice = () => {
+    const price = priceFilterFrom(minInput, maxInput, filters);
+    if (!price) return;
+    // The boxes show what was applied (a minimum above the maximum swaps them).
+    setMinInput(price.minPrice?.toString() ?? '');
+    setMaxInput(price.maxPrice?.toString() ?? '');
+    onFilterChange(price);
+  };
+
+  // A form without a submit button doesn't submit on Enter when it has two boxes.
+  const applyOnEnter = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    applyPrice();
   };
 
   const categories = facets?.categories ?? [];
@@ -123,7 +130,7 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
       )}
 
       <Section title="Price">
-        <form onSubmit={applyPrice} className="space-y-3" aria-label="Price range">
+        <form onSubmit={(e) => e.preventDefault()} className="space-y-3" aria-label="Price range">
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label htmlFor={`min-price-${isMobile ? 'm' : 'd'}`} className="block text-xs font-semibold text-neutral-700 mb-1">Min (₦)</label>
@@ -136,7 +143,12 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                 placeholder={facets ? String(Math.floor(facets.price.min)) : '0'}
                 value={minInput}
                 onChange={(e) => setMinInput(e.target.value)}
-                onBlur={() => applyPrice()}
+                onKeyDown={applyOnEnter}
+                onFocus={() => setFocusedPrice('min')}
+                onBlur={() => {
+                  setFocusedPrice(null);
+                  applyPrice();
+                }}
                 className="w-full rounded-xl bg-[#F0F0F0] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
               />
             </div>
@@ -151,7 +163,12 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                 placeholder={facets ? String(Math.ceil(facets.price.max)) : 'Any'}
                 value={maxInput}
                 onChange={(e) => setMaxInput(e.target.value)}
-                onBlur={() => applyPrice()}
+                onKeyDown={applyOnEnter}
+                onFocus={() => setFocusedPrice('max')}
+                onBlur={() => {
+                  setFocusedPrice(null);
+                  applyPrice();
+                }}
                 className="w-full rounded-xl bg-[#F0F0F0] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
               />
             </div>

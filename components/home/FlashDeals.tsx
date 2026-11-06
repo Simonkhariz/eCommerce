@@ -4,6 +4,7 @@ import React, { useEffect, useEffectEvent, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { Product } from '@/types';
 import { ProductCard } from '@/components/ui/ProductCard';
+import { parseShopTime } from '@/lib/shop-time';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { FireIcon, Clock01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
 
@@ -35,7 +36,7 @@ function useClock(running: boolean): number | null {
 
 function parseEnd(value: string | null | undefined): number | null {
   if (!value) return null;
-  const ts = new Date(value.includes('T') ? value : value.replace(' ', 'T')).getTime();
+  const ts = parseShopTime(value).getTime();
   return Number.isFinite(ts) ? ts : null;
 }
 

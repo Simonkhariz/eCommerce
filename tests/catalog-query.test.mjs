@@ -5,7 +5,9 @@ import assert from 'node:assert/strict';
 import {
   buildCatalogUrl,
   catalogApiParams,
+  catalogShowingLabel,
   parseCatalogParams,
+  priceFilterFrom,
   productListFrom,
   productListPath,
   urlParamsFrom,
@@ -49,4 +51,32 @@ test('a product list answer becomes items plus pagination', () => {
   });
   assert.deepEqual(productListFrom(items, null), { items, pagination: { total: 2, page: 1, per_page: 12, total_pages: 1 } });
   assert.deepEqual(productListFrom('not a list', null).items, []);
+});
+
+test('sale=true is another name for onSale=true', () => {
+  assert.equal(parseCatalogParams(new URLSearchParams('sale=true')).onSale, true);
+  assert.equal(parseCatalogParams(new URLSearchParams('sale=false')).onSale, false);
+  assert.equal(buildCatalogUrl(parseCatalogParams(new URLSearchParams('sale=true'))), '/category?onSale=true');
+});
+
+test('the catalogue count reads right for one product and for ranges', () => {
+  assert.equal(catalogShowingLabel(1, 1, 1), 'Showing 1 of 1 product');
+  assert.equal(catalogShowingLabel(1, 12, 43), 'Showing 1–12 of 43 products');
+  assert.equal(catalogShowingLabel(4, 7, 43), 'Showing 37–43 of 43 products');
+  assert.equal(catalogShowingLabel(2, 1, 13), 'Showing 13 of 13 products');
+});
+
+test('the price filter changes only when the boxes say something new', () => {
+  const none = { minPrice: null, maxPrice: null };
+  assert.equal(priceFilterFrom('', '', none), null, 'leaving empty boxes keeps the page');
+  assert.equal(priceFilterFrom('1000', '5000', { minPrice: 1000, maxPrice: 5000 }), null, 'leaving unchanged boxes keeps the page');
+  assert.deepEqual(priceFilterFrom('1000', '', none), { minPrice: 1000, maxPrice: null });
+  assert.deepEqual(priceFilterFrom('', '', { minPrice: 1000, maxPrice: null }), none);
+  assert.equal(priceFilterFrom('abc', '', none), null);
+});
+
+test('a minimum above the maximum is swapped, and -5 counts as 0', () => {
+  assert.deepEqual(priceFilterFrom('5000', '1000', { minPrice: null, maxPrice: null }), { minPrice: 1000, maxPrice: 5000 });
+  assert.equal(priceFilterFrom('5000', '1000', { minPrice: 1000, maxPrice: 5000 }), null);
+  assert.deepEqual(priceFilterFrom('-5', '', { minPrice: null, maxPrice: null }), { minPrice: 0, maxPrice: null });
 });

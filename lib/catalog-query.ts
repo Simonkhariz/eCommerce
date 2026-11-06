@@ -37,7 +37,7 @@ export function parseCatalogParams(params: URLSearchParams): FilterState {
     minPrice: num(params.get('min_price')),
     maxPrice: num(params.get('max_price')),
     sortBy,
-    onSale: params.get('onSale') === 'true',
+    onSale: params.get('onSale') === 'true' || params.get('sale') === 'true',
     flashDeals: params.get('flash') === 'true' || params.get('flashDeals') === 'true',
     featured: params.get('featured') === 'true',
     page: Math.max(1, Math.floor(num(params.get('page')) ?? 1)),
@@ -155,6 +155,33 @@ export function productListFrom(data: unknown, meta?: Partial<PaginationMeta> | 
       }
     : { total: items.length, page: 1, per_page: 12, total_pages: 1 };
   return { items, pagination };
+}
+
+/** "Showing 13–24 of 43 products", for a page that has products. */
+export function catalogShowingLabel(page: number, shown: number, total: number): string {
+  const first = (page - 1) * PAGE_SIZE + 1;
+  const last = first + shown - 1;
+  const range = first === last ? `${first}` : `${first}–${last}`;
+  return `Showing ${range} of ${total} ${total === 1 ? 'product' : 'products'}`;
+}
+
+/**
+ * The price filter from what is typed in its two boxes (the higher number is taken as the maximum).
+ * Null when nothing changes, so leaving a box untouched keeps the shopper's page, or when a box
+ * doesn't hold a number.
+ */
+export function priceFilterFrom(
+  minInput: string,
+  maxInput: string,
+  current: Pick<FilterState, 'minPrice' | 'maxPrice'>
+): Pick<FilterState, 'minPrice' | 'maxPrice'> | null {
+  const read = (text: string) => (text.trim() === '' ? null : Math.max(0, Number(text)));
+  let minPrice = read(minInput);
+  let maxPrice = read(maxInput);
+  if ((minPrice !== null && Number.isNaN(minPrice)) || (maxPrice !== null && Number.isNaN(maxPrice))) return null;
+  if (minPrice !== null && maxPrice !== null && minPrice > maxPrice) [minPrice, maxPrice] = [maxPrice, minPrice];
+  if (minPrice === current.minPrice && maxPrice === current.maxPrice) return null;
+  return { minPrice, maxPrice };
 }
 
 export function hasActiveFilters(f: FilterState): boolean {

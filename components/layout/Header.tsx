@@ -482,7 +482,7 @@ export const Header: React.FC = () => {
               type="button"
               onClick={openWishlist}
               className="relative p-2 text-black transition-opacity hover:opacity-75"
-              aria-label={wishlistCount > 0 ? `Wishlist, ${wishlistCount} items` : 'Wishlist'}
+              aria-label={wishlistCount > 0 ? `Wishlist, ${wishlistCount} ${wishlistCount === 1 ? 'item' : 'items'}` : 'Wishlist'}
               aria-haspopup="dialog"
             >
               <HugeiconsIcon icon={FavouriteIcon} size={24} />
@@ -500,7 +500,7 @@ export const Header: React.FC = () => {
               href="/cart"
               prefetch={true}
               className="relative p-2 text-black transition-opacity hover:opacity-75"
-              aria-label={totalQuantity > 0 ? `Cart, ${totalQuantity} items` : 'Cart'}
+              aria-label={totalQuantity > 0 ? `Cart, ${totalQuantity} ${totalQuantity === 1 ? 'item' : 'items'}` : 'Cart'}
             >
               <HugeiconsIcon icon={ShoppingCart01Icon} size={24} />
               {totalQuantity > 0 && (

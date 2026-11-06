@@ -166,6 +166,7 @@ export const ProductTabs: React.FC<ProductTabsProps> = ({ product }) => {
                       </span>
                     )}
                   </div>
+                  {rev.title && <h4 className="font-semibold text-sm text-black">{rev.title}</h4>}
                   <p className="text-neutral-700 text-sm leading-relaxed">&ldquo;{rev.comment}&rdquo;</p>
                   {rev.date && <p className="text-xs text-neutral-600 pt-1">Posted on {rev.date}</p>}
                 </article>

@@ -26,7 +26,9 @@ export const StickyMobileBar: React.FC<StickyMobileBarProps> = ({
   onBuyNow,
 }) => {
   return (
-    <div role="region" aria-label="Quick purchase" className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-neutral-200 p-3 px-4 shadow-2xl flex items-center justify-between gap-3">
+    // z-30: under the header (z-40), whose phone menu opens above this bar. data-sticky-purchase-bar
+    // makes room for it below the footer (globals.css).
+    <div role="region" aria-label="Quick purchase" data-sticky-purchase-bar className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-neutral-200 p-3 px-4 shadow-2xl flex items-center justify-between gap-3">
       <div className="flex flex-col min-w-0">
         <span className="text-xs text-neutral-600 font-medium truncate max-w-[140px]">{selectionLabel}</span>
         <div className="flex items-baseline gap-1.5">

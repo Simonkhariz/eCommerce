@@ -2,7 +2,7 @@ import React from 'react';
 import { Product, FilterState } from '@/types';
 import { ProductCard } from '@/components/ui/ProductCard';
 import { formatPrice } from '@/lib/currency';
-import { PAGE_SIZE, hasActiveFilters } from '@/lib/catalog-query';
+import { catalogShowingLabel, hasActiveFilters } from '@/lib/catalog-query';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   SlidersHorizontalIcon,
@@ -71,8 +71,9 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   totalPages,
 }) => {
   const currentPage = Math.min(filters.page, Math.max(1, totalPages));
-  const startIndex = (currentPage - 1) * PAGE_SIZE;
   const active = hasActiveFilters(filters);
+  // An address past the last page (?page=99): the products exist, just not on this page.
+  const pastLastPage = !loading && !error && products.length === 0 && totalCount > 0;
 
   return (
     <div className="flex-1 min-w-0">
@@ -82,9 +83,11 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           <p className="text-sm text-neutral-700 mt-1" aria-live="polite">
             {loading
               ? 'Loading products…'
-              : totalCount > 0
-                ? `Showing ${startIndex + 1}–${Math.min(startIndex + products.length, totalCount)} of ${totalCount} products`
-                : 'No products'}
+              : products.length > 0
+                ? catalogShowingLabel(currentPage, products.length, totalCount)
+                : pastLastPage
+                  ? `Page ${filters.page} not found`
+                  : 'No products'}
           </p>
         </div>
 
@@ -184,7 +187,19 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         </div>
       )}
 
-      {!loading && !error && products.length === 0 && (
+      {pastLastPage && (
+        <div className="bg-neutral-50 rounded-3xl p-12 text-center my-8">
+          <h2 className="font-bold text-lg text-black mb-2">This page doesn&apos;t exist</h2>
+          <p className="text-sm text-neutral-700 max-w-sm mx-auto mb-6">
+            {totalPages === 1 ? 'These products fit on one page.' : `These products end on page ${totalPages}.`}
+          </p>
+          <button type="button" onClick={() => onPageChange(totalPages)} className="bg-black text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-neutral-800">
+            Go to the last page
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && products.length === 0 && !pastLastPage && (
         <div className="bg-neutral-50 rounded-3xl p-12 text-center my-8">
           <h2 className="font-bold text-lg text-black mb-2">No matching products</h2>
           <p className="text-sm text-neutral-700 max-w-sm mx-auto mb-6">
@@ -198,23 +213,23 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         </div>
       )}
 
-      {totalPages > 1 && !error && (
-        <nav aria-label="Pagination" className="mt-12 pt-6 border-t border-neutral-200 flex items-center justify-between gap-2 text-sm font-semibold text-neutral-800">
+      {totalPages > 1 && !error && !pastLastPage && (
+        <nav aria-label="Pagination" className="mt-12 pt-6 border-t border-neutral-200 flex items-center justify-between gap-1 sm:gap-2 text-sm font-semibold text-neutral-800">
           <button
             type="button"
             disabled={currentPage === 1}
             onClick={() => onPageChange(currentPage - 1)}
             aria-label="Previous page"
-            className="flex items-center gap-2 px-3 sm:px-4 py-2 border border-neutral-200 rounded-lg hover:bg-neutral-50 disabled:opacity-40"
+            className="flex shrink-0 items-center gap-2 px-2 sm:px-4 py-2 border border-neutral-200 rounded-lg hover:bg-neutral-50 disabled:opacity-40"
           >
             <HugeiconsIcon icon={ArrowLeft01Icon} size={16} aria-hidden="true" />
             <span className="hidden sm:inline">Previous</span>
           </button>
 
-          <ol className="flex items-center gap-1">
+          <ol className="flex min-w-0 flex-wrap items-center justify-center gap-0.5 sm:gap-1">
             {pageItems(currentPage, totalPages).map((item, idx) =>
               item === 'gap' ? (
-                <li key={`gap-${idx}`} className="w-6 text-center text-neutral-500" aria-hidden="true">…</li>
+                <li key={`gap-${idx}`} className="w-4 sm:w-6 text-center text-neutral-500" aria-hidden="true">…</li>
               ) : (
                 <li key={item}>
                   <button
@@ -222,7 +237,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
                     onClick={() => onPageChange(item)}
                     aria-current={item === currentPage ? 'page' : undefined}
                     aria-label={`Page ${item}`}
-                    className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+                    className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center ${
                       item === currentPage ? 'bg-black text-white' : 'text-neutral-700 hover:bg-neutral-100'
                     }`}
                   >
@@ -238,7 +253,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             disabled={currentPage === totalPages}
             onClick={() => onPageChange(currentPage + 1)}
             aria-label="Next page"
-            className="flex items-center gap-2 px-3 sm:px-4 py-2 border border-neutral-200 rounded-lg hover:bg-neutral-50 disabled:opacity-40"
+            className="flex shrink-0 items-center gap-2 px-2 sm:px-4 py-2 border border-neutral-200 rounded-lg hover:bg-neutral-50 disabled:opacity-40"
           >
             <span className="hidden sm:inline">Next</span>
             <HugeiconsIcon icon={ArrowRight01Icon} size={16} aria-hidden="true" />

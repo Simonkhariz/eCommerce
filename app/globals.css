@@ -335,6 +335,13 @@ input[type="range"]::-webkit-slider-thumb {
    When printing, hides header, footer, page background, and all storefront chrome;
    targets exclusively #printable-receipt fitting strictly on 1 single page.
    ========================================================================== */
+/* Room below the footer for the product page's fixed purchase bar (phones only, like the bar). */
+@media (max-width: 767.98px) {
+  body:has([data-sticky-purchase-bar]) {
+    padding-bottom: 4.5rem;
+  }
+}
+
 @media print {
   @page {
     margin: 8mm;
@@ -353,6 +360,15 @@ input[type="range"]::-webkit-slider-thumb {
     overflow: hidden !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+
+  /* The receipt page: a long receipt carries on to the next sheet instead of being cut off. */
+  html:has(#printable-receipt),
+  html:has(#printable-receipt) body {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 
   /* Hide headers, footers, navigation, buttons, and actions */

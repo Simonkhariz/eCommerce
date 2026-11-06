@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { useStoreInfo, whatsAppLink } from '@/lib/use-store-info';
 import { useStoreSupport } from '@/lib/use-store-support';
+import { storeAddressLine } from '@/lib/store-address';
 
 /** Real contact details from admin → Store settings; anything not set is simply not shown. */
 export function ContactDetails() {
@@ -31,7 +32,7 @@ export function ContactDetails() {
 
   const whatsappNumber = origin.whatsapp_phone || supportPhone || '';
   const waLink = whatsAppLink(whatsappNumber, 'Hello, I have a question about my order.');
-  const address = [origin.origin_address, origin.origin_city, origin.origin_state].filter((p) => p && p.trim()).join(', ');
+  const address = storeAddressLine(origin.origin_address, origin.origin_city, origin.origin_state);
 
   const items: Array<{ label: string; value: React.ReactNode }> = [];
   if (origin.contact_email) {

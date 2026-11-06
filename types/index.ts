@@ -37,6 +37,7 @@ export interface Review {
   author: string;
   rating: number;
   verified: boolean;
+  title?: string;
   comment: string;
   date: string;
 }
