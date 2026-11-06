@@ -59,7 +59,7 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **Daily database backups,** copied off the server to cloud storage, with a careful restore that
     works even on hosts without SSH.
 
-The full system has passed 1,199 automated backend checks and a full load test.
+The full system has passed 1,242 automated backend checks and a full load test.
 
 ---
 
@@ -1225,7 +1225,7 @@ proposal.
 
 **Proof in numbers:**
 
-- **1,199 automated backend checks** in 21 test suites. They run against a throw-away database
+- **1,242 automated backend checks** in 22 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data, buckets and Redis are never touched.
 - Plus 22 storefront unit tests, type checks, lint and a production build. They are run by hand
   before changes are finished; there is no automatic build server yet.
@@ -1348,7 +1348,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive once." |
 | 5 | A clean-up button behind a password field and an emailed code | "No clean-up without your password and an emailed code." |
 | 6 | A calendar with a backup box every night, flying to a cloud | "Daily backups, copied off the server, with a careful restore." |
-| 7 | A counter climbing: 1,199 ✓ | "Over 1,100 automated checks." |
+| 7 | A counter climbing: 1,242 ✓ | "Over 1,100 automated checks." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
