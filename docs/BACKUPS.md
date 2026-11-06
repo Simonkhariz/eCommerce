@@ -71,6 +71,13 @@ The copy is on the server, so it doesn't cover losing the server and the bucket 
 `BACKUP_PICTURES=false` turns the copy off, for hosting with tight disk or file limits; pictures are
 then only in the bucket.
 
+## A clean copy for a new host
+
+A backup holds everything, including customers and orders. For a new host showing the shop to clients,
+`php backend/scripts/export_for_host.php` writes `storage/backups/for-host-<date>.sql.gz` with the shop
+and your administrators, and leaves out customers, orders, payments, sessions and logs. It changes nothing
+here, and backups never use it. To move a live shop with its real customers, use a normal backup.
+
 ## Checking a backup
 
 `manifest.json` holds checksums: `sha256sum database.sql.gz uploads.tar.gz` must print the same

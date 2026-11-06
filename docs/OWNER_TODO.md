@@ -158,7 +158,9 @@ Apache runs PHP inside itself (mod_php), which does the same job as PHP-FPM.
      `systemctl restart php8.2-fpm` after every deploy.
 5. Schedule `expire_pending_orders`, `process_outbox` and `check_database` with cron.
 
-### C. Shared hosting (cPanel)
+### C. Shared hosting (cPanel or DirectAdmin)
+
+**Follow `deploy/cpanel/README.md`:** it starts with what to ask a host before buying. In short:
 
 Apache with PHP-FPM is usually built in. Point a subdomain's document root at `backend/public`;
 the `.htaccess` there handles the rest. Host the Next.js site with cPanel's "Node.js App" or on

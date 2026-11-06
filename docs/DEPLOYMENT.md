@@ -44,8 +44,8 @@ normal. Constraints:
 API under a subdomain whose document root is `backend/public`; storefront as a cPanel
 "Node.js App" (Passenger) or on Vercel (option C). Step-by-step guide and build script:
 `deploy/cpanel/README.md`. The storefront is built on a PC into a self-contained package, because
-builds on shared hosting usually run out of memory. Passed the 30-step smoke test unpacked on
-Windows; not yet run on a real host or Linux. Constraints:
+builds on shared hosting usually run out of memory. Rehearsed on Linux with Apache, Passenger and
+MySQL 8; not yet run on a real host or LiteSpeed. Constraints:
 
 - Check the PHP version (8.2+), the extensions and the upload limit in cPanel's "Select PHP
   Version" / "MultiPHP INI Editor", then in System status.

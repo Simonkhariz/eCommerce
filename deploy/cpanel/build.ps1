@@ -102,6 +102,9 @@ foreach ($folder in 'logs', 'cache', 'backups', 'framework') {
     New-Item -ItemType Directory -Force (Join-Path $api "storage\$folder") | Out-Null
 }
 Copy-Item (Join-Path $src 'deploy\cpanel\env.cpanel.example') (Join-Path $api 'env.cpanel.example')
+# Used only where the API's address can't point at shopco-api/public (README step 2).
+robocopy (Join-Path $src 'deploy\cpanel\api-entry') (Join-Path $api 'api-entry') /E /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) { throw 'Copying the API entry folder failed' }
 
 Step 'Packing'
 New-Item -ItemType Directory -Force $OutDir | Out-Null

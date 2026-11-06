@@ -1101,11 +1101,26 @@ taking real payments, a low-cost paid plan is still recommended (`docs/DEPLOYMEN
   has a domain; live payment status is off until measured there. The admin page is public, so use
   strong passwords.
 
-### 6.9 Hosting: shared hosting (cPanel)
+### 6.9 Hosting: shared hosting (cPanel or DirectAdmin)
 
-`deploy/cpanel/` puts the whole shop on one cPanel account (`deploy/cpanel/README.md`, steps for the
-owner). It is the fallback if Oracle refuses the sign-up, and a dependable home on a low-cost plan.
-**It passed the 30-step smoke test unpacked on Windows, but has not yet run on a real host or Linux.**
+`deploy/cpanel/` puts the whole shop on one hosting account (`deploy/cpanel/README.md`, steps for the
+owner, starting with what to ask a host before buying). It is a dependable home on a low-cost plan.
+
+**How far it's tested:** a full rehearsal on Linux with the real zip files: Apache, Passenger running the
+storefront as "Setup Node.js App" does, Node.js 20, PHP 8.3, MySQL 8, a database user limited to its own
+database, and pictures read from the real R2 bucket. Pages, an order, the WhatsApp payment, admin
+confirmation, scheduled jobs, both backup methods and a real browser passed, and so did the whole
+backend test suite. **Not yet tested: a real host, LiteSpeed (which most Nigerian hosts run), real https,
+uploading a new picture from the host, or a host's process limits.**
+
+**What the rehearsal found and fixed:**
+- Two database updates used syntax only MariaDB accepts, so setup would have stopped on a MySQL host.
+- Zips made on Windows marked every file writable by everyone, which many shared hosts answer with a
+  500 error. `pack.mjs` now makes them 644 and 755.
+- The instructions imported the whole development database, with test customers, orders and sessions, to
+  a public server. `export_for_host.php` now writes a clean copy (below).
+- LiteSpeed's PHP has its own way of finishing a request early; the shop now uses it, so emails after
+  a request don't make people wait. (Written from its documentation, not run on LiteSpeed yet.)
 
 - **What runs where:** the storefront as a cPanel Node.js app; the PHP API on a second address; MySQL
   from the account; pictures in R2. The browser still talks only to the storefront.
@@ -1113,14 +1128,25 @@ owner). It is the fallback if Oracle refuses the sign-up, and a dependable home 
   (about 5 minutes, 16 MB zip), because builds on shared hosting usually run out of memory. It adds the
   Linux picture library, since a Windows build carries only Windows files, and no `npm install` runs on
   the host. The API's address goes into the build, so a new address needs a new build.
-- **`check-host.php`** answers "can this host run it?" before any money or time is spent: PHP version,
-  extensions, upload limits, and whether the host can reach R2, Resend, Kora and Monnify. It is deleted
-  straight afterwards.
+- **`check-host.php`** answers "can this host run it?" early, within a money-back period: PHP version,
+  extensions, upload limits, processor type, Linux version, web server, and whether the host can reach
+  R2, Resend, Kora and Monnify. It is deleted straight afterwards.
+- **The clean database file (`backend/scripts/export_for_host.php`):** keeps products, pictures' records,
+  categories, delivery zones, coupons (use counts back to 0), banners, approved reviews (without the
+  writer's account or email), settings and administrators. Everything else arrives as an empty table:
+  customers, orders, payments, sessions, subscribers, queued emails and logs. A table added in future is
+  left out until someone decides it belongs. It changes nothing on the PC, and dev mode starts off on the host.
+- **If the API's address must stay inside `public_html`** (DirectAdmin often requires this): the
+  `api-entry` folder holds a one-line `index.php` that hands over to the API, which stays outside the
+  web folder. Tested in the rehearsal.
+- **If the host's Linux is too old for the picture library:** `build.ps1 -NoImageResizing` sends pictures at
+  full size instead, which works anywhere but is slower on phones.
 - **What's different from a server of your own:**
   - The API has a public address, so the setup page isn't blocked by nginx. Importing the owner's
     database closes it; on an empty database, create the administrator straight away.
   - Rate limits rely on the host's proxy passing on visitors' addresses, which must be checked in
-    System status from two connections. Otherwise all visitors count as one.
+    System status from two connections. Otherwise all visitors count as one. In the rehearsal, once the
+    storefront's address was trusted, the real address came through and faked ones were ignored.
   - Cron may run every 5-15 minutes only (emails still go out after visits).
   - Picture copies are off (`BACKUP_PICTURES=false`), for disk and file limits.
   - Live payment status and Redis stay off.
@@ -1519,3 +1545,4 @@ When something changes, update the matching section in the same commit:
 | 5 Nov 2026 | Home page: new Featured row, chosen by the owner; a product appears only once on the page; Top selling lists only products that have really sold. Catalogue paging has a fixed order. Backups: pictures in a bucket are now copied to a growing folder on the server, and a deleted picture can be put back (`migrate_uploads.php --from`, which also accepts backups made with pictures in a bucket). Removed the old `migrate_to_physical_only.php`, which deleted data with no confirmation |
 | 5 Nov 2026 | Shared hosting route: `deploy/cpanel/` builds the storefront on a PC into a self-contained package with the Linux picture library, with a host checker and step-by-step guide. `BACKUP_PICTURES=false` turns off the server's copy of bucket pictures, for tight hosting. Checked and not advised: Render, Vercel and Cloudflare Workers free plans |
 | 5 Nov 2026 | Every product row on the storefront now stops at 4 products, including Featured |
+| 6 Nov 2026 | Hosting rehearsed on Linux with Apache, Passenger, MySQL 8 and the real zip files, before buying a host. Fixed: database updates that failed on MySQL, zip permissions that shared hosts refuse. New: clean database export for a new host, entry folder for DirectAdmin, `-NoImageResizing`, and "Before you buy" in the hosting guide |
