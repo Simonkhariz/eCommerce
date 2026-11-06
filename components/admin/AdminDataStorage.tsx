@@ -298,8 +298,13 @@ function ReviewPanel({ data, onChanged }: { data: DataOverview; onChanged: () =>
           you can remove them, with your password and a code sent to your email. Order totals, payments and refunds are always kept.
         </Notice>
       </div>
+      {data.health.cleanup.note && (
+        <div className="border-b border-[#f3f4f6] px-4 py-3">
+          <Notice tone="warning">{data.health.cleanup.note}</Notice>
+        </div>
+      )}
       {rows.length === 0 ? (
-        <p className="px-4 py-4 text-[13px] text-[#6b7280]">Nothing to review: everything is within your keep periods.</p>
+        !data.health.cleanup.note && <p className="px-4 py-4 text-[13px] text-[#6b7280]">Nothing to review: everything is within your keep periods.</p>
       ) : (
         <>
           {group('Customer and business data', records)}

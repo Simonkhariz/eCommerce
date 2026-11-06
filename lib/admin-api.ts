@@ -818,7 +818,7 @@ export type HealthLevel = 'ok' | 'warning' | 'critical';
 
 export interface HealthIssue {
   level: Exclude<HealthLevel, 'ok'>;
-  code: 'size' | 'slow' | 'queries' | 'due' | 'backlog';
+  code: 'size' | 'slow' | 'queries' | 'due' | 'backlog' | 'pictures_not_checked';
   title: string;
   detail: string;
 }
@@ -849,8 +849,11 @@ export interface StorageHealthReport {
     routes: Array<{ method: string; route: string; hits: number; avg_ms: number; max_ms: number }>;
   };
   queries?: { typical_ms: number };
-  /** due: records past the keep periods per rule (nothing is removed until an admin confirms). */
-  cleanup: { due: Record<string, number>; last_run: CleanupRun | null; days_since: number | null };
+  /**
+   * due: records past the keep periods per rule (nothing is removed until an admin confirms).
+   * note: why unused pictures are missing from `due` (their storage can't be reached), else null.
+   */
+  cleanup: { due: Record<string, number>; pictures_checked?: boolean; note?: string | null; last_run: CleanupRun | null; days_since: number | null };
 }
 
 export interface DataOverview {
