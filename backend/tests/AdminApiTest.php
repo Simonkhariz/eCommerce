@@ -170,7 +170,10 @@ $t->check('a fixed code never takes off more than the items cost', 0, (int) $t->
 $fixedId = (int) $t->scalar("SELECT `id` FROM `promotions` WHERE `code` = ?", 's', [$fixed]);
 $t->check('a fixed code must keep a minimum order above its amount (an order is never free)', 422, $A('PUT', "/admin/promotions/{$fixedId}", ['json' => ['min_order_amount' => '']])['status']);
 $t->check('an amount equal to the minimum is refused too', 422, $A('PUT', "/admin/promotions/{$fixedId}", ['json' => ['discount_amount' => 20000]])['status']);
+// The homepage sends only the newest live code, so the newer capped code steps aside for this check.
+$t->sql("UPDATE `promotions` SET `is_active` = 0 WHERE `code` = ?", 's', [$capped]);
 $t->check('the homepage shows the wording', true, in_array('₦5,000 off on orders of ₦20,000+', array_column((array) TestKit::get($t->http('GET', '/storefront/homepage'), 'data.promotions'), 'label'), true));
+$t->sql("UPDATE `promotions` SET `is_active` = 1 WHERE `code` = ?", 's', [$capped]);
 // Safety net for any code (e.g. one made before these rules): an order is never priced at N0.
 $freeCode = 'TZ0' . strtoupper(bin2hex(random_bytes(3)));
 $freeZone = 'TF0' . strtoupper(bin2hex(random_bytes(3)));

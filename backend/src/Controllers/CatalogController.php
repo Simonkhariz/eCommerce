@@ -215,7 +215,7 @@ class CatalogController
                AND (starts_at IS NULL OR starts_at <= NOW()) 
                AND (expires_at IS NULL OR expires_at >= NOW()) 
                AND (max_uses <= 0 OR used_count < max_uses)
-             ORDER BY id DESC LIMIT 5"
+             ORDER BY id DESC LIMIT 1" // only the one the page advertises: others may be private codes
         );
         $banners = $db->fetchAll(
             "SELECT id, title, subtitle, cta_text, cta_url, image_url, display_order FROM banners 

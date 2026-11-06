@@ -73,7 +73,7 @@ if ($paid !== null && $cancelled !== null) {
 $t->section('Analytics (all time) agrees with the database');
 $report = $A('GET', '/admin/analytics/report?range=all');
 $s = (array) TestKit::get($report, 'data.summary');
-$dbGross = (float) $t->scalar("SELECT COALESCE(SUM(`amount`), 0) FROM `payments` WHERE `status` IN ('successful', 'partially_refunded', 'refunded') AND `verified_at` IS NOT NULL");
+$dbGross = (float) $t->scalar("SELECT COALESCE(SUM(COALESCE(`amount_received`, `amount`)), 0) FROM `payments` WHERE `status` IN ('successful', 'partially_refunded', 'refunded') AND `verified_at` IS NOT NULL");
 $dbRefunds = (float) $t->scalar("SELECT COALESCE(SUM(`amount`), 0) FROM `refunds` WHERE `status` = 'completed'");
 $t->ok('there is revenue to check', $dbGross > 0);
 $t->check('gross sales = verified payments', round($dbGross, 2), round((float) ($s['gross_sales'] ?? -1), 2));
@@ -202,6 +202,21 @@ if ($under !== null) {
     $afterUnder = (array) TestKit::get($A('GET', '/admin/analytics/report?range=30days'), 'data.summary');
     $t->check('net sales and refunds are unchanged', [$beforeUnder['net_sales'], $beforeUnder['total_refunded']], [$afterUnder['net_sales'], $afterUnder['total_refunded']]);
     $t->check('the overview agrees', round((float) $afterUnder['net_sales'], 2), round((float) TestKit::get($A('GET', '/admin/dashboard/overview?period=30'), 'data.kpis.net_sales'), 2));
+}
+
+// -----------------------------------------------------------------------------
+$t->section('Sending back an overpayment leaves the sale whole');
+$over = $placeOrder();
+if ($over !== null) {
+    $overRef = 'REP-OVER-' . bin2hex(random_bytes(4));
+    $netNow = static fn (): float => (float) TestKit::get($A('GET', '/admin/analytics/report?range=30days'), 'data.summary.net_sales');
+    $beforeOver = $netNow();
+    $t->sql("INSERT INTO `payments` (`order_id`, `provider`, `provider_reference`, `amount`, `currency`, `status`) VALUES (?, 'kora', ?, ?, 'NGN', 'pending')", 'isd', [$over[2], $overRef, $over[1]]);
+    (new App\Services\PaymentFinalizer($t->db))->finalizeSuccess($overRef, ['amount' => (float) $over[1] + 2000, 'currency' => 'NGN', 'label' => 'Kora']);
+    $t->ok('all the money received counts until the extra goes back', abs($netNow() - $beforeOver - ((float) $over[1] + 2000)) < 0.01);
+    $t->check('the extra is refunded', 201, $A('POST', '/admin/refunds', ['json' => ['order_number' => $over[0], 'amount' => 2000, 'reason' => 'Overpaid', 'status' => 'completed', 'restock' => false]])['status']);
+    $t->ok('net sales grew by the order total, no more and no less', abs($netNow() - $beforeOver - (float) $over[1]) < 0.01);
+    $t->check('the overview agrees', round($netNow(), 2), round((float) TestKit::get($A('GET', '/admin/dashboard/overview?period=30'), 'data.kpis.net_sales'), 2));
 }
 
 // -----------------------------------------------------------------------------

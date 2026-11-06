@@ -154,6 +154,8 @@ class CustomerController
                 $errors[$field] = "{$label} is required.";
             } elseif (Input::tooLong($value, $max)) {
                 $errors[$field] = "{$label} can be at most {$max} characters.";
+            } elseif ($field === 'phone' && !PhoneNumber::isNigerian((string) Input::text($value))) {
+                $errors[$field] = PhoneNumber::NIGERIAN_RULE;
             }
         }
         return $errors;

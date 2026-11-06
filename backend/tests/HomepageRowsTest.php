@@ -111,4 +111,13 @@ $t->sql('UPDATE `products` SET `units_sold` = ? WHERE `id` = ?', 'ii', [7, $ids[
 $t->check('ranked by units sold', [$ids[14], $ids[15], $ids[13]], $rowIds($home(), 'top_selling'));
 $t->check('and products with no sales never fill it', 3, count($rowIds($home(), 'top_selling')));
 
+$t->section('Only the coupon the page advertises is public');
+$codes = [$t->uniq('PUBLIC-A'), $t->uniq('PRIVATE-B')];
+$t->cleanup(fn () => $t->sql('DELETE FROM `promotions` WHERE `code` IN (?, ?)', 'ss', $codes));
+foreach ($codes as $code) {
+    $t->sql("INSERT INTO `promotions` (`code`, `description`, `discount_percent`, `is_active`) VALUES (?, 'Test', 5, 1)", 's', [$code]);
+}
+$shownCodes = array_column((array) ($home()['promotions'] ?? []), 'code');
+$t->check('the newest live code is the only one sent to visitors', [$codes[1]], $shownCodes);
+
 exit($t->finish());

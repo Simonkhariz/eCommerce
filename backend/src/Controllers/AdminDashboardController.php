@@ -77,7 +77,7 @@ class AdminDashboardController
 
         // Daily trend across the selected period.
         $salesByDay = array_column($this->db->fetchAll(
-            "SELECT DATE(verified_at) AS d, SUM(amount) AS sales, COUNT(DISTINCT order_id) AS paid_orders
+            "SELECT DATE(verified_at) AS d, SUM(COALESCE(amount_received, amount)) AS sales, COUNT(DISTINCT order_id) AS paid_orders
              FROM `payments`
              WHERE status IN (" . self::RECEIVED_PAYMENT_STATUSES . ") AND verified_at >= ?
              GROUP BY DATE(verified_at)",
@@ -215,7 +215,7 @@ class AdminDashboardController
     private function periodTotals(string $start, string $end): array
     {
         $sales = $this->db->fetchOne(
-            "SELECT COALESCE(SUM(amount), 0) AS gross, COUNT(DISTINCT order_id) AS paid_orders
+            "SELECT COALESCE(SUM(COALESCE(amount_received, amount)), 0) AS gross, COUNT(DISTINCT order_id) AS paid_orders
              FROM `payments`
              WHERE status IN (" . self::RECEIVED_PAYMENT_STATUSES . ") AND verified_at >= ? AND verified_at < ?",
             'ss',
@@ -267,7 +267,7 @@ class AdminDashboardController
             "SELECT o.order_number, o.updated_at AS cancelled_at, o.payment_status,
                     p.paid, COALESCE(r.refunded, 0) AS refunded, p.paid - COALESCE(r.refunded, 0) AS owed
              FROM `orders` o
-             JOIN (SELECT order_id, SUM(amount) AS paid FROM `payments`
+             JOIN (SELECT order_id, SUM(COALESCE(amount_received, amount)) AS paid FROM `payments`
                    WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ? GROUP BY order_id) p ON p.order_id = o.id
              LEFT JOIN (SELECT r.order_id, SUM(r.amount) AS refunded FROM `refunds` r" . self::REFUND_OF_A_SALE . " WHERE r.status = 'completed' GROUP BY r.order_id) r ON r.order_id = o.id
              WHERE o.order_status = 'cancelled' AND p.paid - COALESCE(r.refunded, 0) > 0.009
@@ -344,7 +344,7 @@ class AdminDashboardController
         $w = [$start, $end];
 
         $sales = $this->db->fetchOne(
-            "SELECT COALESCE(SUM(amount), 0) AS gross, COUNT(DISTINCT order_id) AS paid_orders
+            "SELECT COALESCE(SUM(COALESCE(amount_received, amount)), 0) AS gross, COUNT(DISTINCT order_id) AS paid_orders
              FROM `payments` WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ?",
             'ss',
             $w
@@ -391,7 +391,7 @@ class AdminDashboardController
 
         // Daily series (every day in the window, so charts have no gaps).
         $salesByDay = array_column($this->db->fetchAll(
-            "SELECT DATE(verified_at) AS d, SUM(amount) AS sales, COUNT(DISTINCT order_id) AS paid
+            "SELECT DATE(verified_at) AS d, SUM(COALESCE(amount_received, amount)) AS sales, COUNT(DISTINCT order_id) AS paid
              FROM `payments` WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ? GROUP BY DATE(verified_at)",
             'ss',
             $w
@@ -459,7 +459,7 @@ class AdminDashboardController
             $w
         ), null, 'provider');
         $volume = array_column($this->db->fetchAll(
-            "SELECT provider, SUM(amount) AS volume FROM `payments`
+            "SELECT provider, SUM(COALESCE(amount_received, amount)) AS volume FROM `payments`
              WHERE status IN ({$received}) AND verified_at >= ? AND verified_at < ? GROUP BY provider",
             'ss',
             $w

@@ -154,6 +154,7 @@ $postAddress = static fn (array $json): array => $t->http('POST', '/customer/add
 $addressA = (int) TestKit::get($postAddress($newAddress), 'data.id');
 $addressB = (int) TestKit::get($postAddress(['city' => 'Yaba'] + $newAddress), 'data.id');
 $putAddress = static fn (int $id, array $json): array => $t->http('PUT', "/customer/addresses/{$id}", ['jar' => 'cust', 'csrf' => $csrf, 'json' => $json]);
+$t->check('an address book phone must be a real Nigerian number', 422, $postAddress(array_merge($newAddress, ['phone' => '1']))['status']);
 $cityOf = static fn (int $id): ?string => $t->scalar("SELECT `city` FROM `addresses` WHERE `id` = ?", 'i', [$id]);
 $t->check('PUT a blank city -> 422', 422, $putAddress($addressA, ['city' => ''])['status']);
 $t->check('PUT a list as the city -> 422', 422, $putAddress($addressA, ['city' => ['x']])['status']);

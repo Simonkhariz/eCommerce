@@ -90,6 +90,10 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
   const zone = order.shipping_zone_snapshot;
   const transitions = order.allowed_transitions ?? [];
   const canRefund = order.payment_status === 'successful' || order.payment_status === 'partially_refunded';
+  // Underpaid money stays on a payment that never became successful, and can still be sent back.
+  const hasUnderpayment = (order.payments ?? []).some(
+    (p) => Number(p.amount_received) > 0 && ['pending', 'failed', 'cancelled'].includes(p.status),
+  );
   const latePayment = canRecordLatePayment(order);
 
   const handleError = (err: unknown) => {
@@ -202,7 +206,7 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
                 {ORDER_TRANSITION_LABELS[t] ?? humanize(t)}
               </Button>
             ))}
-            {canRefund && (
+            {(canRefund || hasUnderpayment) && (
               <Link
                 href={`/admin/refunds?order=${encodeURIComponent(order.order_number)}`}
                 className="inline-flex h-9 items-center rounded-lg border border-[#d1d5db] bg-white px-3.5 text-[13px] font-semibold text-[#1f2937] hover:bg-[#f9fafb]"
