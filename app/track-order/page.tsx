@@ -20,12 +20,13 @@ import {
   X,
 } from 'lucide-react';
 import { formatPrice } from '@/lib/currency';
+import { useAuth } from '@/context/AuthContext';
 import { ApiOrder, apiGetOrder, apiInitializePayment, apiMarkPaymentSent, errorMessage } from '@/lib/api-client';
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, formatSupportPhone, whatsAppOrderFrom } from '@/lib/whatsapp';
 import { markInvoiceSent, readGuestToken, saveGuestToken, saveLookupEmail } from '@/lib/pending-order';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useInvoiceSent, useLatestOrderNumber } from '@/lib/use-order-data';
-import { getOrderStatusDisplay, STATUS_TONE_CLASSES } from '@/lib/order-status';
+import { getOrderStatusDisplay, getShipmentDisplay, orderLookupErrorMessage, STATUS_TONE_CLASSES } from '@/lib/order-status';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { Dialog } from '@/components/ui/Dialog';
 import { PaymentMethodsNotice } from '@/components/cart/PaymentMethodsNotice';
@@ -73,6 +74,21 @@ function TrackOrderContent() {
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [copiedTracking, setCopiedTracking] = useState<boolean>(false);
 
+  // Signing out leaves nothing of the order on screen for the next person.
+  const { user } = useAuth();
+  const viewerId = user?.id ?? null;
+  const [lastViewerId, setLastViewerId] = useState(viewerId);
+  if (viewerId !== lastViewerId) {
+    setLastViewerId(viewerId);
+    if (viewerId === null) {
+      setOrder(null);
+      setOrderNumber('');
+      setLookupEmail('');
+      setVerificationInput('');
+      setLookupError(null);
+    }
+  }
+
   const handleCopyTracking = (code: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(code);
@@ -102,7 +118,7 @@ function TrackOrderContent() {
         },
         (err) => {
           setOrder(null);
-          setLookupError(errorMessage(err, NOT_FOUND_MESSAGE));
+          setLookupError(orderLookupErrorMessage(err, NOT_FOUND_MESSAGE));
         }
       )
       .finally(() => setIsLoading(false));
@@ -132,7 +148,7 @@ function TrackOrderContent() {
         (err) => {
           if (!current) return;
           setOrder(null);
-          setLookupError(errorMessage(err, NOT_FOUND_MESSAGE));
+          setLookupError(orderLookupErrorMessage(err, NOT_FOUND_MESSAGE));
         }
       )
       .finally(() => current && setIsLoading(false));
@@ -214,8 +230,10 @@ function TrackOrderContent() {
   };
 
   const rawStatus = order?.status || order?.order_status || 'pending_payment';
-  const statusDisplay = order ? getOrderStatusDisplay(rawStatus, order.payment_status, order.expires_at) : null;
+  const statusDisplay = order ? getOrderStatusDisplay(rawStatus, order.payment_status, order.expires_at, order.customer_marked_paid_at) : null;
   const canPay = Boolean(statusDisplay?.canPay);
+  // The shopper reported their WhatsApp transfer and the store has not confirmed it yet.
+  const awaitingConfirmation = rawStatus === 'pending_payment' && Boolean(order?.customer_marked_paid_at);
   // WhatsApp transfer: once the chat was opened, the shopper reports the transfer here; the store is
   // told (admins emailed) and the payment page waits for its confirmation, then shows the receipt.
   const router = useRouter();
@@ -263,6 +281,9 @@ function TrackOrderContent() {
   ];
 
   const whatsAppInvoiceUrl = order ? buildWhatsAppInvoiceUrl(whatsAppOrderFrom(order), supportPhone) : '';
+  const helpWhatsAppUrl = buildWhatsAppMessageUrl('Hello! I have a question about my order.', supportPhone);
+  const orderWhatsAppUrl = order ? buildWhatsAppMessageUrl(`Hello! I'm checking on my order #${order.order_number}.`, supportPhone) : '';
+  const shipmentDisplay = getShipmentDisplay(order?.shipment?.status);
 
   return (
     <div className="min-h-screen bg-[#FBFBFB] py-8 sm:py-12 px-4 sm:px-6 lg:px-8">
@@ -277,16 +298,22 @@ function TrackOrderContent() {
             <span>Back to the store</span>
           </Link>
 
-          <a
-            href={buildWhatsAppMessageUrl('Hello! I have a question about my order.', supportPhone)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-full hover:bg-emerald-100 transition-colors"
-          >
-            <WhatsAppIcon className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
-            <span>Help: {formatSupportPhone(supportPhone)}</span>
-            <span className="sr-only">on WhatsApp (opens in a new tab)</span>
-          </a>
+          {helpWhatsAppUrl ? (
+            <a
+              href={helpWhatsAppUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-full hover:bg-emerald-100 transition-colors"
+            >
+              <WhatsAppIcon className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
+              <span>Help: {formatSupportPhone(supportPhone)}</span>
+              <span className="sr-only">on WhatsApp (opens in a new tab)</span>
+            </a>
+          ) : (
+            <Link href="/contact" className="text-xs font-semibold text-neutral-700 underline hover:text-black">
+              Need help? Contact us
+            </Link>
+          )}
         </div>
 
         {/* Header */}
@@ -339,8 +366,8 @@ function TrackOrderContent() {
                     aria-describedby={lookupError ? 'track-lookup-error' : undefined}
                     value={orderNumber}
                     onChange={(e) => setOrderNumber(e.target.value)}
-                    placeholder="e.g. ORD-20261016-XXXXXX or GIG-LOS-XXXXXX"
-                    className="w-full text-sm font-mono px-4 py-3 bg-neutral-50 border border-neutral-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-black uppercase placeholder:normal-case placeholder:font-sans"
+                    placeholder="e.g. ORD-20261016-XXXXXX"
+                    className="w-full text-sm font-mono pl-4 pr-10 py-3 bg-neutral-50 border border-neutral-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-black uppercase placeholder:normal-case placeholder:font-sans"
                   />
                   <Package className="w-4 h-4 text-neutral-500 absolute right-4 top-3.5" aria-hidden="true" />
                 </div>
@@ -360,7 +387,7 @@ function TrackOrderContent() {
                   autoComplete="email"
                   value={verificationInput}
                   onChange={(e) => setVerificationInput(e.target.value)}
-                  placeholder="name@example.com (or your access key)"
+                  placeholder="Email or access key"
                   className="w-full text-sm px-4 py-3 bg-neutral-50 border border-neutral-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-black"
                 />
               </div>
@@ -468,24 +495,26 @@ function TrackOrderContent() {
                   </>
                 ) : (
                   <>
-                  {isPaid && (
+                  {(isPaid || awaitingConfirmation) && (
                     <Link
                       href={`/checkout/callback?order=${encodeURIComponent(order.order_number)}`}
                       className="inline-flex items-center gap-1.5 bg-black hover:bg-neutral-800 text-white font-semibold px-4 py-2 rounded-full text-xs transition-colors"
                     >
-                      <span>View receipt</span>
+                      <span>{isPaid ? 'View receipt' : 'See payment status'}</span>
                     </Link>
                   )}
-                  <a
-                    href={buildWhatsAppMessageUrl(`Hello! I'm checking on my order #${order.order_number}.`, supportPhone)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-semibold px-4 py-2 rounded-full text-xs transition-colors"
-                  >
-                    <WhatsAppIcon className="w-3.5 h-3.5 text-[#128C7E]" aria-hidden="true" />
-                    <span>WhatsApp help</span>
-                    <span className="sr-only">(opens in a new tab)</span>
-                  </a>
+                  {orderWhatsAppUrl && (
+                    <a
+                      href={orderWhatsAppUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-semibold px-4 py-2 rounded-full text-xs transition-colors"
+                    >
+                      <WhatsAppIcon className="w-3.5 h-3.5 text-[#128C7E]" aria-hidden="true" />
+                      <span>WhatsApp help</span>
+                      <span className="sr-only">(opens in a new tab)</span>
+                    </a>
+                  )}
                   </>
                 )}
               </div>
@@ -588,9 +617,9 @@ function TrackOrderContent() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold uppercase tracking-wider text-blue-700">Dispatched by courier</span>
-                        <span className="inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 capitalize">
-                          {order.shipment.status?.replace('_', ' ') || 'In Transit'}
+                        <span className="text-xs font-bold uppercase tracking-wider text-blue-700">{shipmentDisplay.heading}</span>
+                        <span className="inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                          {shipmentDisplay.badge}
                         </span>
                       </div>
                       <h3 className="text-base font-extrabold text-neutral-900 mt-0.5">
@@ -657,9 +686,7 @@ function TrackOrderContent() {
                     <span className="text-xs font-bold text-neutral-800">
                       {order.shipment.delivered_at
                         ? `Delivered on ${toDate(order.shipment.delivered_at).toLocaleDateString('en-NG', { dateStyle: 'medium' })}`
-                        : order.shipment.status === 'out_for_delivery'
-                        ? 'Out for Delivery today'
-                        : 'Package in transit'}
+                        : shipmentDisplay.delivery}
                     </span>
                   </div>
                 </div>
@@ -756,7 +783,7 @@ function TrackOrderContent() {
                       ) : (
                         <Clock className="w-3 h-3 text-amber-700" aria-hidden="true" />
                       )}
-                      <span>{isPaid ? 'Paid' : order.payment_status === 'cancelled' ? 'Cancelled' : 'Not paid'}</span>
+                      <span>{isPaid ? 'Paid' : order.payment_status === 'cancelled' ? 'Cancelled' : awaitingConfirmation ? 'Awaiting confirmation' : 'Not paid'}</span>
                     </span>
                   </div>
 

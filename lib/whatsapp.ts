@@ -1,13 +1,11 @@
 /**
  * WhatsApp helpers for order invoices (before payment), receipts (after payment) and support.
- * The store's number comes from the backend (STORE_WHATSAPP_PHONE via /checkout/payment-methods);
- * the constant below is only a fallback until that has loaded.
+ * The store's number comes from the backend (Settings or STORE_WHATSAPP_PHONE, via
+ * /checkout/payment-methods). There is no built-in number: without one every link here is ''
+ * and the page offers another way to reach the store.
  */
 
 import type { ApiOrder, ApiOrderItem } from '@/lib/api-client';
-
-export const SUPPORT_WHATSAPP_NUMBER = '2349066707079';
-export const SUPPORT_PHONE_FORMATTED = '+234 906 670 7079';
 
 /**
  * International digits for wa.me from a number typed in Nigerian local format:
@@ -23,9 +21,10 @@ export function normalizePhoneDigits(phone?: string | null): string {
   return digits;
 }
 
-/** Normalise a configured phone number to wa.me digits (store fallback when none is set). */
-export function toWhatsAppDigits(phone?: string | null): string {
-  return normalizePhoneDigits(phone) || SUPPORT_WHATSAPP_NUMBER;
+/** A wa.me link with a prefilled message, or '' when no number is configured. */
+function whatsAppUrl(supportPhone: string | null | undefined, text: string): string {
+  const digits = normalizePhoneDigits(supportPhone);
+  return digits ? `https://wa.me/${digits}?text=${encodeURIComponent(text)}` : '';
 }
 
 export interface WhatsAppOrderItem {
@@ -96,14 +95,14 @@ function formatCurrency(amount: number): string {
 export function buildWhatsAppInvoiceUrl(order: WhatsAppOrderDetails, supportPhone?: string | null): string {
   // Only the order number: the store looks the order up by it, and the customer can add any
   // message they like before sending.
-  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(order.order_number)}`;
+  return whatsAppUrl(supportPhone, order.order_number);
 }
 
 /**
  * Receipt message after payment: also only the order number (the store has the details).
  */
 export function buildWhatsAppReceiptUrl(order: WhatsAppOrderDetails, supportPhone?: string | null): string {
-  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(order.order_number)}`;
+  return whatsAppUrl(supportPhone, order.order_number);
 }
 
 /**
@@ -111,7 +110,8 @@ export function buildWhatsAppReceiptUrl(order: WhatsAppOrderDetails, supportPhon
  */
 export function buildWhatsAppPrePaymentHelpUrl(orderNumber?: string, totalAmount?: number, supportPhone?: string | null): string {
   if (orderNumber && totalAmount) {
-    return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(
+    return whatsAppUrl(
+      supportPhone,
       [
         `*SHOP.CO — CUSTOMER INQUIRY*`,
         `━━━━━━━━━━━━━━━━━━━━`,
@@ -122,22 +122,21 @@ export function buildWhatsAppPrePaymentHelpUrl(orderNumber?: string, totalAmount
         ``,
         `Please assist me before I complete payment. Thank you!`,
       ].join('\n')
-    )}`;
+    );
   }
 
-  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(
-    'Hello SHOP.CO Support! I am shopping on your store and have an inquiry.'
-  )}`;
+  return whatsAppUrl(supportPhone, 'Hello SHOP.CO Support! I am shopping on your store and have an inquiry.');
 }
 
 /** Plain support chat link with a prefilled message. */
 export function buildWhatsAppMessageUrl(message: string, supportPhone?: string | null): string {
-  return `https://wa.me/${toWhatsAppDigits(supportPhone)}?text=${encodeURIComponent(message)}`;
+  return whatsAppUrl(supportPhone, message);
 }
 
-/** Human-readable form of the configured support number. */
+/** Human-readable form of the configured support number ('' when none is set). */
 export function formatSupportPhone(supportPhone?: string | null): string {
-  const digits = toWhatsAppDigits(supportPhone);
+  const digits = normalizePhoneDigits(supportPhone);
+  if (!digits) return '';
   if (digits.startsWith('234') && digits.length === 13) {
     return `+234 ${digits.slice(3, 6)} ${digits.slice(6, 9)} ${digits.slice(9)}`;
   }

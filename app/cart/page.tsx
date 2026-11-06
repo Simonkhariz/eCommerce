@@ -11,7 +11,11 @@ import { ArrowRight01Icon } from '@hugeicons/core-free-icons';
 
 export default function CartPage() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const { items, revalidateCart, isRevalidating } = useCart();
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const { items, isLoaded, revalidateCart, isRevalidating } = useCart();
+
+  // Nothing to check out: the check below may have emptied the cart, or another tab did.
+  if (isCheckoutOpen && items.length === 0) setIsCheckoutOpen(false);
 
   // Confirm current prices and stock whenever the cart page is opened.
   useEffect(() => {
@@ -19,7 +23,9 @@ export default function CartPage() {
   }, [revalidateCart]);
 
   const handleCheckout = async () => {
+    setIsCheckingOut(true);
     await revalidateCart();
+    setIsCheckingOut(false);
     setIsCheckoutOpen(true);
   };
 
@@ -37,22 +43,29 @@ export default function CartPage() {
         YOUR CART
       </h1>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start">
-        <div className="lg:col-span-7">
-          <CartItemList />
-          {isRevalidating && items.length > 0 && (
-            <p className="mt-3 text-xs text-neutral-600" role="status">
-              Checking current prices and stock…
-            </p>
-          )}
-        </div>
+      {isLoaded ? (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start">
+          <div className="lg:col-span-7">
+            <CartItemList />
+            {isRevalidating && items.length > 0 && (
+              <p className="mt-3 text-xs text-neutral-600" role="status">
+                Checking current prices and stock…
+              </p>
+            )}
+          </div>
 
-        <div className="lg:col-span-5">
-          <OrderSummary onCheckout={handleCheckout} />
+          <div className="lg:col-span-5">
+            <OrderSummary onCheckout={handleCheckout} isChecking={isCheckingOut || isRevalidating} />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="border border-neutral-200 rounded-3xl p-12 text-center bg-white space-y-3" role="status">
+          <div className="w-10 h-10 border-4 border-black/10 border-t-black rounded-full animate-spin mx-auto" aria-hidden="true" />
+          <p className="text-sm text-neutral-700">Loading your cart…</p>
+        </div>
+      )}
 
-      <CheckoutModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} />
+      <CheckoutModal isOpen={isCheckoutOpen && items.length > 0} onClose={() => setIsCheckoutOpen(false)} />
     </div>
   );
 }

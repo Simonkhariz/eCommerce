@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiGetPaymentMethods, PaymentMethodItem, PaymentMethodsResponse } from '@/lib/api-client';
 import { useStoreSeed } from '@/components/layout/StoreDataProvider';
 import { DEFAULT_PAYMENT_WINDOWS, PaymentWindows, paymentWindowsFrom } from '@/lib/site-content';
+import { normalizePhoneDigits } from '@/lib/whatsapp';
 
 interface StoreSupport {
   supportPhone: string | null;
@@ -31,7 +32,8 @@ function fromResponse(res: PaymentMethodsResponse | null | undefined): StoreSupp
     paymentWindows: paymentWindowsFrom(res),
     livePaymentStatus: res?.live_payment_status === true,
     payNowGateway: res?.pay_now_gateway !== undefined ? res.pay_now_gateway : (listedGateway ?? null),
-    whatsappEnabled: res?.whatsapp_enabled ?? methods.some((m) => m.id === 'whatsapp'),
+    // Without a number there is nobody to send the transfer details to.
+    whatsappEnabled: (res?.whatsapp_enabled ?? methods.some((m) => m.id === 'whatsapp')) && normalizePhoneDigits(res?.support_phone) !== '',
     loaded: true,
   };
 }

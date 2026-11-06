@@ -24,6 +24,7 @@ import {
   apiVerifyPayment,
   apiMarkPaymentSent,
   apiReleaseOrder,
+  ApiError,
   CheckoutQuoteResponse,
   errorMessage,
 } from '@/lib/api-client';
@@ -31,13 +32,26 @@ import { buildWhatsAppInvoiceUrl, whatsAppItems } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
 import {
   cartSignature,
+  clearCheckoutDraft,
   clearPendingOrder,
+  readCheckoutDraft,
   readGuestToken,
   readPendingOrder,
+  saveCheckoutDraft,
   saveGuestToken,
   markInvoiceSent,
   savePendingOrder,
 } from '@/lib/pending-order';
+import { formatShopDeadline } from '@/lib/shop-time';
+import {
+  CHECKOUT_FIELD_ORDER,
+  checkoutFieldErrorsFrom,
+  cleanPhone,
+  firstValidationMessage,
+  validateCheckoutDetails,
+  type CheckoutField,
+  type CheckoutFieldErrors,
+} from '@/lib/checkout-validation';
 import { useInvoiceSent } from '@/lib/use-order-data';
 import { NIGERIAN_STATES } from '@/lib/nigeria';
 import { Dialog } from '@/components/ui/Dialog';
@@ -92,13 +106,58 @@ interface CheckoutForm {
 
 const EMPTY_FORM: CheckoutForm = { fullName: '', email: '', phone: '', address: '', city: '', state: '', notes: '', selectedZoneId: undefined };
 
+const FIELD_INPUT_IDS: Record<CheckoutField, string> = {
+  fullName: 'co-name',
+  email: 'co-email',
+  phone: 'co-phone',
+  address: 'co-address',
+  city: 'co-city',
+  state: 'co-state',
+};
+
+/** The details this tab kept over a refresh (lib/pending-order.ts), or an empty form. */
+function formFromDraft(): CheckoutForm {
+  const draft = readCheckoutDraft();
+  if (!draft) return EMPTY_FORM;
+  const text = (value: unknown) => (typeof value === 'string' ? value : '');
+  const state = text(draft.state);
+  const pin = draft.location as CheckoutForm['location'] | undefined;
+  return {
+    ...EMPTY_FORM,
+    fullName: text(draft.fullName),
+    email: text(draft.email),
+    phone: text(draft.phone),
+    address: text(draft.address),
+    city: text(draft.city),
+    state: NIGERIAN_STATES.includes(state) ? state : '',
+    notes: text(draft.notes),
+    location: typeof pin?.latitude === 'number' && typeof pin?.longitude === 'number' ? pin : undefined,
+  };
+}
+
+/** A field's own message, under it. */
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null;
+  return <p id={id} className="mt-1 text-xs text-red-700">{message}</p>;
+}
+
 /**
  * Checkout window. The delivery details typed in it are kept when the shopper closes and
- * reopens it; everything else (step, resumed order, quote, errors) starts fresh on each open.
+ * reopens it, and in this tab over a refresh; everything else (step, resumed order, quote,
+ * errors) starts fresh on each open.
  */
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose }) => {
   const { user, addresses } = useAuth();
-  const [formData, setFormData] = useState<CheckoutForm>(EMPTY_FORM);
+  // Read on the browser only; nothing here is drawn until checkout is opened, so the first
+  // render still matches the server's.
+  const [formData, setFormData] = useState<CheckoutForm>(formFromDraft);
+
+  // Kept for this tab only, without the delivery option (chosen again from the live quote).
+  useEffect(() => {
+    const details = { ...formData, selectedZoneId: undefined };
+    if (Object.values(details).some(Boolean)) saveCheckoutDraft(details);
+    else clearCheckoutDraft();
+  }, [formData]);
 
   // Prefill from the signed-in customer and their default address, once per account and
   // address, never overwriting what was typed. Adjusted while rendering (React's pattern for
@@ -118,6 +177,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
         city: prev.city || defaultAddr?.city || '',
         state: prev.state || (defaultAddr?.state && NIGERIAN_STATES.includes(defaultAddr.state) ? defaultAddr.state : ''),
       }));
+    } else if (prefilledFor) {
+      // Signed out: that cleared the kept details, so the next person gets an empty form. A
+      // session that merely expired keeps what was typed.
+      setFormData(formFromDraft());
     }
   }
 
@@ -148,6 +211,16 @@ function CheckoutSession({
   const [step, setStep] = useState<'details' | 'payment'>('details');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<CheckoutFieldErrors>({});
+  const submitErrorRef = useRef<HTMLDivElement>(null);
+  // Whether this cart's unpaid order still has to be looked at. Until it has been, a new order
+  // could duplicate it, so "Continue" waits; 'failed' offers another try.
+  const [resumeState, setResumeState] = useState<'idle' | 'checking' | 'failed'>(() => {
+    const pending = readPendingOrder();
+    return pending && pending.cartSignature === cartSignature(items) ? 'checking' : 'idle';
+  });
+  const [resumeAttempt, setResumeAttempt] = useState(0);
+  const [isReleasing, setIsReleasing] = useState(false);
   const [order, setOrder] = useState<PayableOrder | null>(null);
   const [copiedToken, setCopiedToken] = useState(false);
   // Which button is starting a payment ('whatsapp' or the "Pay now" gateway), for its label.
@@ -174,7 +247,7 @@ function CheckoutSession({
   const idempotencySignatureRef = useRef<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  const busy = isSubmitting || isInitializingPayment !== false;
+  const busy = isSubmitting || isInitializingPayment !== false || isReleasing;
 
   const handleClose = useCallback(() => {
     if (busy) return;
@@ -198,7 +271,13 @@ function CheckoutSession({
             if (outcome === 'paid') {
               router.push(`/checkout/callback?order=${encodeURIComponent(pending.orderNumber)}`);
               onClose();
-            } else clearPendingOrder(pending.orderNumber);
+            } else if (outcome === 'unknown') {
+              // Couldn't ask: it may still be paid, so it isn't forgotten yet.
+              setResumeState('failed');
+            } else {
+              clearPendingOrder(pending.orderNumber);
+              setResumeState('idle');
+            }
           });
           return;
         }
@@ -215,14 +294,48 @@ function CheckoutSession({
           items: whatsAppItems(o.items),
         });
         setStep('payment');
+        setResumeState('idle');
       })
-      .catch(() => {
-        clearPendingOrder(pending.orderNumber);
+      .catch((err) => {
         setStep('details');
+        // Only the server saying this device can't have the order ends it. A network blip or a
+        // busy server must not forget it, or the next submit would place a second order.
+        if (err instanceof ApiError && (err.statusCode === 403 || err.statusCode === 404)) {
+          clearPendingOrder(pending.orderNumber);
+          setResumeState('idle');
+        } else {
+          setResumeState('failed');
+        }
       });
   });
   useEffect(() => {
     resumePendingOrder();
+  }, [resumeAttempt]);
+
+  const retryResume = () => {
+    const pending = readPendingOrder();
+    if (!pending || pending.cartSignature !== cartSignature(items)) {
+      setResumeState('idle');
+      return;
+    }
+    setResumeState('checking');
+    setResumeAttempt((n) => n + 1);
+  };
+
+  // On a phone the form scrolls: an order error at its top must not go unseen below the fold.
+  useEffect(() => {
+    if (!submitError) return;
+    submitErrorRef.current?.scrollIntoView({ block: 'center' });
+    submitErrorRef.current?.focus({ preventScroll: true });
+  }, [submitError]);
+
+  // Back from the gateway with the page restored as it was left: the buttons are free again.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setInitializingMethod(false);
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
   }, []);
 
   // The Dialog handles Escape, focus trapping and scroll locking. When the step changes,
@@ -254,6 +367,7 @@ function CheckoutSession({
         })
       : null;
   const [quoteAnswer, setQuoteAnswer] = useState<{ request: string; quote: CheckoutQuoteResponse | null; error: string | null } | null>(null);
+  const [quoteAttempt, setQuoteAttempt] = useState(0);
 
   useEffect(() => {
     if (!quoteRequest) return;
@@ -265,16 +379,30 @@ function CheckoutSession({
     return () => {
       current = false;
     };
-  }, [quoteRequest]);
+  }, [quoteRequest, quoteAttempt]);
+
+  const retryQuote = () => {
+    setQuoteAnswer(null);
+    setQuoteAttempt((n) => n + 1);
+  };
 
   const isQuoting = quoteRequest !== null && quoteAnswer?.request !== quoteRequest;
   // While a new quote loads, the last one stays on screen (the order button waits for it).
   const quote = formData.state && items.length > 0 ? (quoteAnswer?.quote ?? null) : null;
   const quoteError = !isQuoting && quoteRequest !== null ? (quoteAnswer?.error ?? null) : null;
 
+  const setField = (field: CheckoutField, value: string) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    setFieldErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  };
+  /** The attributes that tie a field to its message. */
+  const fieldErrorProps = (field: CheckoutField) =>
+    fieldErrors[field] ? { 'aria-invalid': true, 'aria-describedby': `${FIELD_INPUT_IDS[field]}-error` } : {};
+
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
+    if (resumeState !== 'idle') return;
 
     if (items.length === 0) {
       setSubmitError('Your cart is empty.');
@@ -288,6 +416,13 @@ function CheckoutSession({
       setSubmitError('Choose a delivery state we deliver to before placing your order.');
       return;
     }
+    const problems = validateCheckoutDetails(formData);
+    setFieldErrors(problems);
+    const firstProblem = CHECKOUT_FIELD_ORDER.find((field) => problems[field]);
+    if (firstProblem) {
+      document.getElementById(FIELD_INPUT_IDS[firstProblem])?.focus();
+      return;
+    }
 
     setIsSubmitting(true);
     const orderPayload = {
@@ -295,7 +430,7 @@ function CheckoutSession({
       items: checkoutItems(),
       shipping_address: {
         full_name: formData.fullName.trim(),
-        phone: formData.phone.trim(),
+        phone: cleanPhone(formData.phone),
         address_line1: formData.address.trim(),
         city: formData.city.trim(),
         state: formData.state,
@@ -317,6 +452,7 @@ function CheckoutSession({
 
       idempotencyKeyRef.current = null;
       idempotencySignatureRef.current = null;
+      clearCheckoutDraft();
       saveGuestToken(placed.order_number, placed.guest_access_token);
       // The cart stays as it is until payment is verified; remember which order it belongs to.
       savePendingOrder({
@@ -345,7 +481,10 @@ function CheckoutSession({
       });
       setStep('payment');
     } catch (err) {
-      setSubmitError(errorMessage(err, 'We could not place your order. Please review your details and try again.'));
+      // A 422 can say which detail the server refused: shown on that field, and at the top.
+      const details = err instanceof ApiError && err.statusCode === 422 ? err.details : undefined;
+      setFieldErrors(checkoutFieldErrorsFrom(details));
+      setSubmitError(firstValidationMessage(details) ?? errorMessage(err, 'We could not place your order. Please review your details and try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -393,6 +532,7 @@ function CheckoutSession({
       const res = await apiInitializePayment(order.order_number, order.guest_access_token, redirectUrl, selectedMethod);
 
       if (selectedMethod === 'whatsapp') {
+        if (!whatsappInvoice) throw new Error('The store has no WhatsApp number at the moment. Please choose another way to pay, or contact the store.');
         if (whatsappTab) whatsappTab.location.href = whatsappInvoice;
         else window.location.href = whatsappInvoice;
         markInvoiceSent(order.order_number);
@@ -447,22 +587,42 @@ function CheckoutSession({
     }
   };
 
-  const startOver = () => {
-    if (order) {
-      // Give the order's items back now if no payment was started for it (the server decides).
-      // Best effort: if this fails, the order still releases them at its deadline.
-      apiReleaseOrder(order.order_number, readGuestToken(order.order_number)).catch(() => {});
-      clearPendingOrder(order.order_number);
+  const expiresLabel = formatShopDeadline(order?.expires_at);
+
+  // Going back gives the order's items up if no payment was started for it (the server decides).
+  // Until it has said so the order is still this cart's, so it isn't forgotten: another order now
+  // would be a duplicate, and could be paid for twice.
+  const startOver = async () => {
+    if (!order) {
+      setStep('details');
+      return;
     }
+    setIsReleasing(true);
+    setPaymentError(null);
+    try {
+      const { released } = await apiReleaseOrder(order.order_number, readGuestToken(order.order_number));
+      if (!released) {
+        setPaymentError(
+          `A payment was already started for this order, so its delivery details can't be changed here. You can finish paying${expiresLabel ? ` by ${expiresLabel}` : ''}, or contact the store to change them.`
+        );
+        return;
+      }
+    } catch (err) {
+      if (!(err instanceof ApiError && (err.statusCode === 403 || err.statusCode === 404))) {
+        setPaymentError(errorMessage(err, 'We could not reach the store just now. Please try again in a moment.'));
+        return;
+      }
+      // The order is gone, or isn't this device's: nothing to give back.
+    } finally {
+      setIsReleasing(false);
+    }
+    clearPendingOrder(order.order_number);
     setOrder(null);
     setStep('details');
   };
 
-  const expiresLabel = order?.expires_at
-    ? new Date(order.expires_at.replace(' ', 'T')).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })
-    : null;
-
   const zones = quote?.eligible_zones ?? [];
+  const itemCount = quote?.total_quantity ?? items.reduce((n, i) => n + i.quantity, 0);
   const methodAccent: Record<PaymentMethodId, string> = {
     monnify: 'bg-[#002244] hover:bg-[#001730]',
     kora: 'bg-[#055B5C] hover:bg-[#044748]',
@@ -506,9 +666,18 @@ function CheckoutSession({
             </div>
 
             {submitError && (
-              <div role="alert" className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2 text-sm text-red-800">
+              <div ref={submitErrorRef} tabIndex={-1} role="alert" className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2 text-sm text-red-800 outline-none">
                 <HugeiconsIcon icon={AlertCircleIcon} size={16} className="shrink-0 mt-0.5 text-red-600" aria-hidden="true" />
                 <span>{submitError}</span>
+              </div>
+            )}
+
+            {resumeState === 'failed' && (
+              <div role="alert" className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-900">
+                We could not check the order you already started, so we have not placed another one.
+                <button type="button" onClick={retryResume} className="block mt-2 font-semibold underline underline-offset-2">
+                  Try again
+                </button>
               </div>
             )}
 
@@ -519,26 +688,34 @@ function CheckoutSession({
               <div>
                 <label htmlFor="co-name" className={labelClass}>Full name</label>
                 <input id="co-name" type="text" required autoComplete="name" value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} className={fieldClass} />
+                  {...fieldErrorProps('fullName')}
+                  onChange={(e) => setField('fullName', e.target.value)} className={fieldClass} />
+                <FieldError id="co-name-error" message={fieldErrors.fullName} />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label htmlFor="co-phone" className={labelClass}>Phone number</label>
                   <input id="co-phone" type="tel" required autoComplete="tel" inputMode="tel" placeholder="080..." value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className={fieldClass} />
+                    {...fieldErrorProps('phone')}
+                    onChange={(e) => setField('phone', e.target.value)} className={fieldClass} />
+                  <FieldError id="co-phone-error" message={fieldErrors.phone} />
                 </div>
                 <div>
                   <label htmlFor="co-email" className={labelClass}>Email</label>
                   <input id="co-email" type="email" required autoComplete="email" value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })} className={fieldClass} />
+                    {...fieldErrorProps('email')}
+                    onChange={(e) => setField('email', e.target.value)} className={fieldClass} />
+                  <FieldError id="co-email-error" message={fieldErrors.email} />
                 </div>
               </div>
 
               <div>
                 <label htmlFor="co-address" className={labelClass}>Street address</label>
                 <input id="co-address" type="text" required autoComplete="street-address" placeholder="House number, street, area"
-                  value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} className={fieldClass} />
+                  {...fieldErrorProps('address')}
+                  value={formData.address} onChange={(e) => setField('address', e.target.value)} className={fieldClass} />
+                <FieldError id="co-address-error" message={fieldErrors.address} />
                 <DeliveryPin
                   value={formData.location}
                   onChange={(location) => setFormData((f) => ({ ...f, location }))}
@@ -551,9 +728,13 @@ function CheckoutSession({
                   <select
                     id="co-state"
                     required
-                    aria-describedby="co-delivery-status"
+                    aria-invalid={fieldErrors.state ? true : undefined}
+                    aria-describedby={fieldErrors.state ? 'co-state-error co-delivery-status' : 'co-delivery-status'}
                     value={formData.state}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, state: e.target.value, selectedZoneId: undefined }))}
+                    onChange={(e) => {
+                      setField('state', e.target.value);
+                      setFormData((prev) => ({ ...prev, selectedZoneId: undefined }));
+                    }}
                     className={`${fieldClass} cursor-pointer`}
                   >
                     <option value="" disabled>Select state</option>
@@ -561,11 +742,14 @@ function CheckoutSession({
                       <option key={st} value={st}>{st === 'FCT' ? 'Abuja (FCT)' : st}</option>
                     ))}
                   </select>
+                  <FieldError id="co-state-error" message={fieldErrors.state} />
                 </div>
                 <div>
                   <label htmlFor="co-city" className={labelClass}>City / town</label>
                   <input id="co-city" type="text" required autoComplete="address-level2" value={formData.city}
-                    onChange={(e) => setFormData({ ...formData, city: e.target.value })} className={fieldClass} />
+                    {...fieldErrorProps('city')}
+                    onChange={(e) => setField('city', e.target.value)} className={fieldClass} />
+                  <FieldError id="co-city-error" message={fieldErrors.city} />
                 </div>
               </div>
 
@@ -593,6 +777,9 @@ function CheckoutSession({
                         Remove code {appliedPromo.code} and continue without it
                       </button>
                     )}
+                    <button type="button" onClick={retryQuote} className="block mt-2 font-semibold underline underline-offset-2">
+                      Try again
+                    </button>
                   </div>
                 ) : zones.length > 1 ? (
                   <fieldset className="space-y-1.5">
@@ -632,7 +819,7 @@ function CheckoutSession({
 
               <div className="pt-2.5 border-t border-neutral-100 space-y-1.5 text-sm text-neutral-700">
                 <div className="flex justify-between">
-                  <span>Subtotal ({quote?.total_quantity ?? items.reduce((n, i) => n + i.quantity, 0)} items)</span>
+                  <span>Subtotal ({itemCount} {itemCount === 1 ? 'item' : 'items'})</span>
                   <span className="font-semibold text-black">
                     {formatPrice(quote ? quote.subtotal : items.reduce((acc, i) => acc + i.price * i.quantity, 0))}
                   </span>
@@ -658,7 +845,7 @@ function CheckoutSession({
 
                 <button
                   type="submit"
-                  disabled={isSubmitting || isQuoting || !quote?.shipping_zone}
+                  disabled={isSubmitting || isQuoting || !quote?.shipping_zone || resumeState !== 'idle'}
                   aria-describedby={!quote?.shipping_zone ? 'co-delivery-status' : undefined}
                   className="w-full bg-black text-white hover:bg-neutral-800 disabled:opacity-50 font-bold py-3.5 rounded-full text-sm transition-all shadow-md mt-2 flex items-center justify-center gap-2"
                 >
@@ -809,8 +996,8 @@ function CheckoutSession({
             ))}
 
             <div className="flex items-center justify-between gap-2 text-xs">
-              <button type="button" onClick={startOver} disabled={busy} className="text-neutral-700 underline hover:no-underline disabled:opacity-50">
-                Change delivery details
+              <button type="button" onClick={() => void startOver()} disabled={busy} className="text-neutral-700 underline hover:no-underline disabled:opacity-50">
+                {isReleasing ? 'Changing…' : 'Change delivery details'}
               </button>
               <button type="button" onClick={handleClose} disabled={busy} className="text-neutral-700 underline hover:no-underline disabled:opacity-50">
                 Pay later

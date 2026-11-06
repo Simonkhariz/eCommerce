@@ -11,6 +11,8 @@ import { Printer, Download } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import { formatPrice } from '@/lib/currency';
 import { API_BASE_URL, ApiError, apiInitializePayment, apiMarkPaymentSent, errorMessage } from '@/lib/api-client';
+import { shouldRetryQuery } from '@/lib/query-client';
+import { parseShopTime } from '@/lib/shop-time';
 import { POLL_DELAYS, paymentKeys, paymentOrderQuery, paymentStatusQuery, paymentViewFor, type PaymentView } from '@/lib/payment-queries';
 import { LIVE_VERIFY_DELAYS, MAX_RECONNECTS, RECONNECT_MS, isNewerState, openPaymentStream, type LiveState } from '@/lib/live-payment';
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptUrl, formatSupportPhone, whatsAppOrderFrom } from '@/lib/whatsapp';
@@ -82,7 +84,10 @@ function CheckoutCallbackContent() {
     enabled: hydrated && !!orderNumber,
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (!data || query.state.status === 'error' || paymentViewFor(data) !== 'pending') return false;
+      if (!data || paymentViewFor(data) !== 'pending') return false;
+      // One failed check doesn't end the wait: the last answer stays on screen and the page keeps
+      // asking, unless the server refused the question (no access any more).
+      if (query.state.status === 'error') return shouldRetryQuery(0, query.state.error) ? 15000 : false;
       // The customer said they sent a WhatsApp transfer: watch until the store confirms it, however
       // long that takes (reading our own database only; the live stream, when on, is quicker).
       if (data.provider === 'whatsapp' && data.customer_marked_paid) return liveMode ? 30000 : 15000;
@@ -98,22 +103,26 @@ function CheckoutCallbackContent() {
   const pollIndex = Math.max(0, answers - 1 - pollBase);
   // Waiting for the store to confirm a WhatsApp transfer the customer reported.
   const awaitingConfirmation = !!result && paymentViewFor(result) === 'pending' && result.provider === 'whatsapp' && result.customer_marked_paid === true;
-  const checkingAutomatically = awaitingConfirmation || live === 'open' || pollIndex < delays.length;
+  const checkRefused = status.status === 'error' && !shouldRetryQuery(0, status.error);
+  const checkingAutomatically = !checkRefused && (awaitingConfirmation || live === 'open' || pollIndex < delays.length);
   const isRefreshing = status.isFetching;
+  // An answer already received beats a later failed check.
   const view: ViewState = !orderNumber
     ? 'error'
-    : status.status === 'error'
-      ? 'error'
-      : result
-        ? paymentViewFor(result)
+    : result
+      ? paymentViewFor(result)
+      : status.status === 'error'
+        ? 'error'
         : 'checking';
   const message = !orderNumber
     ? 'This page is missing the order number. Use "Track order" with your order number and email instead.'
-    : status.status === 'error'
-      ? status.error instanceof ApiError && status.error.statusCode === 404
-        ? 'We could not open this order from this device. Enter the access key from your order confirmation, or use "Track order" with your email.'
-        : errorMessage(status.error, 'We could not check the payment right now.')
-      : (result?.message ?? null);
+    : result
+      ? (result.message ?? null)
+      : status.status === 'error'
+        ? status.error instanceof ApiError && status.error.statusCode === 404
+          ? 'We could not open this order from this device. Enter the access key from your order confirmation, or use "Track order" with your email.'
+          : errorMessage(status.error, 'We could not check the payment right now.')
+        : null;
 
   // Receipt details: asked once while the payment is open, and again once it is paid.
   const orderDetails = useQuery({
@@ -134,7 +143,7 @@ function CheckoutCallbackContent() {
     // one the order was placed from, so its cart is left as it is.
     if (!token && lookupEmail) return;
     const paidOrder = orderDetails.data ?? null;
-    const paidAtMs = new Date(String(result?.verified_at || paidOrder?.payment?.verified_at || '').replace(' ', 'T')).getTime();
+    const paidAtMs = parseShopTime(result?.verified_at || paidOrder?.payment?.verified_at).getTime();
     const recent = Number.isFinite(paidAtMs) && Date.now() - paidAtMs < 2 * 24 * 60 * 60 * 1000;
     completePaidOrder(
       orderNumber,
@@ -221,6 +230,15 @@ function CheckoutCallbackContent() {
     window.history.replaceState(null, '', `/checkout/callback?order=${encodeURIComponent(orderNumber)}${reference ? `&reference=${encodeURIComponent(reference)}` : ''}`);
   }, [orderNumber, reference, searchParams]);
 
+  // Back from the gateway with the page restored as it was left: the button is free again.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setRetrying(false);
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+
   const handleRetryPayment = async (retryMethod: string) => {
     if (!orderNumber) return;
     setRetrying(retryMethod);
@@ -239,6 +257,7 @@ function CheckoutCallbackContent() {
           order ? whatsAppOrderFrom(order) : { order_number: orderNumber, grand_total: Number(res.amount) },
           supportPhone
         );
+        if (!url) throw new Error('The store has no WhatsApp number at the moment. Please choose another way to pay, or contact the store.');
         if (whatsappTab) whatsappTab.location.href = url;
         else window.location.href = url;
         markInvoiceSent(orderNumber);
@@ -257,21 +276,25 @@ function CheckoutCallbackContent() {
   // WhatsApp transfers are confirmed by the store by hand: "Mark as paid" asks the server, which
   // opens the receipt once the store has confirmed, and otherwise says it is still awaited.
   const handleMarkPaid = async () => {
+    setRetryError(null);
     const answer = await checkAgain();
-    const paymentStatus = answer?.isSuccess ? answer.data.status : null;
-    if (paymentStatus !== 'successful') {
-      // Not confirmed yet: tell the store the transfer was sent (it emails the admins). The page
-      // then shows "Awaiting confirmation" and opens the receipt once the store confirms.
-      if (paymentStatus === 'pending') {
-        const sent = await apiMarkPaymentSent(orderNumber, token, token ? undefined : lookupEmail).catch(() => null);
-        if (sent) {
-          void checkAgain();
-          return;
-        }
+    const latest = answer?.isSuccess ? answer.data : null;
+    // Confirmed, or too late: the page now shows the receipt or explains the cancelled order.
+    if (latest && (latest.status === 'successful' || latest.order_status === 'cancelled')) return;
+    if (latest) {
+      // Not confirmed yet (also after an earlier card attempt failed): tell the store the transfer
+      // was sent (it emails the admins). The page then shows "Awaiting confirmation" and opens the
+      // receipt once the store confirms.
+      try {
+        await apiMarkPaymentSent(orderNumber, token, token ? undefined : lookupEmail);
+        void checkAgain();
+        return;
+      } catch (err) {
+        setRetryError(errorMessage(err, 'We could not reach the store just now. Please try again in a moment.'));
       }
-      setAwaitingFlash(true);
-      setTimeout(() => setAwaitingFlash(false), 3000);
     }
+    setAwaitingFlash(true);
+    setTimeout(() => setAwaitingFlash(false), 3000);
   };
 
   const handleSaveJpeg = async () => {
@@ -292,6 +315,13 @@ function CheckoutCallbackContent() {
   };
 
   const supportLabel = formatSupportPhone(supportPhone);
+  const hasWhatsApp = supportLabel !== '';
+  // Where the WhatsApp links would go when the store has no number set.
+  const contactStoreLink = (
+    <Link href="/contact" className="block w-full bg-neutral-100 hover:bg-neutral-200 font-semibold py-3 rounded-full text-sm">
+      Contact the store
+    </Link>
+  );
   const paidAt = result?.verified_at || order?.payment?.verified_at || null;
   const receiptDate = paidAt || order?.created_at || null;
   const formatDate = (value: string) =>
@@ -419,7 +449,7 @@ function CheckoutCallbackContent() {
 
               <div className="bg-[#FAFAFA] rounded-2xl p-4 text-sm text-neutral-700 text-left space-y-3">
                 {order && order.items.length > 0 && (
-                  <ul className="divide-y divide-neutral-100 max-h-36 overflow-y-auto">
+                  <ul className="divide-y divide-neutral-100">
                     {order.items.map((item) => (
                       <li key={item.id} className="py-2 flex items-center justify-between gap-2">
                         <div className="min-w-0">
@@ -494,21 +524,23 @@ function CheckoutCallbackContent() {
                 <button type="button" onClick={handleSaveJpeg} disabled={isSavingJpeg} className="p-3 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-full disabled:opacity-50" aria-label="Save receipt as image">
                   <Download className="w-4 h-4" />
                 </button>
-                <a
-                  href={buildWhatsAppReceiptUrl(
-                    {
-                      ...(order ? whatsAppOrderFrom(order) : { order_number: orderNumber }),
-                      grand_total: Number(result?.amount ?? order?.grand_total ?? 0),
-                    },
-                    supportPhone
-                  )}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-3 bg-neutral-100 hover:bg-neutral-200 text-[#128C7E] rounded-full"
-                  aria-label="Send receipt to the store on WhatsApp"
-                >
-                  <WhatsAppIcon />
-                </a>
+                {hasWhatsApp && (
+                  <a
+                    href={buildWhatsAppReceiptUrl(
+                      {
+                        ...(order ? whatsAppOrderFrom(order) : { order_number: orderNumber }),
+                        grand_total: Number(result?.amount ?? order?.grand_total ?? 0),
+                      },
+                      supportPhone
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-3 bg-neutral-100 hover:bg-neutral-200 text-[#128C7E] rounded-full"
+                    aria-label="Send receipt to the store on WhatsApp"
+                  >
+                    <WhatsAppIcon />
+                  </a>
+                )}
                 <Link href="/category" className="text-sm font-semibold text-neutral-700 hover:text-black pl-2">
                   Continue shopping
                 </Link>
@@ -577,15 +609,17 @@ function CheckoutCallbackContent() {
                 </button>
               )}
               {!awaitingConfirmation && (result?.status === 'not_started' || !checkingAutomatically) && retryPanel}
-              <a
-                href={buildWhatsAppMessageUrl(`Hello! I paid for order ${orderNumber} (reference ${result?.provider_reference || reference || 'n/a'}) and it is still pending. Can you check?`, supportPhone)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100 font-semibold py-3 rounded-full text-sm flex items-center justify-center gap-2"
-              >
-                <WhatsAppIcon className="w-4 h-4 text-[#128C7E]" />
-                <span>Ask the store on WhatsApp ({supportLabel})</span>
-              </a>
+              {hasWhatsApp ? (
+                <a
+                  href={buildWhatsAppMessageUrl(`Hello! I paid for order ${orderNumber} (reference ${result?.provider_reference || reference || 'n/a'}) and it is still pending. Can you check?`, supportPhone)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100 font-semibold py-3 rounded-full text-sm flex items-center justify-center gap-2"
+                >
+                  <WhatsAppIcon className="w-4 h-4 text-[#128C7E]" />
+                  <span>Ask the store on WhatsApp ({supportLabel})</span>
+                </a>
+              ) : contactStoreLink}
             </div>
           </div>
         )}
@@ -628,7 +662,7 @@ function CheckoutCallbackContent() {
                 </>
               )}
             </p>
-            {awaitingWhatsApp && (
+            {awaitingWhatsApp && (hasWhatsApp ? (
               <a
                 href={buildWhatsAppMessageUrl(`Hello! Order ${orderNumber} was cancelled, but I sent the transfer. Here is my bank receipt.`, supportPhone)}
                 target="_blank"
@@ -638,7 +672,7 @@ function CheckoutCallbackContent() {
                 <WhatsAppIcon className="w-4 h-4 text-[#128C7E]" />
                 <span>I sent the transfer: message the store</span>
               </a>
-            )}
+            ) : contactStoreLink)}
             <Link
               href="/cart"
               onClick={() => clearPendingOrder(orderNumber)}
@@ -659,15 +693,17 @@ function CheckoutCallbackContent() {
               We received your payment for <strong className="font-mono">{orderNumber}</strong>, but the order had already expired.
               The store has been alerted and will refund you or complete the order. You don&apos;t need to pay again.
             </p>
-            <a
-              href={buildWhatsAppMessageUrl(`Hello! My payment for order ${orderNumber} (reference ${result?.provider_reference || reference}) arrived after the order expired. Please help.`, supportPhone)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100 font-semibold py-3 rounded-full text-sm flex items-center justify-center gap-2"
-            >
-              <WhatsAppIcon className="w-4 h-4 text-[#128C7E]" />
-              <span>Contact the store ({supportLabel})</span>
-            </a>
+            {hasWhatsApp ? (
+              <a
+                href={buildWhatsAppMessageUrl(`Hello! My payment for order ${orderNumber} (reference ${result?.provider_reference || reference}) arrived after the order expired. Please help.`, supportPhone)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100 font-semibold py-3 rounded-full text-sm flex items-center justify-center gap-2"
+              >
+                <WhatsAppIcon className="w-4 h-4 text-[#128C7E]" />
+                <span>Contact the store ({supportLabel})</span>
+              </a>
+            ) : contactStoreLink}
           </div>
         )}
       </div>

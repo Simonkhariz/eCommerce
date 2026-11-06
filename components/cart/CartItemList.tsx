@@ -132,7 +132,9 @@ export const CartItemList: React.FC = () => {
                     {typeof item.maxStock === 'number' && item.maxStock <= 5 ? (
                       <span className="text-xs text-amber-800">Only {item.maxStock} left</span>
                     ) : atMax ? (
-                      <span className="text-xs text-neutral-600">Maximum {maxQty} per order</span>
+                      <span className="text-xs text-neutral-600">
+                        {maxQty < MAX_QUANTITY_PER_LINE ? `Only ${maxQty} in stock` : `Maximum ${maxQty} per order`}
+                      </span>
                     ) : null}
                   </div>
                 </div>

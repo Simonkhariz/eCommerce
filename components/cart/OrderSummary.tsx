@@ -13,9 +13,11 @@ import { formatPrice } from '@/lib/currency';
 
 interface OrderSummaryProps {
   onCheckout: () => void;
+  /** Prices and stock are being checked: checkout waits for the answer. */
+  isChecking?: boolean;
 }
 
-export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
+export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout, isChecking = false }) => {
   const {
     items,
     subtotal,
@@ -144,11 +146,11 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout }) => {
       {/* Checkout CTA */}
       <button
         type="button"
-        disabled={items.length === 0}
+        disabled={items.length === 0 || isChecking}
         onClick={onCheckout}
         className="w-full bg-black text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-black font-semibold py-4 rounded-full transition-all shadow-lg flex items-center justify-center gap-2 text-sm sm:text-base group"
       >
-        <span>Go to checkout</span>
+        <span>{isChecking ? 'Checking your cart…' : 'Go to checkout'}</span>
         <HugeiconsIcon
           icon={ArrowRight01Icon}
           size={20}

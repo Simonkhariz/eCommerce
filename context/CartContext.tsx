@@ -17,7 +17,8 @@ import {
   type ValidatePromoResponse,
 } from '@/lib/api-client';
 import { useAuth } from '@/context/AuthContext';
-import { clearPendingOrder, isOrderSettled, markOrderSettled, readGuestToken, readPendingOrder } from '@/lib/pending-order';
+import { clearPendingOrder, isOrderSettled, markOrderSettled, readGuestToken, readPendingOrder, signatureQuantities } from '@/lib/pending-order';
+import { withAddedLines, type AddedLine } from '@/lib/cart-lines';
 
 interface ToastMessage {
   id: string;
@@ -41,6 +42,8 @@ export const MAX_QUANTITY_PER_LINE = 20;
 
 interface CartContextType {
   items: CartItem[];
+  /** False while the saved cart is loading: `items` is not the shopper's cart yet. */
+  isLoaded: boolean;
   addToCart: (product: Product, variant: ProductVariant, quantity?: number) => void;
   removeFromCart: (cartItemId: string) => void;
   updateQuantity: (cartItemId: string, quantity: number) => void;
@@ -140,11 +143,7 @@ function mergeCarts(a: CartItem[], b: CartItem[]): CartItem[] {
 
 /** Take the lines of a paid order (its "variant:quantity" cart signature) out of the cart. */
 function removeOrderedLines(items: CartItem[], signature: string): CartItem[] {
-  const ordered = new Map<string, number>();
-  for (const part of signature.split('|')) {
-    const at = part.lastIndexOf(':');
-    if (at > 0) ordered.set(part.slice(0, at), (ordered.get(part.slice(0, at)) ?? 0) + (parseInt(part.slice(at + 1), 10) || 0));
-  }
+  const ordered = signatureQuantities(signature);
   return items
     .map((item) => {
       const key = String(item.variantId ?? item.id);
@@ -171,6 +170,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loadedKey = useRef<string | null>(null);
   const loadedRef = useRef(false);
   loadedRef.current = isLoaded;
+  // Added to the cart before it finished loading: put back on top of what the load brings.
+  const addedWhileLoading = useRef<AddedLine[]>([]);
   /** Counts cart changes, so a finished save knows whether a newer change is still unsaved. */
   const cartChange = useRef(0);
   const itemsRef = useRef<CartItem[]>([]);
@@ -223,7 +224,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (!cancelled) {
         loadedKey.current = cartStorageKey;
-        setItems(next);
+        const added = addedWhileLoading.current;
+        addedWhileLoading.current = [];
+        setItems(withAddedLines(next, added, MAX_QUANTITY_PER_LINE));
         setIsLoaded(true);
       }
     })();
@@ -338,24 +341,25 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const existing = itemsRef.current.find((i) => i.id === id);
     const newQuantity = Math.min(cap, (existing?.quantity ?? 0) + quantity);
+    const line: CartItem = {
+      id,
+      productId: product.id,
+      variantId: variant.id,
+      sku: variant.sku,
+      name: product.name,
+      slug: product.slug,
+      price: variant.price,
+      originalPrice: product.originalPrice,
+      image: product.images[0] || PRODUCT_IMAGE_PLACEHOLDER,
+      size: variant.size,
+      color: variant.color,
+      quantity: newQuantity,
+      maxStock: variant.stock,
+    };
+    if (!loadedRef.current) addedWhileLoading.current.push({ line, quantity });
 
     setItems((prev) => {
       const index = prev.findIndex((i) => i.id === id);
-      const line: CartItem = {
-        id,
-        productId: product.id,
-        variantId: variant.id,
-        sku: variant.sku,
-        name: product.name,
-        slug: product.slug,
-        price: variant.price,
-        originalPrice: product.originalPrice,
-        image: product.images[0] || PRODUCT_IMAGE_PLACEHOLDER,
-        size: variant.size,
-        color: variant.color,
-        quantity: newQuantity,
-        maxStock: variant.stock,
-      };
       if (index > -1) {
         const updated = [...prev];
         updated[index] = { ...prev[index], ...line };
@@ -531,6 +535,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const { lines } = await apiCheckCartLines(resolved.map((i) => i.variantId as number));
       const byVariant = new Map(lines.map((l) => [l.variant_id, l]));
+      // Placing an order takes its items out of stock while it waits for payment, but they are
+      // this shopper's own: they count as available, or the check would remove them from the
+      // cart the order was placed from (and the order could no longer be resumed).
+      const pendingOrder = readPendingOrder();
+      const reservedForMe = pendingOrder ? signatureQuantities(pendingOrder.cartSignature) : new Map<string, number>();
 
       const next: CartItem[] = [];
       for (const item of resolved) {
@@ -539,14 +548,15 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           notices.push(`${item.name} (${item.size}) is no longer available and was removed.`);
           continue;
         }
-        if (live.stock_quantity <= 0) {
+        const available = live.stock_quantity + (reservedForMe.get(String(item.variantId)) ?? 0);
+        if (available <= 0) {
           notices.push(`${item.name} (${item.size} / ${item.color.name}) sold out and was removed.`);
           continue;
         }
         let quantity = item.quantity;
-        if (quantity > live.stock_quantity) {
-          quantity = live.stock_quantity;
-          notices.push(`Only ${live.stock_quantity} left of ${item.name} (${item.size}); quantity updated.`);
+        if (quantity > available) {
+          quantity = available;
+          notices.push(`Only ${available} left of ${item.name} (${item.size}); quantity updated.`);
         }
         if (Math.abs(live.unit_price - item.price) >= 0.01) {
           notices.push(
@@ -560,7 +570,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           price: live.unit_price,
           originalPrice: live.original_price ?? undefined,
           quantity: Math.min(quantity, MAX_QUANTITY_PER_LINE),
-          maxStock: live.stock_quantity,
+          maxStock: available,
         });
       }
 
@@ -631,6 +641,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <CartContext.Provider
       value={{
         items,
+        isLoaded,
         addToCart,
         removeFromCart,
         updateQuantity,
