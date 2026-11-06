@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { InventoryRow, adminAdjustStock, adminGetInventory, adminGetInventoryLogs, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { formatDateTime, formatPrice, num } from '@/lib/admin-format';
+import { wholeNumber } from '@/lib/admin-logic';
 import {
   Button,
   DataState,
@@ -115,9 +116,10 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
   };
 
   const current = target ? num(target.stock_quantity) : 0;
-  const amount = parseInt(change, 10);
-  const validAmount = Number.isInteger(amount) && amount !== 0;
-  const resulting = current + (validAmount ? amount : 0);
+  // 2.5 or 1e3 is refused below, never cut down to +2 or +1.
+  const amount = wholeNumber(change) ?? 0;
+  const validAmount = amount !== 0;
+  const resulting = current + amount;
 
   const handleAdjust = async (e: React.FormEvent) => {
     e.preventDefault();

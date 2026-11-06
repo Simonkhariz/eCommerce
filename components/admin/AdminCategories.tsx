@@ -4,6 +4,7 @@ import React, { useRef, useState } from 'react';
 import Image from 'next/image';
 import { ImageOff, Plus, Upload } from 'lucide-react';
 import { canOptimizeImage } from '@/lib/image';
+import { wholeNumber } from '@/lib/admin-logic';
 import { apiUploadProductImage } from '@/lib/api-client';
 import { AdminCategory, adminDeactivateCategory, adminGetCategories, adminSaveCategory, errorMessage, fieldErrors } from '@/lib/admin-api';
 import {
@@ -61,8 +62,11 @@ export function AdminCategories() {
   const [uploading, setUploading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Counts each opening of the form, so a late upload can't land in a different category's form.
+  const formOpening = useRef(0);
 
   const openCreate = () => {
+    formOpening.current += 1;
     setEditing(null);
     setForm({ ...EMPTY_FORM, display_order: String(categories.length + 1) });
     setSlugTouched(false);
@@ -71,6 +75,7 @@ export function AdminCategories() {
   };
 
   const openEdit = (cat: AdminCategory) => {
+    formOpening.current += 1;
     setEditing(cat);
     setForm({
       name: cat.name,
@@ -91,10 +96,11 @@ export function AdminCategories() {
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const opening = formOpening.current;
     setUploading(true);
     try {
       const res = await apiUploadProductImage(file);
-      setForm((f) => ({ ...f, image_url: res.image_url }));
+      if (formOpening.current === opening) setForm((f) => ({ ...f, image_url: res.image_url }));
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The image could not be uploaded.'));
     } finally {
@@ -105,9 +111,12 @@ export function AdminCategories() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (uploading) return;
     const local: Record<string, string> = {};
     if (form.name.trim().length < 2) local.name = 'Use at least 2 characters.';
     if (!/^[a-z0-9-]+$/.test(form.slug.trim())) local.slug = 'Lowercase letters, numbers and dashes only.';
+    const displayOrder = wholeNumber(form.display_order.trim() || '0');
+    if (displayOrder === null || displayOrder < 0) local.display_order = 'Use a whole number, 0 or more.';
     setErrors(local);
     if (Object.keys(local).length) return;
 
@@ -118,7 +127,7 @@ export function AdminCategories() {
         slug: form.slug.trim(),
         description: form.description.trim(),
         image_url: form.image_url.trim(),
-        display_order: parseInt(form.display_order, 10) || 0,
+        display_order: displayOrder ?? 0,
         is_active: form.is_active,
       });
       toast.success(editing ? 'Category updated.' : 'Category created.');
@@ -251,14 +260,15 @@ export function AdminCategories() {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        busy={saving}
+        busy={saving || uploading}
+        persistent
         title={editing ? `Edit ${editing.name}` : 'New category'}
         footer={
           <>
-            <Button onClick={() => setOpen(false)} disabled={saving}>
+            <Button onClick={() => setOpen(false)} disabled={saving || uploading}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit" form="category-form" loading={saving}>
+            <Button variant="primary" type="submit" form="category-form" loading={saving} disabled={uploading}>
               {editing ? 'Save changes' : 'Create category'}
             </Button>
           </>
@@ -294,7 +304,7 @@ export function AdminCategories() {
                   placeholder="/uploads/… or https://…"
                 />
                 <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleUpload} aria-hidden="true" tabIndex={-1} />
-                <Button size="sm" onClick={() => fileRef.current?.click()} loading={uploading}>
+                <Button size="sm" onClick={() => fileRef.current?.click()} loading={uploading} disabled={saving}>
                   <Upload className="size-3.5" aria-hidden="true" />
                   Upload
                 </Button>

@@ -85,10 +85,10 @@ export function ShipOrderModal({ orderNumber, onClose, onShipped }: ShipOrderMod
     >
       <form id="ship-order-form" onSubmit={submit} className="grid gap-4" noValidate>
         <Field label="Courier" required error={errors.carrier}>
-          {(p) => <TextInput {...p} data-autofocus value={carrier} onChange={(e) => setCarrier(e.target.value)} placeholder="e.g. GIG Logistics" />}
+          {(p) => <TextInput {...p} data-autofocus maxLength={100} value={carrier} onChange={(e) => setCarrier(e.target.value)} placeholder="e.g. GIG Logistics" />}
         </Field>
         <Field label="Tracking number" required error={errors.tracking_number}>
-          {(p) => <TextInput {...p} value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} />}
+          {(p) => <TextInput {...p} maxLength={100} value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} />}
         </Field>
         <Field label="Tracking link" error={errors.tracking_url} hint="Optional. The courier's tracking page (https://…).">
           {(p) => <TextInput {...p} type="url" inputMode="url" value={trackingUrl} onChange={(e) => setTrackingUrl(e.target.value)} />}

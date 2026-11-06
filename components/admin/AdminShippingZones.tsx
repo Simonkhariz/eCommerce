@@ -310,6 +310,7 @@ function ZoneModal({
       open={!!editing}
       onClose={onClose}
       busy={saving}
+      persistent
       size="lg"
       title={editing?.id ? `Edit ${editing.zone.name}` : 'Add delivery zone'}
       footer={
@@ -325,7 +326,7 @@ function ZoneModal({
     >
       <form id="zone-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2" noValidate>
         <Field label="Name" required error={errors.name}>
-          {(p) => <TextInput {...p} data-autofocus value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. South East" />}
+          {(p) => <TextInput {...p} data-autofocus maxLength={100} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. South East" />}
         </Field>
         <Field label="Code" required error={errors.code} hint="Short unique code, e.g. SOUTH_EAST.">
           {(p) => <TextInput {...p} value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase().replace(/\s+/g, '_') }))} />}
@@ -341,7 +342,7 @@ function ZoneModal({
         </Field>
         <Field label="Delivery estimate" required error={errors.estimated_days} hint="Shown at checkout.">
           {(p) => (
-            <TextInput {...p} value={form.estimated_days} onChange={(e) => setForm((f) => ({ ...f, estimated_days: e.target.value }))} placeholder="2-4 business days" />
+            <TextInput {...p} maxLength={50} value={form.estimated_days} onChange={(e) => setForm((f) => ({ ...f, estimated_days: e.target.value }))} placeholder="2-4 business days" />
           )}
         </Field>
         <Field label="Description" className="sm:col-span-2" hint="Optional, for your own reference.">

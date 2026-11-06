@@ -12,6 +12,7 @@ import {
   type PromotionInput,
 } from '@/lib/admin-api';
 import { formatDate } from '@/lib/admin-format';
+import { wholeNumber } from '@/lib/admin-logic';
 import type { StatusTone } from '@/lib/order-status';
 import {
   Button,
@@ -276,8 +277,9 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const code = form.code.trim().toUpperCase();
-    const percent = parseInt(form.discount_percent, 10);
-    const maxUses = parseInt(form.max_uses || '0', 10);
+    // The server stores whole percents and whole use limits.
+    const percent = wholeNumber(form.discount_percent);
+    const maxUses = wholeNumber(form.max_uses.trim() || '0');
     // Money fields: empty means "none".
     const money = (v: string): number | null => (v.trim() === '' ? null : Number(v));
     const amount = money(form.discount_amount);
@@ -286,13 +288,13 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
     const fixed = form.discount_type === 'fixed';
     const local: Record<string, string> = {};
     if (!/^[A-Z0-9_-]{3,30}$/.test(code)) local.code = 'Use 3-30 letters, numbers, dashes or underscores.';
-    if (!fixed && (!Number.isFinite(percent) || percent < 1 || percent > 90)) local.discount_percent = 'Discount must be between 1% and 90%.';
+    if (!fixed && (percent === null || percent < 1 || percent > 90)) local.discount_percent = 'Enter a whole number from 1 to 90 (no decimals).';
     if (fixed && (amount === null || !Number.isFinite(amount) || amount <= 0)) local.discount_amount = 'Enter the amount to take off (above 0).';
     if (minOrder !== null && (!Number.isFinite(minOrder) || minOrder <= 0)) local.min_order_amount = 'Leave empty for no minimum, or enter an amount above 0.';
     if (!fixed && maxDiscount !== null && (!Number.isFinite(maxDiscount) || maxDiscount <= 0)) local.max_discount_amount = 'Leave empty for no cap, or enter an amount above 0.';
     if (fixed && minOrder === null && !local.min_order_amount) local.min_order_amount = 'A fixed-amount code needs a minimum order above the amount off.';
     if (fixed && amount !== null && minOrder !== null && amount >= minOrder) local.discount_amount = 'The amount off must be less than the minimum order.';
-    if (!Number.isFinite(maxUses) || maxUses < 0) local.max_uses = 'Use 0 for unlimited, or a positive limit.';
+    if (maxUses === null || maxUses < 0) local.max_uses = 'Use 0 for unlimited, or a whole number limit.';
     if (form.starts_at && form.expires_at && form.expires_at < form.starts_at) local.expires_at = 'The end date must be on or after the start date.';
     setErrors(local);
     if (Object.keys(local).length) return;
@@ -303,11 +305,11 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
         code,
         description: form.description.trim(),
         discount_type: form.discount_type,
-        discount_percent: fixed ? 0 : percent,
+        discount_percent: fixed ? 0 : (percent ?? 0),
         discount_amount: fixed ? amount : null,
         min_order_amount: minOrder,
         max_discount_amount: fixed ? null : maxDiscount,
-        max_uses: maxUses,
+        max_uses: maxUses ?? 0,
         is_active: form.is_active,
         starts_at: form.starts_at || null,
         expires_at: form.expires_at || null,
@@ -329,6 +331,7 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
       open={!!promotion}
       onClose={onClose}
       busy={saving}
+      persistent
       title={existing ? `Edit ${existing.code}` : 'New promo code'}
       footer={
         <>

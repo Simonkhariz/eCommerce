@@ -12,6 +12,7 @@ import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Info, Loader2, 
 import type { StatusTone } from '@/lib/order-status';
 import type { PaginationMeta } from '@/lib/admin-api';
 import { ApiError } from '@/lib/api-client';
+import { createModalStack, pastEndPage, searchBoxOnUrlChange } from '@/lib/admin-logic';
 
 // =============================================================================
 // Buttons
@@ -67,17 +68,30 @@ export interface ModalProps {
   size?: 'sm' | 'md' | 'lg';
   /** Block closing (e.g. while a request is in flight). */
   busy?: boolean;
+  /**
+   * Forms people fill in: only Cancel and the X close it, so a stray click on the backdrop or
+   * Escape can't throw the form away.
+   */
+  persistent?: boolean;
 }
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function Modal({ open, onClose, title, description, children, footer, size = 'md', busy = false }: ModalProps) {
+const modalStack = createModalStack(() => {
+  const previous = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  return () => {
+    document.body.style.overflow = previous;
+  };
+});
+
+export function Modal({ open, onClose, title, description, children, footer, size = 'md', busy = false, persistent = false }: ModalProps) {
   const titleId = useId();
   const descId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   // Escape always uses the latest onClose / busy without re-running the focus effect.
   const closeOnEscape = useEffectEvent((): boolean => {
-    if (busy) return false;
+    if (busy || persistent) return false;
     onClose();
     return true;
   });
@@ -88,8 +102,11 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     const panel = panelRef.current;
     const first = panel?.querySelector<HTMLElement>('[data-autofocus]') ?? panel?.querySelector<HTMLElement>(FOCUSABLE);
     (first ?? panel)?.focus();
+    const self = modalStack.enter();
 
     const onKey = (e: KeyboardEvent) => {
+      // A dialog over this one (a confirmation over an editor) answers the keys, not this one.
+      if (!modalStack.isTop(self)) return;
       if (e.key === 'Escape' && closeOnEscape()) {
         e.stopPropagation();
       }
@@ -108,11 +125,9 @@ export function Modal({ open, onClose, title, description, children, footer, siz
       }
     };
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      modalStack.leave(self);
       previouslyFocused?.focus?.();
     };
   }, [open]);
@@ -123,7 +138,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4">
-      <div className="animate-fade absolute inset-0 bg-black/40" onClick={() => !busy && onClose()} aria-hidden="true" />
+      <div className="animate-fade absolute inset-0 bg-black/40" onClick={() => !busy && !persistent && onClose()} aria-hidden="true" />
       <div
         ref={panelRef}
         role="dialog"
@@ -372,15 +387,6 @@ export function useUrlFilters<K extends string>(defaults: Record<K, string>) {
   return [values, set] as const;
 }
 
-export function useDebouncedValue<T>(value: T, delayMs = 300): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = window.setTimeout(() => setDebounced(value), delayMs);
-    return () => window.clearTimeout(id);
-  }, [value, delayMs]);
-  return debounced;
-}
-
 /**
  * Text for a list's search box, written to the URL filters (`search`) once typing pauses.
  * The box follows the URL too, so Back and Forward show the search that page was for.
@@ -388,31 +394,46 @@ export function useDebouncedValue<T>(value: T, delayMs = 300): T {
 export function useSearchBox(search: string, setFilters: (changes: { search: string }) => void, delayMs = 300) {
   const [text, setText] = useState(search);
   const [shownFor, setShownFor] = useState(search);
+  // What this box wrote that has not reached the URL yet (router.replace takes a moment).
+  const [pending, setPending] = useState<string[]>([]);
   if (search !== shownFor) {
     setShownFor(search);
-    // Our own update (a trimmed copy of the text) leaves the box alone, so a space typed
+    // Our own update leaves the box alone, so nothing typed since is lost, and a space typed
     // between words is not removed mid-typing.
-    if (search !== text.trim()) setText(search);
+    const next = searchBoxOnUrlChange(search, text, pending);
+    setPending(next.pending);
+    if (next.text !== text) setText(next.text);
   }
-  const debounced = useDebouncedValue(text, delayMs);
   const apply = useEffectEvent((value: string) => {
-    if (value.trim() !== search) setFilters({ search: value.trim() });
+    const wanted = value.trim();
+    if (wanted !== (pending.length > 0 ? pending[pending.length - 1] : search)) {
+      setPending((list) => [...list, wanted]);
+      setFilters({ search: wanted });
+    }
   });
   useEffect(() => {
-    apply(debounced);
-  }, [debounced]);
+    const id = window.setTimeout(() => apply(text), delayMs);
+    return () => window.clearTimeout(id);
+  }, [text, delayMs]);
   return [text, setText] as const;
 }
 
 /**
  * Load data for a screen and reload when `deps` change. Out-of-order responses are ignored.
  * Returns data, loading, error and a reload() for retry buttons and after mutations.
+ *
+ * A list answer ({items, pagination}) that is empty only because its page is past the end moves
+ * to the last page instead of showing a false "nothing here": through ?page= in the address, or
+ * through `onPastEnd` for a list that keeps its page elsewhere.
  */
-export function useAdminData<T>(loader: () => Promise<T>, deps: React.DependencyList) {
+export function useAdminData<T>(loader: () => Promise<T>, deps: React.DependencyList, options?: { onPastEnd?: (lastPage: number) => void }) {
+  const router = useRouter();
   // The latest loader, read only when a request starts (never during render).
   const loaderRef = useRef(loader);
+  const onPastEndRef = useRef(options?.onPastEnd);
   useLayoutEffect(() => {
     loaderRef.current = loader;
+    onPastEndRef.current = options?.onPastEnd;
   });
 
   // One request per dependency set (plain values: filters, page...) and per reload().
@@ -432,7 +453,23 @@ export function useAdminData<T>(loader: () => Promise<T>, deps: React.Dependency
       .current()
       .then(
         (data) => {
-          if (current) setResult({ key: depsKey, reloads, data, error: null });
+          if (!current) return;
+          // Past the end: what is on screen (or the spinner) stays until the last page's answer.
+          const lastPage = pastEndPage(data);
+          if (lastPage !== null) {
+            if (onPastEndRef.current) {
+              onPastEndRef.current(lastPage);
+              return;
+            }
+            const url = new URL(window.location.href);
+            if (url.searchParams.has('page')) {
+              if (lastPage > 1) url.searchParams.set('page', String(lastPage));
+              else url.searchParams.delete('page');
+              router.replace(url.pathname + url.search, { scroll: false });
+              return;
+            }
+          }
+          setResult({ key: depsKey, reloads, data, error: null });
         },
         (err) => {
           if (redirectIfSignedOut(err) || !current) return;
@@ -450,7 +487,7 @@ export function useAdminData<T>(loader: () => Promise<T>, deps: React.Dependency
     return () => {
       current = false;
     };
-  }, [depsKey, reloads]);
+  }, [depsKey, reloads, router]);
 
   // Loading until the answer for the current filters and reload count has arrived; the last
   // data stays on screen meanwhile.

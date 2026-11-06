@@ -16,6 +16,7 @@ import {
 } from '@/lib/api-client';
 import { adminGetCategories, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { formatPrice, num } from '@/lib/admin-format';
+import { splitUploads, uploadFailureMessage, wholeNumber } from '@/lib/admin-logic';
 import { slugify } from '@/components/admin/AdminCategories';
 import { ShareProductModal, type ShareableProduct } from '@/components/admin/ShareProductModal';
 import { AdminImage } from '@/components/admin/AdminImage';
@@ -221,6 +222,8 @@ export function ProductManagement() {
   const [uploading, setUploading] = useState(false);
   const [newImageUrl, setNewImageUrl] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  // Counts each opening of the editor, so a late upload can't land in a different product's form.
+  const editorOpening = useRef(0);
 
   const update = <K extends keyof ProductForm>(key: K, value: ProductForm[K]) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -228,6 +231,7 @@ export function ProductManagement() {
     setForm((f) => ({ ...f, variants: f.variants.map((v, i) => (i === index ? { ...v, ...changes } : v)) }));
 
   const openCreate = () => {
+    editorOpening.current += 1;
     setEditingId(null);
     setForm({ ...EMPTY_FORM, variants: [{ ...NEW_VARIANT }] });
     setSlugTouched(false);
@@ -238,6 +242,7 @@ export function ProductManagement() {
   };
 
   const openEdit = (p: AdminProduct) => {
+    editorOpening.current += 1;
     setEditingId(p.id);
     setForm(productToForm(p));
     setSlugTouched(true);
@@ -250,22 +255,26 @@ export function ProductManagement() {
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
+    const opening = editorOpening.current;
     setUploading(true);
     try {
-      const results = await Promise.all(files.map((f) => apiUploadProductImage(f)));
-      setForm((f) => {
-        const hasPrimary = f.images.some((i) => i.is_primary);
-        return {
-          ...f,
-          images: [
-            ...f.images,
-            ...results.map((r, i) => ({ image_url: r.image_url, alt_text: '', is_primary: !hasPrimary && i === 0 })),
-          ],
-        };
-      });
-      toast.success(results.length === 1 ? 'Photo uploaded.' : `${results.length} photos uploaded.`);
-    } catch (err) {
-      if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The photo could not be uploaded.'));
+      // One bad file must not cost the others: keep what worked and name what didn't.
+      const { uploaded, failed } = splitUploads(files, await Promise.allSettled(files.map((f) => apiUploadProductImage(f))));
+      if (editorOpening.current !== opening) return;
+      if (uploaded.length > 0) {
+        setForm((f) => {
+          const hasPrimary = f.images.some((i) => i.is_primary);
+          return {
+            ...f,
+            images: [
+              ...f.images,
+              ...uploaded.map((r, i) => ({ image_url: r.image_url, alt_text: '', is_primary: !hasPrimary && i === 0 })),
+            ],
+          };
+        });
+        toast.success(uploaded.length === 1 ? 'Photo uploaded.' : `${uploaded.length} photos uploaded.`);
+      }
+      if (failed.length > 0 && !failed.some((f) => redirectIfSignedOut(f.reason))) toast.error(uploadFailureMessage(failed));
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -328,8 +337,11 @@ export function ProductManagement() {
       const key = `${v.size.trim().toLowerCase()}|${v.color_name.trim().toLowerCase()}`;
       if (seen.has(key)) e[`variant_${i}`] = 'This size and colour is listed twice.';
       seen.add(key);
-      if (!v.id && !(Number.isInteger(Number(v.stock_quantity)) && Number(v.stock_quantity) >= 0)) {
-        e[`variant_${i}`] = 'Starting stock must be 0 or more.';
+      if (!v.id && !((wholeNumber(v.stock_quantity.trim() || '0') ?? -1) >= 0)) {
+        e[`variant_${i}`] = 'Starting stock must be a whole number, 0 or more.';
+      }
+      if (v.low_stock_threshold.trim() !== '' && !((wholeNumber(v.low_stock_threshold) ?? -1) >= 0)) {
+        e[`variant_${i}`] = 'The low-stock alert must be a whole number, 0 or more.';
       }
       if (v.price_override.trim() !== '' && !(parseFloat(v.price_override) > 0)) e[`variant_${i}`] = 'Variant price must be above 0.';
     });
@@ -338,6 +350,7 @@ export function ProductManagement() {
 
   const handleSave = async (ev: React.FormEvent) => {
     ev.preventDefault();
+    if (uploading) return;
     const local = validate();
     setErrors(local);
     setFormError(Object.keys(local).length ? 'Please fix the highlighted fields.' : null);
@@ -366,13 +379,13 @@ export function ProductManagement() {
         display_order: idx,
       })),
       variants: form.variants.map((v) => ({
-        ...(v.id ? { id: v.id } : { stock_quantity: Math.max(0, parseInt(v.stock_quantity, 10) || 0) }),
+        ...(v.id ? { id: v.id } : { stock_quantity: wholeNumber(v.stock_quantity) ?? 0 }),
         sku: v.sku.trim(),
         size: v.size.trim(),
         color_name: v.color_name.trim(),
         color_hex: v.color_hex,
         price_override: v.price_override.trim() ? Number(v.price_override) : null,
-        low_stock_threshold: Math.max(0, parseInt(v.low_stock_threshold, 10) || 0),
+        low_stock_threshold: wholeNumber(v.low_stock_threshold) ?? 0,
       })),
     };
 
@@ -603,16 +616,17 @@ export function ProductManagement() {
       <Modal
         open={editorOpen}
         onClose={() => setEditorOpen(false)}
-        busy={saving}
+        busy={saving || uploading}
+        persistent
         size="lg"
         title={editingId ? `Edit ${form.name || 'product'}` : 'New product'}
         description="Physical products only. Prices are in naira."
         footer={
           <>
-            <Button onClick={() => setEditorOpen(false)} disabled={saving}>
+            <Button onClick={() => setEditorOpen(false)} disabled={saving || uploading}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit" form="product-form" loading={saving}>
+            <Button variant="primary" type="submit" form="product-form" loading={saving} disabled={uploading}>
               {editingId ? 'Save product' : 'Create product'}
             </Button>
           </>
@@ -747,7 +761,7 @@ export function ProductManagement() {
                 aria-hidden="true"
                 tabIndex={-1}
               />
-              <Button size="sm" onClick={() => fileRef.current?.click()} loading={uploading}>
+              <Button size="sm" onClick={() => fileRef.current?.click()} loading={uploading} disabled={saving}>
                 <Upload className="size-3.5" aria-hidden="true" />
                 Upload photos
               </Button>
@@ -911,6 +925,7 @@ export function ProductManagement() {
                           <span className={VARIANT_LABEL}>Colour</span>
                           <input
                             aria-label={`${label} colour name`}
+                            maxLength={50}
                             value={v.color_name}
                             onChange={(e) => updateVariant(idx, { color_name: e.target.value })}
                             placeholder="e.g. Navy"

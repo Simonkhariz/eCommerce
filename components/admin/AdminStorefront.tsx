@@ -281,12 +281,13 @@ function BannerModal({ id, initial, onClose, onSaved }: { id: number | null; ini
     <Modal
       open
       onClose={onClose}
-      busy={saving}
+      busy={saving || uploading}
+      persistent
       title={id ? 'Edit banner' : 'New banner'}
       size="lg"
       footer={
         <>
-          <Button onClick={onClose} disabled={saving}>
+          <Button onClick={onClose} disabled={saving || uploading}>
             Cancel
           </Button>
           <Button variant="primary" type="submit" form="banner-form" loading={saving} disabled={uploading}>

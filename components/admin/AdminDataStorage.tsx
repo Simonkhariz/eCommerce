@@ -348,7 +348,7 @@ function cellValue(column: DataRecordColumn, value: string | number | null): Rea
 /** The exact records one rule would remove, page by page. */
 function RecordsDialog({ rule, label, asOf, onClose }: { rule: string; label: string; asOf: string; onClose: () => void }) {
   const [page, setPage] = useState(1);
-  const { data, loading, error, reload } = useAdminData(() => adminGetDataRecords(rule, asOf, page), [rule, asOf, page]);
+  const { data, loading, error, reload } = useAdminData(() => adminGetDataRecords(rule, asOf, page), [rule, asOf, page], { onPastEnd: setPage });
   const right = (c: DataRecordColumn) => c.type === 'money' || c.type === 'number';
 
   return (
