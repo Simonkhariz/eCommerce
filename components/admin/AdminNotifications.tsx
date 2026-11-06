@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { RefreshCw, RotateCcw, Send } from 'lucide-react';
+import { ApiError } from '@/lib/api-client';
 import { adminGetOutbox, adminGetOutboxStatus, adminProcessOutbox, adminRetryOutbox, errorMessage, OutboxRow } from '@/lib/admin-api';
 import { formatDateTime, formatRelative, humanize } from '@/lib/admin-format';
 import {
@@ -60,6 +61,11 @@ export function AdminNotifications() {
       await Promise.all([reload(), reloadStatus()]);
     } catch (err) {
       if (redirectIfSignedOut(err)) return;
+      if (err instanceof ApiError && err.errorCode === 'TIMEOUT') {
+        toast.error('The server did not answer within 2 minutes. It may still be sending, so some emails may have gone out: the list below shows where things stand.');
+        void Promise.all([reload(), reloadStatus()]);
+        return;
+      }
       toast.error(errorMessage(err, 'The queue could not be processed.'));
     } finally {
       setProcessing(false);
@@ -71,7 +77,7 @@ export function AdminNotifications() {
     try {
       const res = await adminRetryOutbox(row.id);
       toast.success(res.message || `Email to ${row.recipient_email} sent.`);
-      await reload();
+      await Promise.all([reload(), reloadStatus()]);
     } catch (err) {
       if (redirectIfSignedOut(err)) return;
       toast.error(errorMessage(err, 'The email could not be re-sent.'));
@@ -93,7 +99,14 @@ export function AdminNotifications() {
               <Send className="size-3.5" aria-hidden="true" />
               Send queued now{mail ? ` (${mail.outbox_pending})` : ''}
             </Button>
-            <Button onClick={reload} loading={loading && !!data} aria-label="Refresh list">
+            <Button
+              onClick={() => {
+                reload();
+                reloadStatus();
+              }}
+              loading={loading && !!data}
+              aria-label="Refresh list"
+            >
               <RefreshCw className="size-3.5" aria-hidden="true" />
             </Button>
           </>

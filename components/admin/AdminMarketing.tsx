@@ -84,7 +84,11 @@ export function AdminMarketing() {
       if (err instanceof ApiError && err.errorCode === 'RECIPIENTS_CHANGED') {
         reload();
       }
-      toast.error(errorMessage(err));
+      toast.error(
+        err instanceof ApiError && err.errorCode === 'TIMEOUT'
+          ? 'The server did not answer within 2 minutes. The broadcast may still be queuing: check the Email outbox before sending again. Anyone who already has this newsletter today won’t get it twice.'
+          : errorMessage(err)
+      );
     } finally {
       setSending(false);
     }

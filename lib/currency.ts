@@ -8,13 +8,19 @@ export const STORE_CURRENCY_SYMBOL = '₦';
 
 /**
  * Format a numeric amount into Nigerian Naira (₦).
- * e.g., 14500 -> "₦14,500"
+ * Kobo are shown only when the amount has them, so a total is never rounded away from what is
+ * actually owed (a percentage coupon can leave kobo).
+ * e.g., 14500 -> "₦14,500", 11110.5 -> "₦11,110.50"
  */
 export function formatPrice(amount: number | null | undefined): string {
   if (amount === null || amount === undefined || isNaN(amount)) {
     return '₦0';
   }
-  const formatted = Math.round(amount).toLocaleString('en-NG');
+  const kobo = Math.round(amount * 100);
+  const formatted = (kobo / 100).toLocaleString('en-NG', {
+    minimumFractionDigits: kobo % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
   return `${STORE_CURRENCY_SYMBOL}${formatted}`;
 }
 

@@ -264,7 +264,7 @@ export function clearApiCache(): void {
  */
 async function fetchFullFromApi<T>(
   endpoint: string,
-  options?: RequestInit
+  options?: RequestInit & { timeoutMs?: number }
 ): Promise<ApiResponse<T>> {
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   const url = `${API_BASE_URL}${path}`;
@@ -279,7 +279,7 @@ async function fetchFullFromApi<T>(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  const timeoutId = setTimeout(() => controller.abort(), options?.timeoutMs ?? 30000); // 30s unless the call says otherwise
   // A caller's signal (e.g. TanStack Query cancelling a request nobody needs any more) also
   // stops the request; that is reported as a cancellation, not as a timeout.
   const callerSignal = options?.signal ?? null;
@@ -339,6 +339,10 @@ async function fetchFullFromApi<T>(
       throw err;
     }
     if (err instanceof Error && err.name === 'AbortError') {
+      // An admin change the server may already be carrying out: trying again blindly could repeat it.
+      if (method !== 'GET' && isAdminEndpoint(path)) {
+        throw new ApiError('The server did not answer in time, so this may or may not have gone through. Check before trying again.', 0, 'TIMEOUT');
+      }
       throw new ApiError('The request timed out. Please check your connection and try again.', 0, 'TIMEOUT');
     }
     if (err instanceof TypeError) {
@@ -353,7 +357,7 @@ async function fetchFullFromApi<T>(
  */
 async function fetchFromApi<T>(
   endpoint: string,
-  options?: RequestInit
+  options?: RequestInit & { timeoutMs?: number }
 ): Promise<T> {
   const json = await fetchFullFromApi<T>(endpoint, options);
   return json.data as T;
@@ -926,6 +930,7 @@ export async function apiUploadProductImage(
   return fetchFromApi<{ image_url: string; file_name: string; size_bytes: number }>('/admin/upload-image', {
     method: 'POST',
     body: formData,
+    timeoutMs: 120000, // slow connections; matches the proxy's limit (next.config.mjs)
   });
 }
 

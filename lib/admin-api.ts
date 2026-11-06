@@ -5,6 +5,7 @@
 
 import { API_BASE_URL, ApiError, PaginationMeta, apiRequest, apiRequestFull } from '@/lib/api-client';
 import { refreshAfter, refreshBellCounts, refreshDevMode, refreshStorageAlert } from '@/lib/admin-query-keys';
+import { queryString as qs } from '@/lib/admin-logic';
 
 export type { PaginationMeta };
 export { errorMessage } from '@/lib/api-client';
@@ -14,21 +15,15 @@ export interface Paginated<T> {
   pagination: PaginationMeta;
 }
 
-type Query = Record<string, string | number | boolean | null | undefined>;
+/**
+ * For actions that can run long on a slow host. Matches the proxy's limit (next.config.mjs), so
+ * the browser doesn't give up while the server carries on.
+ */
+const SLOW_ACTION_TIMEOUT_MS = 120_000;
 
-function qs(params?: Query): string {
-  if (!params) return '';
-  const q = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === '' || value === 'all') return;
-    q.set(key, String(value));
-  });
-  const s = q.toString();
-  return s ? `?${s}` : '';
-}
-
-function send<T>(endpoint: string, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', body?: unknown): Promise<T> {
+function send<T>(endpoint: string, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', body?: unknown, options?: { timeoutMs?: number }): Promise<T> {
   return apiRequest<T>(endpoint, {
+    ...options,
     method,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -181,6 +176,11 @@ export function adminConfirmDelivery(orderNumber: string, comment?: string) {
 /** Record a manual (bank transfer / WhatsApp) payment. The bank reference is required. */
 export function adminConfirmPayment(orderNumber: string, data: { reference: string; note?: string }) {
   return refreshAfter(send<AdminOrderDetail>(`/admin/orders/${encodeURIComponent(orderNumber)}/confirm-payment`, 'POST', data), refreshBellCounts);
+}
+
+/** Clear the "needs attention" flag with a note saying what was done (3-500 characters). */
+export function adminResolveAttention(orderNumber: string, note: string) {
+  return refreshAfter(send<AdminOrderDetail>(`/admin/orders/${encodeURIComponent(orderNumber)}/resolve-attention`, 'POST', { note }), refreshBellCounts);
 }
 
 // =============================================================================
@@ -669,7 +669,7 @@ export function adminRetryOutbox(id: number) {
 export function adminProcessOutbox() {
   return apiRequestFull<{ processed: number; sent: number; retrying: number; failed: number; still_pending: number }>(
     '/admin/notifications/outbox/process',
-    { method: 'POST' }
+    { method: 'POST', timeoutMs: SLOW_ACTION_TIMEOUT_MS }
   );
 }
 
@@ -956,5 +956,5 @@ export function adminGetSubscribers(params: { status?: string; page?: number; pe
 /** confirm_recipients must equal the active-subscriber count the admin saw and confirmed. */
 export function adminSendBroadcast(data: { subject: string; content: string; confirm_recipients: number }) {
   // already_queued_today: subscribers who already had this exact newsletter queued today (not sent twice).
-  return send<{ queued_count: number; already_queued_today: number; mail_mode: string }>('/admin/marketing/broadcast', 'POST', data);
+  return send<{ queued_count: number; already_queued_today: number; mail_mode: string }>('/admin/marketing/broadcast', 'POST', data, { timeoutMs: SLOW_ACTION_TIMEOUT_MS });
 }
