@@ -171,6 +171,11 @@ function pct(part: number, whole: number): string {
   return whole > 0 ? `${Math.round((part / whole) * 100)}%` : '—';
 }
 
+/** "1 paid order", "2 paid orders". */
+function count(n: number, noun: string): string {
+  return `${n.toLocaleString()} ${noun}${n === 1 ? '' : 's'}`;
+}
+
 function Report({ report }: { report: AnalyticsReport }) {
   const s = report.summary;
   const [showFormulas, setShowFormulas] = useState(false);
@@ -194,16 +199,16 @@ function Report({ report }: { report: AnalyticsReport }) {
           value={formatPrice(num(s.net_sales))}
           sub={`${formatPrice(num(s.gross_sales))} received − ${formatPrice(num(s.total_refunded))} refunded${num(s.owed_refunds) > 0 ? ` − ${formatPrice(num(s.owed_refunds))} owed` : ''}`}
         />
-        <Stat label="Average order value" value={formatPrice(num(s.aov))} sub={`From ${num(s.paid_orders).toLocaleString()} paid orders`} />
+        <Stat label="Average order value" value={formatPrice(num(s.aov))} sub={`From ${count(num(s.paid_orders), 'paid order')}`} />
         <Stat
           label="Units sold"
           value={num(s.total_units_sold).toLocaleString()}
-          sub={`${num(s.paying_customers).toLocaleString()} paying customers · ${num(s.repeat_customer_rate)}% ordered again`}
+          sub={`${count(num(s.paying_customers), 'paying customer')} · ${num(s.repeat_customer_rate)}% ordered again`}
         />
         <Stat
           label="Placed orders that were paid"
           value={`${num(s.conversion_rate)}%`}
-          sub={`Of ${num(s.total_orders).toLocaleString()} orders placed in this period`}
+          sub={`Of ${count(num(s.total_orders), 'order')} placed in this period`}
         />
       </div>
 

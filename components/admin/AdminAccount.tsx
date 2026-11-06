@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { adminGetAccount, adminUpdateAccount, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { formatDate, humanize } from '@/lib/admin-format';
+import { useAdminSession } from '@/components/admin/AdminAuthGate';
 import {
   Button,
   DataState,
@@ -24,6 +25,7 @@ const MIN_PASSWORD = 10;
  */
 export function AdminAccount() {
   const toast = useToast();
+  const { updateAdmin } = useAdminSession();
   const { data: account, loading, error, reload } = useAdminData(() => adminGetAccount(), []);
 
   const [fullName, setFullName] = useState('');
@@ -58,6 +60,7 @@ export function AdminAccount() {
     try {
       const res = await adminUpdateAccount({ full_name: fullName.trim(), phone: phone.trim() });
       toast.success(res.message || 'Profile updated.');
+      updateAdmin({ full_name: fullName.trim(), phone: phone.trim() || null });
       reload();
     } catch (err) {
       if (redirectIfSignedOut(err)) return;

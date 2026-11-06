@@ -7,6 +7,8 @@ import { LoadingState } from '@/components/admin/ui';
 
 interface AdminSession {
   admin: ApiUser;
+  /** After the admin edits their profile, so the sidebar and greeting show it without a reload. */
+  updateAdmin: (changes: Partial<ApiUser>) => void;
   signOut: () => Promise<void>;
 }
 
@@ -78,6 +80,10 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
     }
   }, [router]);
 
+  const updateAdmin = useCallback((changes: Partial<ApiUser>) => {
+    setAdmin((current) => (current ? { ...current, ...changes } : current));
+  }, []);
+
   if (!admin) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-[#f8f8f8]">
@@ -86,5 +92,5 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <AdminSessionContext.Provider value={{ admin, signOut }}>{children}</AdminSessionContext.Provider>;
+  return <AdminSessionContext.Provider value={{ admin, updateAdmin, signOut }}>{children}</AdminSessionContext.Provider>;
 }

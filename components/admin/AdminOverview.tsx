@@ -24,7 +24,7 @@ import { formatDate, formatDateTime, formatPrice, formatRelative, gatewayLabel, 
 import type { StatusTone } from '@/lib/order-status';
 import { AdminIcon } from '@/components/admin/AdminIcon';
 import { useAdminSession } from '@/components/admin/AdminAuthGate';
-import { ErrorState, LoadingState, useAdminData, useUrlFilters } from '@/components/admin/ui';
+import { ErrorState, LoadingState, Notice, useAdminData, useUrlFilters } from '@/components/admin/ui';
 
 const PERIODS = [
   { value: '7', label: 'Last 7 days' },
@@ -78,6 +78,17 @@ export function AdminOverview() {
           </button>
         </div>
       </header>
+
+      {error && data && (
+        <Notice tone="danger">
+          <span role="alert">
+            The figures could not be refreshed: {error} What you see below is from the last successful load (the last {data.period.days} days).{' '}
+            <button type="button" onClick={reload} className="font-semibold underline underline-offset-2">
+              Try again
+            </button>
+          </span>
+        </Notice>
+      )}
 
       {error && !data ? (
         <Shell title="Overview" icon={<BarChart3 className="size-4" aria-hidden="true" />}>

@@ -8,8 +8,10 @@ import {
   OrderStatus,
   adminConfirmDelivery,
   adminGetOrder,
+  adminResolveAttention,
   adminUpdateOrderStatus,
   errorMessage,
+  fieldErrors,
 } from '@/lib/admin-api';
 import {
   ORDER_TRANSITION_LABELS,
@@ -59,6 +61,7 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
   const [shipOpen, setShipOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [statusTarget, setStatusTarget] = useState<OrderStatus | null>(null);
+  const [resolveOpen, setResolveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const notFound = error && !order && /not found/i.test(error);
@@ -175,6 +178,11 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
             {order.order_status === 'pending_payment' && (
               <Button variant="primary" onClick={() => setPaymentOpen(true)} disabled={busy}>
                 Record manual payment
+              </Button>
+            )}
+            {order.requires_attention && (
+              <Button onClick={() => setResolveOpen(true)} disabled={busy}>
+                Mark as resolved
               </Button>
             )}
             {transitions.map((t) => (
@@ -390,7 +398,7 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
             <DetailList
               items={[
                 { label: 'Name', value: addr.full_name || '—' },
-                { label: 'Email', value: order.guest_email || (order.user_id ? 'Signed-in customer' : '—') },
+                { label: 'Email', value: order.customer_email || order.guest_email || (order.user_id ? 'Signed-in customer' : '—') },
                 { label: 'Phone', value: addr.phone || '—' },
                 {
                   label: 'Address',
@@ -499,7 +507,98 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
           setStatusTarget(null);
         }}
       />
+
+      <ResolveAttentionModal
+        open={resolveOpen}
+        order={order}
+        onClose={() => setResolveOpen(false)}
+        onDone={(updated) => {
+          setData(updated);
+          setResolveOpen(false);
+        }}
+      />
     </div>
+  );
+}
+
+const RESOLVE_NOTE_MIN = 3;
+const RESOLVE_NOTE_MAX = 500;
+
+/** Clear the "needs attention" flag; the note says what was done and stays on the order's record. */
+function ResolveAttentionModal({
+  open,
+  order,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  order: OrderDetail;
+  onClose: () => void;
+  onDone: (order: OrderDetail) => void;
+}) {
+  const toast = useToast();
+  const [note, setNote] = useState('');
+  const [error, setError] = useState<string | undefined>();
+  const [saving, setSaving] = useState(false);
+
+  // Start empty each time it opens.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setNote('');
+      setError(undefined);
+    }
+  }
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = note.trim();
+    if (text.length < RESOLVE_NOTE_MIN || text.length > RESOLVE_NOTE_MAX) {
+      setError(`Write what you did, in ${RESOLVE_NOTE_MIN} to ${RESOLVE_NOTE_MAX} characters.`);
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      const updated = await adminResolveAttention(order.order_number, text);
+      toast.success('Marked as resolved.');
+      onDone(updated);
+    } catch (err) {
+      if (redirectIfSignedOut(err)) return;
+      const message = fieldErrors(err).note;
+      if (message) setError(message);
+      else toast.error(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      busy={saving}
+      size="sm"
+      title="Mark as resolved?"
+      description={order.attention_reason || undefined}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" form="resolve-attention-form" variant="primary" loading={saving}>
+            Mark as resolved
+          </Button>
+        </>
+      }
+    >
+      <form id="resolve-attention-form" onSubmit={submit} noValidate>
+        <Field label="What did you do?" required error={error} hint={`${note.trim().length}/${RESOLVE_NOTE_MAX} characters.`}>
+          {(p) => <TextArea {...p} data-autofocus maxLength={RESOLVE_NOTE_MAX} value={note} onChange={(e) => setNote(e.target.value)} />}
+        </Field>
+      </form>
+    </Modal>
   );
 }
 
@@ -517,6 +616,13 @@ function StatusChangeModal({
   const toast = useToast();
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // A note written for one status change never carries over to another.
+  const [commentFor, setCommentFor] = useState(target);
+  if (target !== commentFor) {
+    setCommentFor(target);
+    setComment('');
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

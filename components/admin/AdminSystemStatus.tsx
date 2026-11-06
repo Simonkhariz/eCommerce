@@ -111,7 +111,7 @@ function StatusBody({ data }: { data: SystemStatus }) {
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3">
         <StatusPill label={healthy ? 'Healthy' : 'Degraded'} tone={healthy ? 'green' : 'red'} />
         <span className="text-[13px] text-[#374151]">
-          {data.environment === 'production' ? 'Production' : 'Development'} · server time {formatDateTime(data.server_time)}
+          {data.environment === 'production' ? 'Production' : 'Development'} · server time {data.server_time}
         </span>
       </div>
 

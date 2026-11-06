@@ -64,7 +64,7 @@ const METHODS: Array<{ id: PaymentMethodId; name: string; description: string }>
 /**
  * On/off switches for the payment methods offered at checkout. Saves immediately.
  */
-function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['readonly']; onSaved: () => void }) {
+function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['readonly']; onSaved: () => Promise<void> }) {
   const toast = useToast();
   const [busy, setBusy] = useState<PaymentMethodId | null>(null);
 
@@ -76,7 +76,7 @@ function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['r
     try {
       await adminUpdatePaymentMethods({ primary_gateway: gateway });
       toast.success(`"Pay now" now uses ${gateway === 'kora' ? 'Kora' : 'Monnify'}.`);
-      onSaved();
+      await onSaved();
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The change could not be saved.'));
     } finally {
@@ -89,7 +89,7 @@ function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['r
     try {
       await adminUpdatePaymentMethods({ [id]: on });
       toast.success(`${METHODS.find((m) => m.id === id)?.name} is now ${on ? 'on' : 'off'} at checkout.`);
-      onSaved();
+      await onSaved();
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The change could not be saved.'));
     } finally {
@@ -174,7 +174,7 @@ function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['r
  */
 export function AdminSettings() {
   const toast = useToast();
-  const { data, loading, error, reload } = useAdminData(() => adminGetSettings(), []);
+  const { data, setData, loading, error, reload } = useAdminData(() => adminGetSettings(), []);
   const [values, setValues] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -185,13 +185,23 @@ export function AdminSettings() {
   });
 
   // The form starts from the saved settings each time they (re)load.
-  const [valuesFor, setValuesFor] = useState<typeof data>(null);
-  if (data && data !== valuesFor) {
-    setValuesFor(data);
+  const [valuesFor, setValuesFor] = useState<StoreSettings['editable'] | null>(null);
+  if (data && data.editable !== valuesFor) {
+    setValuesFor(data.editable);
     setValues(saved);
   }
 
   const changed = Object.keys(values).filter((key) => values[key] !== saved[key]);
+
+  // A payment switch only changes the read-only half, so details being typed above stay as they are.
+  const refreshPaymentMethods = async () => {
+    try {
+      const fresh = await adminGetSettings();
+      setData((current) => (current ? { ...current, readonly: fresh.readonly } : fresh));
+    } catch (err) {
+      if (!redirectIfSignedOut(err)) toast.error('The change was saved, but this page could not refresh. Reload to see the switches as they are now.');
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -291,7 +301,7 @@ export function AdminSettings() {
               </form>
             </Panel>
 
-            <PaymentMethodsPanel settings={ro} onSaved={reload} />
+            <PaymentMethodsPanel settings={ro} onSaved={refreshPaymentMethods} />
 
             <DevModePanel />
 
