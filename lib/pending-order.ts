@@ -43,6 +43,16 @@ export function cartSignature(items: CartItem[]): string {
     .join('|');
 }
 
+/** A cart signature ("variant:quantity|...") as quantities per variant. */
+export function signatureQuantities(signature: string): Map<string, number> {
+  const quantities = new Map<string, number>();
+  for (const part of signature.split('|')) {
+    const at = part.lastIndexOf(':');
+    if (at > 0) quantities.set(part.slice(0, at), (quantities.get(part.slice(0, at)) ?? 0) + (parseInt(part.slice(at + 1), 10) || 0));
+  }
+  return quantities;
+}
+
 export function savePendingOrder(order: PendingOrder): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(order));
@@ -172,4 +182,64 @@ export function readGuestToken(orderNumber: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+const CHECKOUT_DRAFT_KEY = 'shopco_checkout_draft';
+
+/** Delivery details typed at checkout, kept for this tab so a refresh doesn't lose them. Never payment data. */
+export function saveCheckoutDraft(draft: Record<string, unknown>): void {
+  try {
+    sessionStorage.setItem(CHECKOUT_DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // Storage unavailable: the details just aren't kept over a refresh.
+  }
+}
+
+export function readCheckoutDraft(): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(CHECKOUT_DRAFT_KEY) || 'null');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearCheckoutDraft(): void {
+  try {
+    sessionStorage.removeItem(CHECKOUT_DRAFT_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function removeKeysStartingWith(storage: Storage, prefixes: string[]): void {
+  const keys: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const key = storage.key(i);
+    if (key && prefixes.some((prefix) => key.startsWith(prefix))) keys.push(key);
+  }
+  keys.forEach((key) => storage.removeItem(key));
+}
+
+/**
+ * On sign-out, nothing that opens an order stays on this device for the next person: access keys
+ * (they show the order's name, address and phone), the recent order, the pending order, lookup
+ * emails and the typed delivery details. Which keys belong to the account is not recorded, so
+ * all of them go; an order can still be opened with its number and checkout email.
+ */
+export function forgetOrdersOnThisDevice(): void {
+  try {
+    removeKeysStartingWith(localStorage, ['shopco_guest_token_', 'shopco_whatsapp_invoice_']);
+    localStorage.removeItem('shopco_latest_order_number');
+    localStorage.removeItem(KEY);
+  } catch {
+    // ignore
+  }
+  try {
+    removeKeysStartingWith(sessionStorage, ['shopco_lookup_email_']);
+  } catch {
+    // ignore
+  }
+  clearCheckoutDraft();
+  notifyChange();
 }

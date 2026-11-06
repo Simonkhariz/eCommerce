@@ -1,10 +1,13 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { forgetOrdersOnThisDevice } from '@/lib/pending-order';
 import {
+  ApiError,
   ApiUser,
   ApiAddress,
+  onCustomerSessionEvent,
   apiGetMe,
   apiLogin,
   apiRegister,
@@ -25,6 +28,8 @@ interface AuthContextType {
   addresses: ApiAddress[];
   isAuthModalOpen: boolean;
   authModalTab: 'login' | 'register' | 'magic';
+  /** Why the sign-in window opened by itself (the session ended). */
+  authNotice: string | null;
   openAuthModal: (tab?: 'login' | 'register' | 'magic') => void;
   closeAuthModal: () => void;
   login: (email: string, password: string) => Promise<void>;
@@ -45,11 +50,21 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const router = useRouter();
+  // The admin area has its own sign-in check (components/admin/AdminAuthGate.tsx). The shopper's is
+  // not asked there, which leaves isLoading true, so the cart and wishlist don't load there either.
+  const inAdminArea = usePathname()?.startsWith('/admin') ?? false;
   const [user, setUser] = useState<ApiUser | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [addresses, setAddresses] = useState<ApiAddress[]>([]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register' | 'magic'>('login');
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
+  // Counts sign-ins and sign-outs, so a /auth/me answer from before one is ignored.
+  const sessionChanges = useRef(0);
+  const signedInRef = useRef(false);
+  useEffect(() => {
+    signedInRef.current = user !== null;
+  }, [user]);
 
   const loadAddresses = useCallback(async () => {
     try {
@@ -61,39 +76,76 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // State changes only once the server has answered (never synchronously).
-  const refreshUser = useCallback(
-    () =>
-      apiGetMe()
-        .then(
-          (res) => {
-            setUser(res.user);
-            if (res.user) loadAddresses();
-          },
-          () => {
-            setUser(null);
-            setAddresses([]);
+  const sessionEnded = useCallback(() => {
+    sessionChanges.current += 1;
+    setUser(null);
+    setAddresses([]);
+    setAuthNotice('Your session has ended. Please sign in again.');
+    setAuthModalTab('login');
+    setIsAuthModalOpen(true);
+  }, []);
+
+  const refreshUser = useCallback(() => {
+    const startedAt = sessionChanges.current;
+    return apiGetMe()
+      .then(
+        (res) => {
+          if (startedAt !== sessionChanges.current) return;
+          setUser(res.user);
+          if (res.user) loadAddresses();
+        },
+        (err) => {
+          if (startedAt !== sessionChanges.current) return;
+          // A 401 is the normal answer for a guest; it only means something ended when signed in.
+          if (signedInRef.current && err instanceof ApiError && err.statusCode === 401) {
+            sessionEnded();
+            return;
           }
-        )
-        .finally(() => setIsLoading(false)),
-    [loadAddresses]
-  );
+          setUser(null);
+          setAddresses([]);
+        }
+      )
+      .finally(() => setIsLoading(false));
+  }, [loadAddresses, sessionEnded]);
 
   // Initial session hydration from HttpOnly cookie
   useEffect(() => {
+    if (inAdminArea) return;
     refreshUser();
-  }, [refreshUser]);
+  }, [inAdminArea, refreshUser]);
+
+  // What other requests find out about the session: it ended, or another tab of this browser
+  // signed in (the session here is then that one).
+  useEffect(
+    () =>
+      onCustomerSessionEvent({
+        expired: () => {
+          if (signedInRef.current) sessionEnded();
+        },
+        signedInElsewhere: (nextUser) => {
+          sessionChanges.current += 1;
+          setUser(nextUser);
+          loadAddresses();
+        },
+      }),
+    [sessionEnded, loadAddresses]
+  );
 
   const openAuthModal = (tab: 'login' | 'register' | 'magic' = 'login') => {
+    setAuthNotice(null);
     setAuthModalTab(tab);
     setIsAuthModalOpen(true);
   };
 
   const closeAuthModal = () => {
+    setAuthNotice(null);
     setIsAuthModalOpen(false);
   };
 
   const login = async (email: string, password: string) => {
     const res = await apiLogin({ email, password });
+    sessionChanges.current += 1;
+    setAuthNotice(null);
     setIsAuthModalOpen(false);
 
     // Admin accounts get an admin-scoped session cookie and belong in the admin dashboard,
@@ -111,6 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = async (data: { full_name: string; email: string; password: string; phone?: string }) => {
     const res = await apiRegister(data);
+    sessionChanges.current += 1;
     setUser(res.user);
     setIsAuthModalOpen(false);
     loadAddresses();
@@ -122,6 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const verifyMagicLink = async (token: string) => {
     const res = await apiVerifyMagicLink(token);
+    sessionChanges.current += 1;
     setUser(res.user);
     setIsAuthModalOpen(false);
     loadAddresses();
@@ -132,6 +186,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await apiLogout();
     } finally {
+      sessionChanges.current += 1;
+      forgetOrdersOnThisDevice();
       setUser(null);
       setAddresses([]);
     }
@@ -169,6 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         addresses,
         isAuthModalOpen,
         authModalTab,
+        authNotice,
         openAuthModal,
         closeAuthModal,
         login,

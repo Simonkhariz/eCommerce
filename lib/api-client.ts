@@ -3,7 +3,7 @@
  * Communicates with the PHP 8+ REST backend API running on XAMPP / local server.
  */
 
-import { Product, ProductColor, ProductVariant, Review } from '@/types';
+import type { Product, ProductColor, ProductVariant, Review } from '@/types';
 import { optimizeImageForUpload } from '@/lib/image-optimize';
 import { productListFrom, productListPath } from '@/lib/catalog-query';
 import { clearQueryCache } from '@/lib/query-client';
@@ -226,7 +226,56 @@ function rememberCsrf(user: ApiUser | undefined, token: string | undefined): voi
     setAdminCsrfToken(token);
   } else {
     setMemoryCsrfToken(token);
+    knownCustomerId = user?.id ?? null;
+    customerSessionEpoch += 1;
   }
+}
+
+// What this tab believes about the customer session. The cookie is shared with other tabs, so
+// the session behind a request can change without this tab having been told.
+let knownCustomerId: number | null = null;
+/** Changes at every sign-in and sign-out here: a 401 from before one says nothing about the session now. */
+let customerSessionEpoch = 0;
+
+export interface CustomerSessionEvents {
+  /** A signed-in request was refused: the session has ended. Also fires for guests; ignore it then. */
+  expired: () => void;
+  /** Another tab of this browser signed in, so this is now the tab's session. */
+  signedInElsewhere: (user: ApiUser) => void;
+}
+
+let customerSessionEvents: CustomerSessionEvents | null = null;
+
+/** For the auth state (context/AuthContext.tsx): returns the function that stops listening. */
+export function onCustomerSessionEvent(events: CustomerSessionEvents): () => void {
+  customerSessionEvents = events;
+  return () => {
+    if (customerSessionEvents === events) customerSessionEvents = null;
+  };
+}
+
+let csrfRefresh: Promise<boolean> | null = null;
+
+/**
+ * The session's CSRF token was refused: this tab's copy is from before a sign-in on another tab.
+ * Asks the server for the current one and tells the auth state. True when the request can be sent
+ * again; never when the session is now a different customer's (a saved cart, say, would go to the
+ * wrong account).
+ */
+function refreshCustomerCsrf(): Promise<boolean> {
+  csrfRefresh ??= (async () => {
+    const before = knownCustomerId;
+    try {
+      const me = await apiGetMe();
+      customerSessionEvents?.signedInElsewhere(me.user);
+      return before === null || before === me.user.id;
+    } catch {
+      return false;
+    }
+  })().finally(() => {
+    csrfRefresh = null;
+  });
+  return csrfRefresh;
 }
 
 /** The message to show for a failed request (or anything thrown), else the fallback. */
@@ -264,7 +313,8 @@ export function clearApiCache(): void {
  */
 async function fetchFullFromApi<T>(
   endpoint: string,
-  options?: RequestInit & { timeoutMs?: number }
+  options?: RequestInit & { timeoutMs?: number },
+  isCsrfRetry = false
 ): Promise<ApiResponse<T>> {
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   const url = `${API_BASE_URL}${path}`;
@@ -296,6 +346,7 @@ async function fetchFullFromApi<T>(
   if (csrf && method !== 'GET') {
     headers['X-CSRF-Token'] = csrf;
   }
+  const epochAtStart = customerSessionEpoch;
 
   try {
     const res = await fetch(url, {
@@ -321,6 +372,16 @@ async function fetchFullFromApi<T>(
     }
 
     if (!res.ok || !json.success) {
+      if (!isCsrfRetry && json.error?.code === 'CSRF_MISMATCH' && !isAdminEndpoint(path) && (await refreshCustomerCsrf())) {
+        return await fetchFullFromApi<T>(endpoint, options, true);
+      }
+      // /auth/* answers 401 for a guest or a wrong password, which says nothing about a session.
+      if (res.status === 401 && !isAdminEndpoint(path) && !path.startsWith('/auth/') && epochAtStart === customerSessionEpoch) {
+        setMemoryCsrfToken(null);
+        knownCustomerId = null;
+        customerSessionEpoch += 1;
+        customerSessionEvents?.expired();
+      }
       const errMsg =
         json.error?.message || json.message || `Request failed with status ${res.status}`;
       throw new ApiError(errMsg, res.status, json.error?.code, json.error?.details);
@@ -405,6 +466,7 @@ export function mapApiProductToStorefront(item: ApiProductSummary | ApiProductDe
           author: r.author,
           rating: Number(r.rating),
           verified: Boolean(r.verified),
+          title: r.title || undefined,
           comment: r.comment,
           date: new Date(r.created_at.replace(' ', 'T')).toLocaleDateString('en-NG', {
             year: 'numeric',
@@ -426,7 +488,8 @@ export function mapApiProductToStorefront(item: ApiProductSummary | ApiProductDe
     discountPercent: item.discount_percent > 0 ? item.discount_percent : undefined,
     rating: Number(item.rating_avg) || 0,
     reviewCount: Number(item.rating_count) || 0,
-    category: item.category_slug,
+    // A product can have no category (the API then sends null).
+    category: item.category_slug ?? '',
     categoryName: item.category_name,
     dressStyle: item.dress_style ? [item.dress_style.toLowerCase()] : [],
     gender: 'unisex',
@@ -580,6 +643,8 @@ export async function apiLogout(scope: 'customer' | 'admin' = 'customer'): Promi
       setAdminCsrfToken(null);
     } else {
       setMemoryCsrfToken(null);
+      knownCustomerId = null;
+      customerSessionEpoch += 1;
     }
     clearApiCache();
     clearQueryCache();
@@ -598,6 +663,7 @@ export async function apiGetMe(scope: 'customer' | 'admin' = 'customer'): Promis
       setAdminCsrfToken(res.data.csrf_token);
     } else {
       setMemoryCsrfToken(res.data.csrf_token);
+      knownCustomerId = res.data.user?.id ?? null;
     }
   }
   return res.data!;
@@ -1091,6 +1157,8 @@ export interface ApiCustomerOrder {
   grand_total: number;
   shipping_address_snapshot: ShippingAddressInput | null;
   expires_at: string | null;
+  /** When the customer reported their WhatsApp transfer. */
+  customer_marked_paid_at?: string | null;
   created_at: string;
   updated_at: string;
   items: ApiOrderItem[];
@@ -1273,7 +1341,7 @@ export async function apiInitializePayment(
   }
 
   return fetchFromApi<PaymentInitializationResponse>(
-    `/checkout/orders/${orderNumber}/initialize-payment`,
+    `/checkout/orders/${encodeURIComponent(orderNumber)}/initialize-payment`,
     {
       method: 'POST',
       headers,
@@ -1374,7 +1442,7 @@ export async function apiVerifyPayment(
   }
 
   return fetchFromApi<PaymentVerificationResponse>(
-    `/checkout/orders/${orderNumber}/verify-payment${query}`,
+    `/checkout/orders/${encodeURIComponent(orderNumber)}/verify-payment${query}`,
     {
       method: 'GET',
       headers,

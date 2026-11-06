@@ -2,7 +2,8 @@
 
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { errorMessage as describeError } from '@/lib/api-client';
+import { ApiError, errorMessage as describeError } from '@/lib/api-client';
+import { firstValidationMessage } from '@/lib/checkout-validation';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Cancel01Icon, Mail01Icon, LockPasswordIcon, UserIcon, CallIcon, CheckmarkCircle02Icon } from '@hugeicons/core-free-icons';
 import { Dialog } from '@/components/ui/Dialog';
@@ -49,7 +50,7 @@ function IconField({
 }
 
 export const AuthModal: React.FC = () => {
-  const { isAuthModalOpen, authModalTab, openAuthModal, closeAuthModal, login, register, requestMagicLink } = useAuth();
+  const { isAuthModalOpen, authModalTab, authNotice, openAuthModal, closeAuthModal, login, register, requestMagicLink } = useAuth();
   const uid = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ login: null, register: null, magic: null });
@@ -134,7 +135,9 @@ export const AuthModal: React.FC = () => {
       await register({ full_name: fullName, email, password, phone: phone || undefined });
       resetForm();
     } catch (err) {
-      setErrorMessage(describeError(err, 'We could not create your account. Please check your details.'));
+      // A 422 says which detail is wrong; its headline only says the form failed.
+      const detail = err instanceof ApiError && err.statusCode === 422 ? firstValidationMessage(err.details) : null;
+      setErrorMessage(detail ?? describeError(err, 'We could not create your account. Please check your details.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -208,6 +211,11 @@ export const AuthModal: React.FC = () => {
           })}
         </div>
 
+        {authNotice && !errorMessage && (
+          <div role="status" className="mb-4 p-3.5 rounded-2xl bg-amber-50 text-amber-900 text-sm font-medium border border-amber-200">
+            {authNotice}
+          </div>
+        )}
         {errorMessage && (
           <div role="alert" className="mb-4 p-3.5 rounded-2xl bg-red-50 text-red-800 text-sm font-medium border border-red-200">
             {errorMessage}
