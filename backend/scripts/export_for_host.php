@@ -30,6 +30,7 @@ define('BASE_PATH', dirname(__DIR__));
 require_once BASE_PATH . '/src/autoload.php';
 
 use App\Config\Env;
+use App\Support\GzipFile;
 use App\Support\SqlDump;
 
 Env::load(BASE_PATH . '/.env');
@@ -94,14 +95,12 @@ try {
         Env::int('DB_PORT', 3306)
     );
     $conn->set_charset('utf8mb4');
-    $gz = gzopen($out, 'wb6');
-    if ($gz === false) {
-        $fail("Cannot write {$out}.");
-    }
+    // Fails loudly on a full disk (GzipFile), so a cut-off file is never taken to the host.
+    $gz = new GzipFile($out);
     $counts = SqlDump::dump($conn, static function (string $sql) use ($gz): void {
-        gzwrite($gz, $sql);
+        $gz->write($sql);
     }, $keepRows, $replace);
-    gzclose($gz);
+    $gz->close();
 
     $admins = [];
     foreach ($conn->query("SELECT `email` FROM `users` WHERE `role` <> 'customer' ORDER BY `id`")->fetch_all() as $row) {

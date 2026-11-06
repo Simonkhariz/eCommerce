@@ -34,7 +34,9 @@ class Router
      * Register a route for any HTTP method.
      *
      * @param string $method HTTP verb (GET, POST, PUT, DELETE, PATCH, OPTIONS)
-     * @param string $path Route path with optional parameters e.g. /api/v1/products/{id}
+     * @param string $path Route path with optional parameters e.g. /api/v1/products/{id}. A parameter
+     *                     takes letters, digits, _ and - unless it names its own pattern, e.g. {code:[^/]+}.
+     *                     It is matched as sent, so a wider pattern's handler must URL-decode it.
      * @param callable|array{class-string, string} $handler Closure or [ControllerClass, 'method']
      * @param array<int, callable> $middleware Route-specific middleware
      */
@@ -48,16 +50,16 @@ class Router
 
         // Convert {param} into regex capture groups
         $paramNames = [];
-        $regex = preg_replace_callback('/\{([a-zA-Z0-9_]+)\}/', function ($matches) use (&$paramNames) {
+        $regex = preg_replace_callback('/\{([a-zA-Z0-9_]+)(?::([^{}]+))?\}/', function ($matches) use (&$paramNames) {
             $paramNames[] = $matches[1];
-            return '([a-zA-Z0-9_\-]+)';
+            return '(' . ($matches[2] ?? '[a-zA-Z0-9_\-]+') . ')';
         }, $path);
 
         $regex = '#^' . $regex . '$#';
 
         $this->routes[] = [
             'method' => strtoupper($method),
-            'pattern' => $path,
+            'pattern' => preg_replace('/\{([a-zA-Z0-9_]+):[^{}]+\}/', '{$1}', $path),
             'regex' => $regex,
             'handler' => $handler,
             'params' => $paramNames,

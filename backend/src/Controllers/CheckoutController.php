@@ -20,6 +20,7 @@ use App\Support\RequestContext;
 use App\Support\Response;
 use App\Support\SessionCookie;
 use App\Support\SessionGuard;
+use App\Support\ValidationFailed;
 use InvalidArgumentException;
 use RuntimeException;
 use Throwable;
@@ -56,7 +57,17 @@ class CheckoutController
             Response::success($quote, 'Checkout quotation generated successfully.');
         } catch (InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'VALIDATION_ERROR');
+        } catch (\mysqli_sql_exception $e) {
+            // Never surface raw SQL errors (mysqli_sql_exception extends RuntimeException).
+            error_log('[Checkout Quote DB Failure] ' . $e->getMessage());
+            Response::error('We could not calculate your total right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         } catch (RuntimeException $e) {
+            // Database.php's own failures carry code 500 and setup text; the rest (not enough
+            // stock, no delivery zones) are written for the customer.
+            if ($e->getCode() === 500) {
+                error_log('[Checkout Quote DB Failure] ' . $e->getMessage());
+                Response::error('We could not calculate your total right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
+            }
             Response::error($e->getMessage(), 400, 'QUOTE_ERROR');
         } catch (Throwable $e) {
             error_log('[Checkout Quote Failure] ' . $e->getMessage());
@@ -96,6 +107,11 @@ class CheckoutController
 
         $lines = [];
         foreach ($rows as $row) {
+            // A line that can't be bought says only that: unpublished products stay private.
+            if (!$row['available']) {
+                $lines[] = ['variant_id' => (int) $row['variant_id'], 'available' => false];
+                continue;
+            }
             $lines[] = [
                 'variant_id' => (int) $row['variant_id'],
                 'product_id' => (int) $row['product_id'],
@@ -108,7 +124,7 @@ class CheckoutController
                 'stock_quantity' => max(0, (int) $row['stock_quantity']),
                 'product_name' => $row['product_name'],
                 'product_slug' => $row['product_slug'],
-                'available' => (bool) $row['available'],
+                'available' => true,
             ];
         }
 
@@ -139,12 +155,17 @@ class CheckoutController
             $order = $this->checkoutService->createOrder($body, $userId, $idempotencyKey !== '' ? $idempotencyKey : null);
             Response::success($order, 'Order placed successfully. Inventory has been reserved.', 201);
         } catch (InvalidArgumentException $e) {
-            Response::error($e->getMessage(), 422, 'VALIDATION_ERROR');
+            Response::error($e->getMessage(), 422, 'VALIDATION_ERROR', $e instanceof ValidationFailed ? $e->details : []);
         } catch (\mysqli_sql_exception $e) {
             // Never surface raw SQL errors (mysqli_sql_exception extends RuntimeException).
             error_log('[Order Creation DB Failure] ' . $e->getMessage());
             Response::error('We could not place your order right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         } catch (RuntimeException $e) {
+            // Database.php's own failures carry code 500 and setup text.
+            if ($e->getCode() === 500) {
+                error_log('[Order Creation DB Failure] ' . $e->getMessage());
+                Response::error('We could not place your order right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
+            }
             // Inventory or promotion conflict raised deliberately by CheckoutService
             $code = str_contains($e->getMessage(), 'Insufficient stock') ? 'INSUFFICIENT_STOCK' : 'ORDER_CREATION_FAILED';
             Response::error($e->getMessage(), 409, $code);
@@ -192,10 +213,12 @@ class CheckoutController
      */
     public function show(array $params): void
     {
-        $lookupCode = trim($params['orderNumber'] ?? '');
+        // This route takes the code as sent ("TRK%20123"). Bytes that aren't text can match nothing.
+        $lookupCode = trim(rawurldecode($params['orderNumber'] ?? ''));
         if ($lookupCode === '') {
             Response::error('Order number or tracking code is required.', 422, 'VALIDATION_ERROR');
         }
+        $searchable = mb_check_encoding($lookupCode, 'UTF-8') && !str_contains($lookupCode, "\0");
 
         $notFound = 'We could not find an order matching those details. Check the order number and the email used at checkout.';
 
@@ -203,9 +226,9 @@ class CheckoutController
         $ip = RequestContext::clientIp();
         RateLimiter::guard('order_lookup_fail', $ip, 20, 900, 'Too many unsuccessful lookups. Please wait 15 minutes and try again.');
 
-        $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$lookupCode]);
+        $order = $searchable ? $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$lookupCode]) : null;
 
-        if ($order === null) {
+        if ($order === null && $searchable) {
             // A courier tracking number identifies the order, but never authorizes access on its own.
             $shipment = $this->db->fetchOne(
                 "SELECT `order_id` FROM `shipments` WHERE `tracking_number` = ? LIMIT 1",
@@ -296,10 +319,11 @@ class CheckoutController
      */
     public function paymentMethods(): void
     {
+        // Switched on and able to work: no keys or no WhatsApp number means it isn't offered.
         $status = PaymentMethods::status($this->db);
-        $monnifyEnabled = $status['monnify']['enabled'];
-        $koraEnabled = $status['kora']['enabled'];
-        $whatsappEnabled = $status['whatsapp']['enabled'];
+        $monnifyEnabled = $status['monnify']['enabled'] && PaymentMethods::configured('monnify');
+        $koraEnabled = $status['kora']['enabled'] && PaymentMethods::configured('kora');
+        $whatsappEnabled = $status['whatsapp']['enabled'] && PaymentMethods::configured('whatsapp');
 
         $methods = [];
 
@@ -432,9 +456,14 @@ class CheckoutController
             }
         } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'VALIDATION_ERROR');
+        } catch (\mysqli_sql_exception $e) {
+            // Never surface raw SQL errors (mysqli_sql_exception extends RuntimeException).
+            error_log('[Payment Initialization DB Failure] ' . $e->getMessage());
+            Response::error('We could not start the payment right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
         } catch (\RuntimeException $e) {
+            // What went wrong (keys, the gateway's own words) is for the log, not the customer.
             error_log('[Payment Initialization Gateway Error] ' . $e->getMessage());
-            Response::error($e->getMessage(), 502, 'GATEWAY_ERROR');
+            Response::error('We could not reach the payment provider. Your order is saved: please try again shortly or choose another payment method.', 502, 'GATEWAY_ERROR');
         } catch (\Throwable $e) {
             error_log('[Payment Initialization Failure] ' . $e->getMessage());
             Response::error('We could not start the payment right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');

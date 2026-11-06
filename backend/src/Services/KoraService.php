@@ -6,6 +6,9 @@ namespace App\Services;
 
 use App\Config\Env;
 use App\Database\Database;
+use App\Support\Input;
+use App\Support\RateLimiter;
+use App\Support\RequestContext;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -24,6 +27,11 @@ use RuntimeException;
  */
 class KoraService
 {
+    /** Webhooks with a wrong signature recorded per connection, shared with Monnify. */
+    public const BAD_SIGNATURE_BUCKET = 'webhook_bad_signature';
+    public const BAD_SIGNATURE_LIMIT = 30;
+    public const BAD_SIGNATURE_WINDOW = 600;
+
     private Database $db;
     private string $baseUrl;
     private string $secretKey;
@@ -158,7 +166,7 @@ class KoraService
 
         $isSuccess = ($statusCode >= 200 && $statusCode < 300) && (!isset($responseJson['status']) || $responseJson['status'] === true);
         if (!$isSuccess) {
-            $providerMessage = (string) ($responseJson['message'] ?? 'Payment provider rejected checkout initialization.');
+            $providerMessage = Input::text($responseJson['message'] ?? null, 'Payment provider rejected checkout initialization.');
             $this->recordPaymentAttempt($paymentId, [
                 'error' => 'PROVIDER_REJECTED',
                 'http_status' => $statusCode,
@@ -167,7 +175,9 @@ class KoraService
                 'timestamp' => date('Y-m-d H:i:s'),
                 'order_recoverable' => true,
             ]);
-            throw new RuntimeException("Payment provider initialization failed: {$providerMessage}");
+            // The provider's words are for the store (log and payment record), not the customer.
+            error_log("[Kora Initialization Rejected] HTTP {$statusCode}: {$providerMessage}");
+            throw new RuntimeException('The payment provider could not start the checkout. Your order remains pending.');
         }
 
         $data = $responseJson['data'] ?? [];
@@ -208,19 +218,31 @@ class KoraService
      */
     public function verifyWebhookSignature(string $rawBody, string $signatureHeader): bool
     {
+        return $this->verifiedWebhookData($rawBody, $signatureHeader) !== null;
+    }
+
+    /**
+     * The `data` member the signature covers, decoded from exactly the text that was checked, or
+     * null if the signature is wrong. A body can repeat "data": the signature may cover the first
+     * while json_decode keeps the last, so the payload's own decoded value must never be trusted.
+     *
+     * @return array<mixed>|null
+     */
+    private function verifiedWebhookData(string $rawBody, string $signatureHeader): ?array
+    {
         $signature = strtolower(trim($signatureHeader));
         if ($signature === '' || trim($rawBody) === '') {
-            return false;
+            return null;
         }
 
         $signingKey = $this->secretKey !== '' ? $this->secretKey : $this->webhookSecret;
         if ($signingKey === '') {
-            return false;
+            return null;
         }
 
         $payload = json_decode($rawBody, true);
         if (!is_array($payload) || !isset($payload['data'])) {
-            return false;
+            return null;
         }
 
         $candidates = array_filter([
@@ -231,17 +253,19 @@ class KoraService
 
         foreach (array_unique($candidates) as $candidate) {
             if (hash_equals(hash_hmac('sha256', $candidate, $signingKey), $signature)) {
-                return true;
+                $data = json_decode($candidate, true);
+                return is_array($data) ? $data : [];
             }
         }
 
-        return false;
+        return null;
     }
 
     /**
      * Process an incoming Kora webhook notification.
-     * Invalid signatures throw InvalidArgumentException (401). Every outcome, including
-     * rejections, is recorded in payment_webhook_events.
+     * Invalid signatures throw InvalidArgumentException (401). Every outcome is recorded in
+     * payment_webhook_events; a rejection as a short record, never its body, up to a limit per
+     * connection (429 beyond it), so unsigned requests can't fill the database.
      */
     public function handleWebhook(string $rawBody, string $signatureHeader): array
     {
@@ -250,20 +274,25 @@ class KoraService
             throw new InvalidArgumentException("Malformed webhook payload. Expected valid JSON.");
         }
 
-        $eventType = trim((string) ($payload['event'] ?? 'unknown'));
-        $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
-        $reference = trim((string) ($data['reference'] ?? ''));
-        $eventReference = !empty($payload['event_id'])
-            ? trim((string) $payload['event_id'])
-            : "{$eventType}:{$reference}:" . ($data['status'] ?? 'unknown');
+        $eventType = Input::text($payload['event'] ?? null, 'unknown');
 
-        if (!$this->verifyWebhookSignature($rawBody, $signatureHeader)) {
+        $data = $this->verifiedWebhookData($rawBody, $signatureHeader);
+        if ($data === null) {
+            RateLimiter::attempt(self::BAD_SIGNATURE_BUCKET, RequestContext::clientIp(), self::BAD_SIGNATURE_LIMIT, self::BAD_SIGNATURE_WINDOW);
+            $unsigned = is_array($payload['data'] ?? null) ? $payload['data'] : [];
             $this->recordWebhookEvent('invalid-signature:' . substr(hash('sha256', $rawBody), 0, 32), $eventType, 0, 'failed', [
                 'error' => 'SIGNATURE_VERIFICATION_FAILED',
-                'reference' => $reference,
+                'reference' => mb_substr(Input::text($unsigned['reference'] ?? null), 0, 100),
             ]);
             throw new InvalidArgumentException("Webhook signature verification failed.");
         }
+
+        // From here on, only what the signature covers.
+        $payload['data'] = $data;
+        $reference = Input::text($data['reference'] ?? null);
+        $eventReference = !empty($payload['event_id'])
+            ? Input::text($payload['event_id'])
+            : "{$eventType}:{$reference}:" . Input::text($data['status'] ?? null, 'unknown');
 
         return $this->processPaymentEvent($eventType, $data, $eventReference, $payload);
     }

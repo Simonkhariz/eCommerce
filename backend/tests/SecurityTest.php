@@ -132,6 +132,76 @@ $t->check('PUT profile with CSRF -> 200', 200, $t->http('PUT', '/customer/profil
 $t->check('a number as the profile name is not a server error', 200, $t->http('PUT', '/customer/profile', ['jar' => 'cust', 'csrf' => $csrf, 'json' => ['full_name' => 12345]])['status']);
 $t->check('a list as an address name gets a clear 422', 422, $t->http('POST', '/customer/addresses', ['jar' => 'cust', 'csrf' => $csrf, 'json' => ['recipient_name' => [], 'phone' => '08000000000', 'street_address' => '1 Road', 'city' => 'Ikeja', 'state' => 'Lagos']])['status']);
 $t->check('customer cookie on an admin endpoint -> 401', 401, $t->http('GET', '/admin/orders', ['jar' => 'cust'])['status']);
+
+$t->section('Profile: the phone rule, and sizes the database can hold');
+$putProfile = static fn (array $json): array => $t->http('PUT', '/customer/profile', ['jar' => 'cust', 'csrf' => $csrf, 'json' => $json]);
+$storedPhone = static fn (): ?string => $t->scalar("SELECT `phone` FROM `users` WHERE `email` = ?", 's', [$custEmail]);
+$t->check('profile phone "abc" -> 422', 422, $putProfile(['phone' => 'abc'])['status']);
+$t->check('and it is not stored', '08000000000', $storedPhone());
+$t->check('a list as the phone -> 422', 422, $putProfile(['phone' => ['0803']])['status']);
+$t->check('an over-long phone -> 422', 422, $putProfile(['phone' => str_repeat('0', 51)])['status']);
+$t->check('an over-long name -> 422', 422, $putProfile(['full_name' => str_repeat('n', 256)])['status']);
+$t->check('spaces and dashes are fine', 200, $putProfile(['phone' => '0803 123-4567'])['status']);
+$t->check('+234 is fine', 200, $putProfile(['phone' => '+234 803 123 4567'])['status']);
+$t->check('the phone is optional: empty clears it', [200, ''], (static function () use ($putProfile, $storedPhone): array {
+    return [$putProfile(['phone' => ''])['status'], $storedPhone()];
+})());
+
+$t->section('Addresses: an update follows the same rules as a new one');
+$customerId = (int) $t->scalar("SELECT `id` FROM `users` WHERE `email` = ?", 's', [$custEmail]);
+$newAddress = ['recipient_name' => 'Ada Obi', 'phone' => '08031234567', 'street_address' => '1 Road', 'city' => 'Ikeja', 'state' => 'Lagos'];
+$postAddress = static fn (array $json): array => $t->http('POST', '/customer/addresses', ['jar' => 'cust', 'csrf' => $csrf, 'json' => $json]);
+$addressA = (int) TestKit::get($postAddress($newAddress), 'data.id');
+$addressB = (int) TestKit::get($postAddress(['city' => 'Yaba'] + $newAddress), 'data.id');
+$putAddress = static fn (int $id, array $json): array => $t->http('PUT', "/customer/addresses/{$id}", ['jar' => 'cust', 'csrf' => $csrf, 'json' => $json]);
+$cityOf = static fn (int $id): ?string => $t->scalar("SELECT `city` FROM `addresses` WHERE `id` = ?", 'i', [$id]);
+$t->check('PUT a blank city -> 422', 422, $putAddress($addressA, ['city' => ''])['status']);
+$t->check('PUT a list as the city -> 422', 422, $putAddress($addressA, ['city' => ['x']])['status']);
+$t->check('neither is saved (no blank, no "Array")', 'Ikeja', $cityOf($addressA));
+$t->check('PUT one good field still works', 200, $putAddress($addressA, ['city' => 'Surulere'])['status']);
+$t->check('and is saved', 'Surulere', $cityOf($addressA));
+foreach ([['label', 51], ['recipient_name', 256], ['phone', 51], ['street_address', 256], ['city', 101], ['state', 101], ['country', 101], ['postal_code', 21]] as [$field, $size]) {
+    $t->check("POST an over-long {$field} -> 422", 422, $postAddress([$field => str_repeat('1', $size)] + $newAddress)['status']);
+    $t->check("PUT an over-long {$field} -> 422", 422, $putAddress($addressA, [$field => str_repeat('1', $size)])['status']);
+}
+// A failure partway must not leave the customer with no default address.
+$defaultOf = static fn (): array => array_map('intval', array_column($t->sql("SELECT `id` FROM `addresses` WHERE `user_id` = ? AND `is_default` = 1", 'i', [$customerId]), 'id'));
+$t->check('the first address is the default', [$addressA], $defaultOf());
+$conn = $t->db->getConnection();
+$sqlMode = (string) $conn->query('SELECT @@SESSION.sql_mode')->fetch_row()[0];
+$conn->query("SET SESSION sql_mode = 'STRICT_ALL_TABLES'");
+$addressRepo = new \App\Repositories\AddressRepository();
+foreach ([
+    'an update' => static fn () => $addressRepo->update($addressB, $customerId, ['is_default' => 1, 'label' => str_repeat('x', 60)]),
+    'a new address' => static fn () => $addressRepo->create($customerId, ['is_default' => 1, 'label' => str_repeat('x', 60)] + $newAddress),
+] as $what => $failing) {
+    try {
+        $failing();
+        $t->ok("{$what} too big for the database fails", false);
+    } catch (\mysqli_sql_exception) {
+        $t->check("{$what} that fails keeps the default address", [$addressA], $defaultOf());
+    }
+}
+$conn->query("SET SESSION sql_mode = '" . $conn->real_escape_string($sqlMode) . "'");
+$t->check('a good update moves the default', [$addressB], (static function () use ($putAddress, $addressB, $defaultOf): array {
+    $putAddress($addressB, ['is_default' => true]);
+    return $defaultOf();
+})());
+
+$t->section('Sign-up refuses bad input with a 422');
+$register = static fn (array $over): array => $t->http('POST', '/auth/register', ['json' => $over + ['full_name' => 'Bad Input', 'email' => $t->uniq('t-sec-bad') . '@example.test', 'password' => 'GoodPassword123']]);
+foreach ([
+    'a password with a zero byte' => [['password' => "GoodPass\u{0}word123"], 'password'],
+    'an over-long name' => [['full_name' => str_repeat('n', 256)], 'full_name'],
+    'an over-long phone' => [['phone' => str_repeat('0', 51)], 'phone'],
+    'a phone that is not one' => [['phone' => 'abc'], 'phone'],
+    'a list as the name' => [['full_name' => ['x']], 'full_name'],
+] as $what => [$over, $field]) {
+    $res = $register($over);
+    $t->check("{$what} -> 422 on {$field}", [422, true], [$res['status'], TestKit::get($res, "error.details.{$field}") !== null]);
+}
+$t->check('/auth/me?scope[]=x -> 401, not a server error', 401, $t->http('GET', '/auth/me?scope[]=x')['status']);
+$t->check('/auth/logout?scope[]=x -> 200, not a server error', 200, $t->http('POST', '/auth/logout?scope[]=x', ['json' => []])['status']);
 $raw = (string) ($jar[$customerCookie]['value'] ?? '');
 $t->check('session stored hashed (raw cookie is not a DB id)', 0, (int) $t->scalar("SELECT COUNT(*) FROM `sessions` WHERE `id` = ?", 's', [$raw]));
 $t->check('session stored as sha256 of the cookie', 1, (int) $t->scalar("SELECT COUNT(*) FROM `sessions` WHERE `id` = ?", 's', [hash('sha256', $raw)]));
@@ -293,7 +363,70 @@ if ($allowed !== '') {
 }
 
 // -----------------------------------------------------------------------------
+$t->section('First-run setup refuses a password bcrypt cannot take');
+$adminIds = array_map('intval', array_column($t->sql("SELECT `id` FROM `users` WHERE `role` IN ('admin', 'super_admin')"), 'id'));
+$setupFlag = $t->scalar("SELECT `value` FROM `store_settings` WHERE `key_name` = 'is_setup_completed'");
+$setupOpen = static function () use ($t, $adminIds): void {
+    $t->sql("UPDATE `users` SET `role` = 'customer' WHERE `id` IN (" . implode(',', $adminIds) . ')');
+    $t->sql("UPDATE `store_settings` SET `value` = '0' WHERE `key_name` = 'is_setup_completed'");
+};
+$setupClosed = static function () use ($t, $adminIds, $setupFlag): void {
+    $t->sql("UPDATE `users` SET `role` = 'admin' WHERE `id` IN (" . implode(',', $adminIds) . ')');
+    $t->sql("UPDATE `store_settings` SET `value` = ? WHERE `key_name` = 'is_setup_completed'", 's', [(string) $setupFlag]);
+};
+$t->cleanup($setupClosed);
+$setupOpen();
+$setup = $t->http('POST', '/setup', ['json' => [
+    'name' => 'Owner', 'email' => 'owner@example.test', 'password' => "GoodPass\u{0}word123", 'store_name' => 'Shop',
+    'origin_address' => '1 Road', 'origin_city' => 'Ikeja', 'origin_state' => 'Lagos',
+]]);
+$setupClosed();
+$t->check('a password with a zero byte -> 422 on password', [422, true], [$setup['status'], TestKit::get($setup, 'error.details.password') !== null]);
+
+// -----------------------------------------------------------------------------
+$t->section('Sign-in: only real addresses reach an account');
+$login = static fn (string $email, string $password, array $headers = []): array => $t->http('POST', '/auth/login', ['headers' => $headers, 'json' => ['email' => $email, 'password' => $password]]);
+$t->ok('an admin address like admin@shopco.ng passes the check', filter_var('admin@shopco.ng', FILTER_VALIDATE_EMAIL) !== false);
+$refused = array_filter(array_column($t->sql('SELECT `email` FROM `users`'), 'email'), static fn (string $e): bool => filter_var(strtolower($e), FILTER_VALIDATE_EMAIL) === false);
+$t->check('every address already in the database passes it', [], array_values($refused));
+$wrongPassword = $login($admin['email'], 'not-the-password');
+$accented = preg_replace('/e/', 'é', $admin['email'], 1);
+$t->ok('(the accented address really differs)', $accented !== $admin['email']);
+$accentRes = $login($accented, $admin['password']);
+$t->check('an accented copy of an admin address, even with the right password -> 401', 401, $accentRes['status']);
+$t->check('the answer is the same as for a wrong password', $wrongPassword['json'], $accentRes['json']);
+$t->check('a capitalised address is still the same account', 200, $login(strtoupper($admin['email']), $admin['password'])['status']);
+$t->check('a zero byte in a password is just a wrong password', 401, $login($admin['email'], "x\u{0}y")['status']);
+$t->sql('DELETE FROM `rate_limits`');
+
+// Unknown addresses take as long as a wrong password (the password check always runs).
+$timed = static function (callable $emailFor) use ($login): float {
+    $times = [];
+    foreach ([1, 2, 3] as $i) {
+        $start = microtime(true);
+        $login($emailFor($i), 'not-the-password');
+        $times[] = microtime(true) - $start;
+    }
+    sort($times);
+    return $times[1];
+};
+$knownTime = $timed(static fn (int $i): string => $custEmail);
+$unknownTime = $timed(static fn (int $i): string => "nobody{$i}." . getmypid() . '@example.test');
+$t->ok('an unknown email takes about as long as a known one', $unknownTime > $knownTime * 0.5, sprintf('unknown %.0f ms, known %.0f ms', $unknownTime * 1000, $knownTime * 1000));
+$t->sql('DELETE FROM `rate_limits`');
+
+// Fifty failures from one connection stop it, whichever addresses it tries.
+for ($i = 1; $i <= 50; $i++) {
+    $last = $login("not-an-address-{$i}", 'guess')['status'];
+}
+$t->check('the 50th failure is still an ordinary 401', 401, $last);
+$t->check('the next attempt from that connection -> 429, even with the right password', 429, $login($admin['email'], $admin['password'])['status']);
+$t->sql('DELETE FROM `rate_limits`');
+
+// -----------------------------------------------------------------------------
 $t->section('Rate limits');
+// Three requests, as the sign-in tests above cleared the counters.
+$t->http('POST', '/auth/customer/magic-link', ['json' => ['email' => $custEmail]]);
 $t->http('POST', '/auth/customer/magic-link', ['json' => ['email' => $custEmail]]);
 $t->http('POST', '/auth/customer/magic-link', ['json' => ['email' => $custEmail]]);
 $t->check('4th magic link for one email within 15 minutes -> 429', 429, $t->http('POST', '/auth/customer/magic-link', ['json' => ['email' => $custEmail]])['status']);

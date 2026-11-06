@@ -271,7 +271,7 @@ $t->ok('checkout no longer offers Kora', !in_array('kora', $methodIds(), true));
 $t->ok('settings report Kora as switched off', TestKit::get($A('GET', '/admin/settings'), 'data.readonly.payment_methods.kora.enabled') === false);
 $t->check('switching every method off is refused', 422, $A('PUT', '/admin/settings/payment-methods', ['json' => ['monnify' => false, 'kora' => false, 'whatsapp' => false]])['status']);
 $t->check('switch Kora back on', 200, $A('PUT', '/admin/settings/payment-methods', ['json' => ['kora' => true]])['status']);
-$t->ok('checkout offers Kora again', in_array('kora', $methodIds(), true));
+$t->check('checkout offers Kora again (when it has keys)', \App\Services\PaymentMethods::configured('kora'), in_array('kora', $methodIds(), true));
 $payNow = static fn (): ?string => TestKit::get($t->http('GET', '/checkout/payment-methods'), 'data.pay_now_gateway');
 // Which gateways have keys on this server decides the right answer ("Pay now" never points at a
 // gateway that isn't set up: its button could only fail).
@@ -612,6 +612,9 @@ $t->check('and its stock corrected', [200, 100], (function () use ($A, $spacedId
 $t->section('Admin account');
 $second = 'admin-second-' . $adminId;
 $t->http('POST', '/auth/login', ['json' => ['email' => $admin['email'], 'password' => $admin['password']], 'jar' => $second]);
+$t->check('an over-long phone on the admin account refused', 422, $A('PUT', '/admin/account', ['json' => ['full_name' => 'Test adminapi', 'phone' => str_repeat('0', 51)]])['status']);
+$t->check('an over-long name on the admin account refused', 422, $A('PUT', '/admin/account', ['json' => ['full_name' => str_repeat('n', 256)]])['status']);
+$t->check('a new password with a zero byte refused', 422, $A('PUT', '/admin/account', ['json' => ['full_name' => 'Test adminapi', 'current_password' => $admin['password'], 'new_password' => "another\u{0}long-pass"]])['status']);
 $t->check('wrong current password refused', 422, $A('PUT', '/admin/account', ['json' => ['full_name' => 'Test adminapi', 'current_password' => 'nope', 'new_password' => 'another-long-pass']])['status']);
 $t->check('change password', 200, $A('PUT', '/admin/account', ['json' => ['full_name' => 'Test adminapi', 'current_password' => $admin['password'], 'new_password' => $admin['password'] . '-new']])['status']);
 $t->check('other admin session signed out', 401, $t->http('GET', '/admin/account', ['jar' => $second])['status']);

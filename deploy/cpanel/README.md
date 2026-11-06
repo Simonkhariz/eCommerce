@@ -205,6 +205,25 @@ address every 5 minutes. Hosts stop idle Node.js apps, which makes the next visi
 (under 1 second in the rehearsal, likely a few on a busy host); these visits usually keep it awake, and
 they tell you when the shop is down.
 
+## Turning on card payments
+
+The shop starts with WhatsApp payment only. Do this once a gateway has approved your business.
+
+1. In the API's `.env`, remove the `#` from that gateway's lines and fill in the keys from its dashboard
+   (the block is under `PAYMENT_KORA_ENABLED`). Set its `PAYMENT_MONNIFY_ENABLED` or `PAYMENT_KORA_ENABLED`
+   to `true`.
+2. **Monnify:** keep `MONNIFY_API_BASE_URL=https://api.monnify.com`. Without that line it uses Monnify's
+   test system (sandbox), where no real money moves. In Monnify's dashboard, set the transaction webhook to
+   `https://<shop address>/api/v1/webhooks/monnify`.
+3. **Kora:** nothing to set in its dashboard: each payment tells Kora where to send its notice,
+   `APP_URL` + `/api/v1/webhooks/kora`, and that's why `APP_URL` must be the real https address.
+4. In admin, **Settings → Payment methods**: check the gateway shows as live, not sandbox or "not set up",
+   and choose which one "Pay now" uses.
+5. Pay for a small real order and refund it, before telling customers.
+
+A gateway without its keys isn't offered at checkout, so a half-finished setup can't take a customer to
+a failing page.
+
 ## Updating later
 
 1. Commit, then run step 3 again (the build; not the database export).

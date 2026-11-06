@@ -51,35 +51,38 @@ class AddressRepository
      */
     public function create(int $userId, array $data): int
     {
-        $isDefault = !empty($data['is_default']) ? 1 : 0;
+        // In one transaction: a failed insert must not leave the customer with no default address.
+        return $this->db->transaction(function (Database $db) use ($userId, $data): int {
+            $isDefault = !empty($data['is_default']) ? 1 : 0;
 
-        // If this is the user's first address, make it default automatically
-        $existingCount = $this->db->fetchOne("SELECT COUNT(*) AS c FROM `addresses` WHERE `user_id` = ?", 'i', [$userId]);
-        if ($existingCount !== null && (int) $existingCount['c'] === 0) {
-            $isDefault = 1;
-        }
+            // If this is the user's first address, make it default automatically
+            $existingCount = $db->fetchOne("SELECT COUNT(*) AS c FROM `addresses` WHERE `user_id` = ?", 'i', [$userId]);
+            if ($existingCount !== null && (int) $existingCount['c'] === 0) {
+                $isDefault = 1;
+            }
 
-        if ($isDefault === 1) {
-            $this->db->execute("UPDATE `addresses` SET `is_default` = 0 WHERE `user_id` = ?", 'i', [$userId]);
-        }
+            if ($isDefault === 1) {
+                $db->execute("UPDATE `addresses` SET `is_default` = 0 WHERE `user_id` = ?", 'i', [$userId]);
+            }
 
-        $label = Input::text($data['label'] ?? null, 'Home');
-        $recipientName = Input::text($data['recipient_name'] ?? null);
-        $phone = Input::text($data['phone'] ?? null);
-        $streetAddress = Input::text($data['street_address'] ?? null);
-        $city = Input::text($data['city'] ?? null);
-        $state = Input::text($data['state'] ?? null);
-        $country = Input::text($data['country'] ?? null, 'Nigeria');
-        $postalCode = isset($data['postal_code']) ? Input::text($data['postal_code'] ?? null) : null;
+            $label = Input::text($data['label'] ?? null, 'Home');
+            $recipientName = Input::text($data['recipient_name'] ?? null);
+            $phone = Input::text($data['phone'] ?? null);
+            $streetAddress = Input::text($data['street_address'] ?? null);
+            $city = Input::text($data['city'] ?? null);
+            $state = Input::text($data['state'] ?? null);
+            $country = Input::text($data['country'] ?? null, 'Nigeria');
+            $postalCode = isset($data['postal_code']) ? Input::text($data['postal_code'] ?? null) : null;
 
-        $sql = "INSERT INTO `addresses` (`user_id`, `label`, `recipient_name`, `phone`, `street_address`, `city`, `state`, `country`, `postal_code`, `is_default`)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO `addresses` (`user_id`, `label`, `recipient_name`, `phone`, `street_address`, `city`, `state`, `country`, `postal_code`, `is_default`)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-        return (int) $this->db->insert(
-            $sql,
-            'issssssssi',
-            [$userId, $label, $recipientName, $phone, $streetAddress, $city, $state, $country, $postalCode, $isDefault]
-        );
+            return (int) $db->insert(
+                $sql,
+                'issssssssi',
+                [$userId, $label, $recipientName, $phone, $streetAddress, $city, $state, $country, $postalCode, $isDefault]
+            );
+        });
     }
 
     /**
@@ -90,10 +93,6 @@ class AddressRepository
         $existing = $this->findByIdAndUser($id, $userId);
         if ($existing === null) {
             return false;
-        }
-
-        if (!empty($data['is_default'])) {
-            $this->db->execute("UPDATE `addresses` SET `is_default` = 0 WHERE `user_id` = ?", 'i', [$userId]);
         }
 
         $fields = [];
@@ -116,7 +115,7 @@ class AddressRepository
             if (array_key_exists($col, $data)) {
                 $fields[] = "`{$col}` = ?";
                 $types .= $t;
-                $values[] = $t === 'i' ? (!empty($data[$col]) ? 1 : 0) : trim((string) $data[$col]);
+                $values[] = $t === 'i' ? (!empty($data[$col]) ? 1 : 0) : Input::text($data[$col]);
             }
         }
 
@@ -129,7 +128,13 @@ class AddressRepository
         $values[] = $id;
         $values[] = $userId;
 
-        $this->db->execute($sql, $types, $values);
+        // In one transaction: a failed update must not leave the customer with no default address.
+        $this->db->transaction(function (Database $db) use ($data, $userId, $sql, $types, $values): void {
+            if (!empty($data['is_default'])) {
+                $db->execute("UPDATE `addresses` SET `is_default` = 0 WHERE `user_id` = ?", 'i', [$userId]);
+            }
+            $db->execute($sql, $types, $values);
+        });
         return true;
     }
 
@@ -166,8 +171,10 @@ class AddressRepository
             return false;
         }
 
-        $this->db->execute("UPDATE `addresses` SET `is_default` = 0 WHERE `user_id` = ?", 'i', [$userId]);
-        $this->db->execute("UPDATE `addresses` SET `is_default` = 1 WHERE `id` = ? AND `user_id` = ?", 'ii', [$id, $userId]);
+        $this->db->transaction(function (Database $db) use ($id, $userId): void {
+            $db->execute("UPDATE `addresses` SET `is_default` = 0 WHERE `user_id` = ?", 'i', [$userId]);
+            $db->execute("UPDATE `addresses` SET `is_default` = 1 WHERE `id` = ? AND `user_id` = ?", 'ii', [$id, $userId]);
+        });
         return true;
     }
 }

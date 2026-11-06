@@ -312,6 +312,13 @@ $t->ok('email address shown masked', str_contains((string) TestKit::get($ok, 'da
 $code = $t->confirmationCode(strtolower($admin['email']));
 $t->ok('code delivered by email', $code !== null && strlen($code) === 6);
 $t->check('code is never stored', 0, (int) $t->scalar("SELECT COUNT(*) FROM `admin_confirmations` WHERE `id` = ? AND `code_hash` = ?", 'ss', [$confirmId, (string) $code]));
+// Someone signed in to admin must not be able to read the code: that is what it protects against.
+$outboxList = $A('GET', '/admin/notifications/outbox?per_page=100');
+$t->check('the email outbox lists the code email', 200, $outboxList['status']);
+$t->ok('with its subject', in_array('Your clean-up confirmation code', array_column((array) TestKit::get($outboxList, 'data.items'), 'subject'), true));
+$t->ok('the outbox list does not show the code', !str_contains($outboxList['body'], (string) $code));
+$t->ok('nor does the review list of old emails', !str_contains($A('GET', '/admin/data/records?rule=old_emails&as_of=' . rawurlencode($now()))['body'], (string) $code));
+$t->check('and it is nowhere in its stored row', 0, (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `template` = 'admin_confirm_code' AND (`subject` LIKE ? OR `payload` LIKE ?)", 'ss', ["%{$code}%", "%{$code}%"]));
 $t->ok('nothing removed yet', $evtExists($evt));
 
 $bad = $run(['confirmation_id' => $confirmId, 'code' => $code === '000000' ? '111111' : '000000']);

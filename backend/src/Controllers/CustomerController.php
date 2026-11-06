@@ -9,6 +9,7 @@ use App\Database\Database;
 use App\Middleware\JsonBodyMiddleware;
 use App\Repositories\AddressRepository;
 use App\Repositories\UserRepository;
+use App\Support\PhoneNumber;
 use App\Support\RequestContext;
 use App\Support\Response;
 
@@ -56,6 +57,18 @@ class CustomerController
         $fullName = isset($body['full_name']) ? Input::text($body['full_name'] ?? null) : null;
         $phone = isset($body['phone']) ? Input::text($body['phone'] ?? null) : null;
 
+        $errors = [];
+        if ($fullName !== null && Input::tooLong($fullName, 255)) {
+            $errors['full_name'] = 'Full name can be at most 255 characters.';
+        }
+        // The phone is optional, so an empty one clears it; a list is not an empty phone.
+        if (is_array($body['phone'] ?? null) || ($phone !== null && $phone !== '' && !PhoneNumber::isNigerian($phone))) {
+            $errors['phone'] = PhoneNumber::NIGERIAN_RULE;
+        }
+        if (!empty($errors)) {
+            Response::error('Profile validation failed.', 422, 'VALIDATION_ERROR', $errors);
+        }
+
         $updates = [];
         if ($fullName !== null && $fullName !== '') {
             $updates['full_name'] = $fullName;
@@ -98,23 +111,7 @@ class CustomerController
 
         $body = JsonBodyMiddleware::getBody();
 
-        $errors = [];
-        if (empty(Input::text($body['recipient_name'] ?? null))) {
-            $errors['recipient_name'] = 'Recipient name is required.';
-        }
-        if (empty(Input::text($body['phone'] ?? null))) {
-            $errors['phone'] = 'Phone number is required.';
-        }
-        if (empty(Input::text($body['street_address'] ?? null))) {
-            $errors['street_address'] = 'Street address is required.';
-        }
-        if (empty(Input::text($body['city'] ?? null))) {
-            $errors['city'] = 'City is required.';
-        }
-        if (empty(Input::text($body['state'] ?? null))) {
-            $errors['state'] = 'State is required.';
-        }
-
+        $errors = self::addressErrors($body, false);
         if (!empty($errors)) {
             Response::error('Address validation failed.', 422, 'VALIDATION_ERROR', $errors);
         }
@@ -123,6 +120,43 @@ class CustomerController
         $created = $this->addressRepo->findByIdAndUser($addressId, (int) $user['id']);
 
         Response::success($created, 'Address added successfully.', 201);
+    }
+
+    /**
+     * The address book's rules. A new address must have every required field; an update is
+     * checked on the fields it sends. Each limit is its database column's size.
+     *
+     * @return array<string, string> field => message
+     */
+    private static function addressErrors(array $body, bool $onlySentFields): array
+    {
+        // field => [label, largest size, required]
+        $rules = [
+            'label' => ['Label', 50, false],
+            'recipient_name' => ['Recipient name', 255, true],
+            'phone' => ['Phone number', 50, true],
+            'street_address' => ['Street address', 255, true],
+            'city' => ['City', 100, true],
+            'state' => ['State', 100, true],
+            'country' => ['Country', 100, false],
+            'postal_code' => ['Postal code', 20, false],
+        ];
+
+        $errors = [];
+        foreach ($rules as $field => [$label, $max, $required]) {
+            if ($onlySentFields && !array_key_exists($field, $body)) {
+                continue;
+            }
+            $value = $body[$field] ?? null;
+            if (is_array($value)) {
+                $errors[$field] = "{$label} must be text.";
+            } elseif ($required && empty(Input::text($value))) {
+                $errors[$field] = "{$label} is required.";
+            } elseif (Input::tooLong($value, $max)) {
+                $errors[$field] = "{$label} can be at most {$max} characters.";
+            }
+        }
+        return $errors;
     }
 
     /**
@@ -137,6 +171,11 @@ class CustomerController
 
         $addressId = (int) ($params['id'] ?? 0);
         $body = JsonBodyMiddleware::getBody();
+
+        $errors = self::addressErrors($body, true);
+        if (!empty($errors)) {
+            Response::error('Address validation failed.', 422, 'VALIDATION_ERROR', $errors);
+        }
 
         $updated = $this->addressRepo->update($addressId, (int) $user['id'], $body);
         if (!$updated) {
@@ -370,7 +409,7 @@ class CustomerController
         $orders = $this->db->fetchAll(
             "SELECT `id`, `order_number`, `order_status`, `payment_status`, `currency`,
                     `subtotal`, `discount_amount`, `shipping_fee`, `grand_total`,
-                    `shipping_address_snapshot`, `expires_at`, `created_at`, `updated_at`
+                    `shipping_address_snapshot`, `expires_at`, `customer_marked_paid_at`, `created_at`, `updated_at`
              FROM `orders`
              WHERE `user_id` = ?
              ORDER BY `id` DESC",

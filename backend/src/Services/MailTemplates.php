@@ -379,7 +379,9 @@ final class MailTemplates
         $code = (string) ($p['code'] ?? '');
         $summary = is_array($p['summary'] ?? null) ? $p['summary'] : [];
         $expires = !empty($p['expires_at']) ? $this->dateTime((string) $p['expires_at']) : '';
-        $subject = "Your clean-up confirmation code: {$code}";
+        // Never the code itself: subjects are listed in admin (Email outbox), where anyone signed in
+        // to admin could read it, and the code exists to prove access to this inbox.
+        $subject = 'Your clean-up confirmation code';
 
         $rows = [];
         foreach ($summary as $label => $count) {

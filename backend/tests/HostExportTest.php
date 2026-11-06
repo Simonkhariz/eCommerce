@@ -52,6 +52,25 @@ fclose($pipes[1]);
 fclose($pipes[2]);
 $code = proc_close($proc);
 
+$t->section('A file that cannot be written fails, and none is left behind');
+// support/failing_gzip.php makes the writer's gzwrite/gzclose fail as on a full disk.
+foreach (['short', 'lost', 'close'] as $failure) {
+    $brokenFile = "{$dir}/broken-{$failure}.sql.gz";
+    $proc = proc_open(
+        [PHP_BINARY, '-d', 'auto_prepend_file=' . __DIR__ . '/support/failing_gzip.php', BASE_PATH . '/scripts/export_for_host.php', "--out={$brokenFile}"],
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        BASE_PATH,
+        array_merge(getenv(), ['FAKE_GZIP_FAILURE' => $failure])
+    );
+    $brokenOutput = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $t->check("{$failure}: exit 1", 1, proc_close($proc));
+    $t->ok("{$failure}: says it failed", str_contains($brokenOutput, 'The export failed'), $brokenOutput);
+    $t->ok("{$failure}: no file left", !is_file($brokenFile));
+}
+
 $t->section('The file is made, and nothing changes where it was made');
 $t->ok('exit 0', $code === 0, $output);
 $t->ok('the file exists', is_file($file));

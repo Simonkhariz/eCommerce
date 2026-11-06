@@ -32,7 +32,7 @@ final class SessionCookie
     /**
      * Normalize a user-supplied scope value (query string / body).
      */
-    public static function normalizeScope(?string $scope): string
+    public static function normalizeScope(mixed $scope): string
     {
         return $scope === self::SCOPE_ADMIN ? self::SCOPE_ADMIN : self::SCOPE_CUSTOMER;
     }

@@ -84,11 +84,41 @@ $t->check('best-selling sort works', 200, $t->http('GET', '/products?sort=best_s
 $t->check('flash deals filter works', 200, $t->http('GET', '/products?flash_deals=1')['status']);
 $t->check('unknown product 404', 404, $t->http('GET', '/products/no-such-product-' . getmypid())['status']);
 
+$publicDetail = $t->http('GET', "/products/{$slug}");
+$t->ok('a public product does not show its sales figures', is_array($publicDetail['json']['data'] ?? null) && !array_key_exists('units_sold', $publicDetail['json']['data']));
+$t->ok('public variants do not show the low-stock alert level', array_filter((array) TestKit::get($publicDetail, 'data.variants'), static fn (array $variant): bool => array_key_exists('low_stock_threshold', $variant)) === []);
+$adminDetail = (new \App\Repositories\ProductRepository())->findDetail($slug, true);
+$t->ok('admin still gets both', array_key_exists('units_sold', $adminDetail) && array_key_exists('low_stock_threshold', $adminDetail['variants'][0]));
+
+// A list where text is expected is ignored or refused, never a server error.
+foreach (['colors', 'sizes', 'color', 'size', 'category', 'search', 'q', 'dress_style', 'sort', 'min_price', 'max_price', 'page', 'per_page'] as $param) {
+    foreach (["{$param}[]=x", "{$param}[][]=x"] as $query) {
+        $status = $t->http('GET', "/products?{$query}")['status'];
+        $t->ok("/products?{$query} is not a server error", $status < 500, (string) $status);
+    }
+}
+
 // -----------------------------------------------------------------------------
 $t->section('Cart check and delivery quotes');
 $cc = $t->http('POST', '/checkout/cart-check', ['json' => ['variant_ids' => [$vid]]]);
 $t->check('cart-check returns the live price', $price, (float) TestKit::get($cc, 'data.lines.0.unit_price'));
 $t->check('cart-check returns live stock', $stock, (int) TestKit::get($cc, 'data.lines.0.stock_quantity'));
+
+// A product that is not on sale keeps its details to itself.
+$productName = (string) $t->scalar("SELECT `name` FROM `products` WHERE `id` = ?", 'i', [$pid]);
+$restoreProduct = fn () => $t->sql("UPDATE `products` SET `status` = 'published' WHERE `id` = ?", 'i', [$pid]);
+$t->cleanup($restoreProduct);
+foreach (['draft', 'archived'] as $hiddenStatus) {
+    $t->sql("UPDATE `products` SET `status` = ? WHERE `id` = ?", 'si', [$hiddenStatus, $pid]);
+    $hiddenCheck = $t->http('POST', '/checkout/cart-check', ['json' => ['variant_ids' => [$vid]]]);
+    $t->check("cart-check on a {$hiddenStatus} product says only that it is unavailable", ['variant_id' => $vid, 'available' => false], TestKit::get($hiddenCheck, 'data.lines.0'));
+    $hiddenQuote = $t->http('POST', '/checkout/quote', ['json' => ['items' => [['product_id' => $pid, 'variant_id' => $vid, 'quantity' => 1]]]]);
+    $t->check("a quote for a {$hiddenStatus} product -> 422", 422, $hiddenQuote['status']);
+    $t->ok('and it names neither the product nor its status', !str_contains($hiddenQuote['body'], $productName) && !str_contains($hiddenQuote['body'], $hiddenStatus), $hiddenQuote['body']);
+}
+$restoreProduct();
+$unknownQuote = $t->http('POST', '/checkout/quote', ['json' => ['items' => [['product_id' => 99999999, 'quantity' => 1]]]]);
+$t->check('a product ID that does not exist gets the same answer', TestKit::get($hiddenQuote, 'error.message'), TestKit::get($unknownQuote, 'error.message'));
 $quote = fn (string $state) => $t->http('POST', '/checkout/quote', ['json' => [
     'items' => [['product_id' => $pid, 'variant_id' => $vid, 'quantity' => 1]],
     'shipping_address' => ['state' => $state, 'country' => 'Nigeria'],
@@ -218,6 +248,71 @@ $t->check('releasing again changes nothing', false, TestKit::get(
 $t->check('a released order cannot start a payment', 422, $t->http('POST', "/checkout/orders/{$leftNum}/initialize-payment", ['headers' => ["X-Guest-Access-Token: {$leftToken}"], 'json' => ['gateway' => 'whatsapp']])['status']);
 
 // -----------------------------------------------------------------------------
+$t->section('Delivery details: the same rules as the checkout form');
+$t->sql('DELETE FROM `rate_limits`');
+$placeWith = static fn (array $change, array $extra = []): array => $t->http('POST', '/checkout/orders', ['json' => $extra + [
+    'email' => $email,
+    'items' => [['product_id' => $pid, 'variant_id' => $vid, 'quantity' => 1]],
+    'shipping_address' => $change + $address('Store Flow', 'FCT', 'Garki'),
+]]);
+$ordersBefore = (int) $t->scalar('SELECT COUNT(*) FROM `orders`');
+foreach ([
+    'full_name' => ['.', 'A', '12 34', 'A.'],
+    'phone' => ['1', '0803123456', '080312345678', '803 123 4567', '+23408031234567', '+44 20 7946 0958', 'abc'],
+    'address_line1' => ['.', 'ab', '  a '],
+    'city' => ['.', 'ab'],
+] as $field => $badValues) {
+    foreach ($badValues as $bad) {
+        $res = $placeWith([$field => $bad]);
+        $t->check("{$field} '{$bad}' -> 422", 422, $res['status']);
+        $t->ok('naming the field the way the form reads it', is_string(TestKit::get($res, 'error.details') ? ($res['json']['error']['details']["shipping_address.{$field}"] ?? null) : null), $res['body']);
+    }
+    $t->sql('DELETE FROM `rate_limits`');
+}
+$t->check('a missing field names itself too', 'Contact phone number is required.', $placeWith(['phone' => ''])['json']['error']['details']['shipping_address.phone'] ?? null);
+$t->check('no order was made', $ordersBefore, (int) $t->scalar('SELECT COUNT(*) FROM `orders`'));
+$t->check('over-long notes -> 422', [422, true], (static function () use ($placeWith): array {
+    $res = $placeWith([], ['notes' => str_repeat('n', 2001)]);
+    return [$res['status'], TestKit::get($res, 'error.details.notes') !== null];
+})());
+$t->sql('DELETE FROM `rate_limits`');
+foreach ([
+    ['full_name' => 'Ọ Ụ', 'phone' => '0803 123-4567', 'address_line1' => '1 A', 'city' => 'Ife'],
+    ['full_name' => 'Ada', 'phone' => '+234 803 123 4567', 'address_line1' => 'Plot 3', 'city' => 'Aba'],
+    ['full_name' => 'Ada Obi', 'phone' => '(0803) 123 4567', 'address_line1' => 'Plot 3', 'city' => 'Aba'],
+] as $good) {
+    $res = $placeWith($good, ['notes' => str_repeat('n', 2000)]);
+    $t->check("good details ({$good['phone']}) are accepted", 201, $res['status']);
+    $ordersCreated[] = (string) TestKit::get($res, 'data.order_number');
+    $t->http('POST', '/checkout/orders/' . TestKit::get($res, 'data.order_number') . '/release', ['headers' => ['X-Guest-Access-Token: ' . TestKit::get($res, 'data.guest_access_token')], 'json' => []]);
+}
+$t->check('the form\'s quote needs only the state', 200, $quote('Lagos')['status']);
+$t->sql('DELETE FROM `rate_limits`');
+
+// -----------------------------------------------------------------------------
+$t->section('A database failure is never shown to the customer');
+$leakChecks = static function (array $res, string $table) use ($t): void {
+    $t->check("no database details in the answer ({$table} missing)", 500, $res['status']);
+    $t->ok('nothing about tables or the database', !preg_match("/{$table}|table|sql|" . preg_quote((string) \App\Config\Env::get('DB_DATABASE', ''), '/') . '/i', $res['body']), $res['body']);
+};
+$hidden = static function (string $table, callable $request) use ($t): array {
+    $t->sql("RENAME TABLE `{$table}` TO `{$table}_hidden`");
+    try {
+        return $request();
+    } finally {
+        $t->sql("RENAME TABLE `{$table}_hidden` TO `{$table}`");
+    }
+};
+$leakChecks($hidden('shipping_zones', static fn (): array => $quote('Lagos')), 'shipping_zones');
+$unpaid = $placeWith([]);
+$unpaidNum = (string) TestKit::get($unpaid, 'data.order_number');
+$unpaidAccess = ['X-Guest-Access-Token: ' . TestKit::get($unpaid, 'data.guest_access_token')];
+$ordersCreated[] = $unpaidNum;
+$leakChecks($hidden('payments', static fn (): array => $t->http('POST', "/checkout/orders/{$unpaidNum}/initialize-payment", ['headers' => $unpaidAccess, 'json' => ['gateway' => 'whatsapp']])), 'payments');
+$t->check('the order is still there to pay', 'pending_payment', $t->scalar("SELECT `order_status` FROM `orders` WHERE `order_number` = ?", 's', [$unpaidNum]));
+$t->check('released', true, TestKit::get($t->http('POST', "/checkout/orders/{$unpaidNum}/release", ['headers' => $unpaidAccess, 'json' => []]), 'data.released'));
+
+// -----------------------------------------------------------------------------
 $t->section('Magic link links guest orders; saved cart and wishlist');
 $t->check('magic link requested', 200, $t->http('POST', '/auth/customer/magic-link', ['json' => ['email' => $email]])['status']);
 $link = $t->magicLinkToken($email);
@@ -226,7 +321,10 @@ $verify = $t->http('POST', '/auth/customer/verify', ['jar' => 'buyer', 'json' =>
 $t->check('magic link verifies', 200, $verify['status']);
 $csrf = (string) TestKit::get($verify, 'data.csrf_token');
 $t->check('magic link cannot be reused', 401, $t->http('POST', '/auth/customer/verify', ['json' => ['token' => (string) $link]])['status']);
-$t->check('guest order now appears under My orders', $onum, TestKit::get($t->http('GET', '/customer/orders', ['jar' => 'buyer']), 'data.0.order_number'));
+$myOrders = $t->http('GET', '/customer/orders', ['jar' => 'buyer']);
+$t->ok('guest order now appears under My orders', in_array($onum, array_column((array) TestKit::get($myOrders, 'data'), 'order_number'), true));
+$myOrder = array_values(array_filter((array) TestKit::get($myOrders, 'data'), static fn (array $o): bool => $o['order_number'] === $onum))[0] ?? [];
+$t->ok('My orders knows the customer said they sent the transfer', !empty($myOrder['customer_marked_paid_at']));
 $saved = $t->http('PUT', '/customer/cart', ['jar' => 'buyer', 'csrf' => $csrf, 'json' => ['items' => [['variant_id' => $vid, 'quantity' => 2], ['variant_id' => 999999, 'quantity' => 1]]]]);
 $t->check('save cart 200', 200, $saved['status']);
 $t->check('saved cart drops unknown variants', 1, count((array) TestKit::get($saved, 'data.items')));
@@ -326,5 +424,100 @@ $t->check('subscriber marked unsubscribed', 'unsubscribed', $t->scalar("SELECT `
 $t->check('subscribing again re-activates', 200, $t->http('POST', '/newsletter/subscribe', ['json' => ['email' => $sub]])['status']);
 $t->check('re-activated subscriber is active', 'active', $t->scalar("SELECT `status` FROM `newsletter_subscribers` WHERE `email` = ?", 's', [$sub]));
 $t->check('unsubscribe date cleared on re-subscribe', null, $t->scalar("SELECT `unsubscribed_at` FROM `newsletter_subscribers` WHERE `email` = ?", 's', [$sub]));
+
+// -----------------------------------------------------------------------------
+$t->section('Tracking codes with spaces and dots can be looked up; slashes are refused when saved');
+$t->sql('DELETE FROM `rate_limits`');
+$tracked = $placeWith([]);
+$trackedNum = (string) TestKit::get($tracked, 'data.order_number');
+$ordersCreated[] = $trackedNum;
+(new \App\Services\PaymentFinalizer($t->db))->recordManualPayment((int) TestKit::get($tracked, 'data.order_id'), 'TRACK-' . bin2hex(random_bytes(4)), null);
+$ship = static fn (string $code): array => $t->http('POST', "/admin/orders/{$trackedNum}/shipment", ['jar' => $admin['jar'], 'csrf' => $admin['csrf'], 'json' => ['carrier' => 'GIG', 'tracking_number' => $code]]);
+$trackedAccess = ['headers' => ["X-Order-Email: {$email}"]];
+$lookup = static fn (string $code): array => $t->http('GET', '/checkout/orders/' . rawurlencode($code), $trackedAccess);
+$withSpace = 'TRK 12-' . bin2hex(random_bytes(3));
+$t->check('a code with a space is saved', 200, $ship($withSpace)['status']);
+$t->check('and finds its order', $trackedNum, TestKit::get($lookup($withSpace), 'data.order_number'));
+$t->check('a code with a slash is refused with a clear reason', [422, true], (static function () use ($ship): array {
+    $res = $ship('AB/12');
+    return [$res['status'], str_contains((string) TestKit::get($res, 'error.message'), 'slash')];
+})());
+$t->check('as is a backslash', 422, $ship('AB\\12')['status']);
+$t->check('and the saved code is unchanged', $withSpace, $t->scalar("SELECT `tracking_number` FROM `shipments` s JOIN `orders` o ON o.`id` = s.`order_id` WHERE o.`order_number` = ?", 's', [$trackedNum]));
+$t->check('without the checkout email a tracking code opens nothing', 404, $t->http('GET', '/checkout/orders/' . rawurlencode($withSpace))['status']);
+foreach (['..%2F..%2Fadmin', '%FF%FE', 'TRK%00'] as $oddCode) {
+    $t->check("an odd code ({$oddCode}) is simply not found", 404, $t->http('GET', "/checkout/orders/{$oddCode}", $trackedAccess)['status']);
+}
+$t->check('the other order routes stay narrow', 404, $t->http('POST', '/checkout/orders/TRK%2012/release', ['json' => []])['status']);
+
+// -----------------------------------------------------------------------------
+$t->section('A shop with nothing set up: no method is offered that could only fail');
+$lanePort = (int) (getenv('TEST_FLOW_API_PORT') ?: 8120);
+$laneDir = sys_get_temp_dir() . '/shopco-flow-' . getmypid();
+@mkdir($laneDir, 0700, true);
+$laneEnv = "{$laneDir}/env";
+$unset = ['MONNIFY_CONTRACT_CODE', 'STORE_WHATSAPP_PHONE', 'KORA_SECRET_KEY', 'KORA_API_BASE_URL'];
+file_put_contents($laneEnv, implode("\n", array_merge(
+    array_values(array_filter(file((string) getenv('SHOPCO_ENV_FILE'), FILE_IGNORE_NEW_LINES) ?: [], static fn (string $l): bool => !in_array(trim((string) strstr($l, '=', true)), $unset, true))),
+    ['MONNIFY_CONTRACT_CODE=', 'STORE_WHATSAPP_PHONE=', 'KORA_SECRET_KEY=']
+)) . "\n");
+$startLane = static function (string $envFile) use ($lanePort, $laneDir): mixed {
+    $proc = proc_open(
+        [PHP_BINARY, '-S', "127.0.0.1:{$lanePort}", '-t', BASE_PATH . '/public', BASE_PATH . '/dev-router.php'],
+        [1 => ['file', "{$laneDir}/api.log", 'a'], 2 => ['file', "{$laneDir}/api.log", 'a']],
+        $pipes,
+        BASE_PATH,
+        array_merge(getenv(), ['SHOPCO_ENV_FILE' => $envFile])
+    );
+    for ($i = 0; $i < 50 && @file_get_contents("http://127.0.0.1:{$lanePort}/api/v1/health") === false; $i++) {
+        usleep(200000);
+    }
+    return $proc;
+};
+$stopLane = static function (mixed $proc): void {
+    proc_terminate($proc);
+    proc_close($proc);
+    usleep(300000);
+};
+$oldNumber = $t->scalar("SELECT `value` FROM `store_settings` WHERE `key_name` = 'store_whatsapp_phone'");
+$t->sql("DELETE FROM `store_settings` WHERE `key_name` = 'store_whatsapp_phone'");
+$t->cleanup(function () use ($t, $oldNumber, $laneDir): void {
+    if ($oldNumber !== null) {
+        $t->sql("INSERT INTO `store_settings` (`key_name`, `value`) VALUES ('store_whatsapp_phone', ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)", 's', [(string) $oldNumber]);
+    }
+    array_map('unlink', glob("{$laneDir}/*") ?: []);
+    @rmdir($laneDir);
+});
+$lane = $startLane($laneEnv);
+$laneApi = "http://127.0.0.1:{$lanePort}/api/v1";
+$bare = $t->http('GET', "{$laneApi}/checkout/payment-methods");
+$t->check('with no WhatsApp number, WhatsApp is reported off', false, TestKit::get($bare, 'data.whatsapp_enabled'));
+$t->check('and no method without its keys or number is offered', [], TestKit::get($bare, 'data.methods'));
+$t->sql('DELETE FROM `rate_limits`');
+$bareOrder = $placeWith([]);
+$bareNum = (string) TestKit::get($bareOrder, 'data.order_number');
+$bareAccess = ['X-Guest-Access-Token: ' . TestKit::get($bareOrder, 'data.guest_access_token')];
+$ordersCreated[] = $bareNum;
+$barePay = static fn (string $gateway): array => $t->http('POST', "{$laneApi}/checkout/orders/{$bareNum}/initialize-payment", ['headers' => $bareAccess, 'json' => ['gateway' => $gateway]]);
+foreach (['monnify', 'kora', 'whatsapp'] as $gateway) {
+    $res = $barePay($gateway);
+    $t->check("{$gateway} without what it needs is refused", [422, 'PAYMENT_METHOD_DISABLED'], [$res['status'], TestKit::get($res, 'error.code')]);
+    $t->ok('and the customer is told nothing about the setup', !preg_match('/MONNIFY|KORA|\.env|contract|configured/i', $res['body']), $res['body']);
+}
+$dotted = 'TRK.5 ' . bin2hex(random_bytes(3));
+$t->check('(a code with a dot is saved)', 200, $ship($dotted)['status']);
+$t->check('a code with a dot finds its order', $trackedNum, TestKit::get($t->http('GET', "{$laneApi}/checkout/orders/" . rawurlencode($dotted), $trackedAccess), 'data.order_number'));
+$stopLane($lane);
+
+// A gateway that fails: the reason goes in the log, not to the customer.
+file_put_contents("{$laneDir}/env2", implode("\n", array_merge(
+    array_values(array_filter(file((string) getenv('SHOPCO_ENV_FILE'), FILE_IGNORE_NEW_LINES) ?: [], static fn (string $l): bool => !in_array(trim((string) strstr($l, '=', true)), $unset, true))),
+    ['MONNIFY_CONTRACT_CODE=test', 'MONNIFY_API_KEY=test', 'MONNIFY_SECRET_KEY=test', 'MONNIFY_API_BASE_URL=http://127.0.0.1:9', 'STORE_WHATSAPP_PHONE=']
+)) . "\n");
+$lane = $startLane("{$laneDir}/env2");
+$failing = $barePay('monnify');
+$stopLane($lane);
+$t->check('a gateway that cannot be reached -> 502', [502, 'GATEWAY_ERROR'], [$failing['status'], TestKit::get($failing, 'error.code')]);
+$t->ok('without saying why', !preg_match('/authenticate|HTTP|Monnify/i', (string) TestKit::get($failing, 'error.message')), $failing['body']);
 
 exit($t->finish());

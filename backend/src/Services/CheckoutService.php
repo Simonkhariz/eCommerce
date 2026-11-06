@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Support\Input;
+use App\Support\PhoneNumber;
+use App\Support\ValidationFailed;
 use App\Config\Env;
 use App\Database\Database;
 use RuntimeException;
@@ -18,6 +20,7 @@ class CheckoutService
 {
     private const MAX_LINES = 30;
     private const MAX_QUANTITY_PER_LINE = 20;
+    private const MAX_NOTES = 2000;
 
     private Database $db;
 
@@ -149,6 +152,10 @@ class CheckoutService
             throw new InvalidArgumentException('Delivery address is required for all orders.');
         }
         $this->validateShippingAddressFields($shippingAddress);
+        if (Input::tooLong($input['notes'] ?? null, self::MAX_NOTES)) {
+            $message = 'Order notes can be at most ' . number_format(self::MAX_NOTES) . ' characters.';
+            throw new ValidationFailed($message, ['notes' => $message]);
+        }
 
         // 3. Resolve and revalidate destination shipping zone
         $requestedZoneId = isset($input['shipping_zone_id']) ? (int) $input['shipping_zone_id'] : null;
@@ -279,7 +286,7 @@ class CheckoutService
                     $addressSnapshot['location'] = $pin;
                 }
 
-                $notes = isset($input['notes']) ? trim((string) $input['notes']) : null;
+                $notes = isset($input['notes']) ? Input::text($input['notes']) : null;
 
                 // H. Insert Order (stock stays reserved until expires_at unless the order is paid)
                 $orderId = (int) $db->insert(
@@ -371,9 +378,11 @@ class CheckoutService
 
                 return $createdOrder;
             });
-        } catch (\mysqli_sql_exception $e) {
+        } catch (RuntimeException $e) {
             // Two concurrent submissions with the same idempotency key: the loser replays the winner.
-            if ($idempotencyKey !== null && $e->getCode() === 1062 && str_contains($e->getMessage(), 'idempotency')) {
+            // It may fail on the key itself, or sooner: when the winner took the last unit, the loser
+            // sees "Insufficient stock" for an order that was in fact placed.
+            if ($idempotencyKey !== null) {
                 $replay = $this->replayIdempotentOrder($idempotencyKey, $email);
                 if ($replay !== null) {
                     return $replay;
@@ -479,12 +488,10 @@ class CheckoutService
                 [$productId]
             );
 
-            if ($product === null) {
-                throw new InvalidArgumentException("Product with ID {$productId} was not found.");
-            }
-
-            if ($product['status'] !== 'published') {
-                throw new InvalidArgumentException("Product '{$product['name']}' is not available for purchase (status: {$product['status']}).");
+            // The same answer for all of these: a product's name and status stay private until it
+            // is published, and an ID can't be tested to see if a product exists.
+            if ($product === null || $product['status'] !== 'published') {
+                throw new InvalidArgumentException('An item in your cart is no longer available. Please remove it and try again.');
             }
 
             // 2. Resolve the exact variant the customer chose. Never substitute a different one.
@@ -821,7 +828,9 @@ class CheckoutService
     }
 
     /**
-     * Validate mandatory fields for physical shipping address.
+     * Validate the delivery details: the same rules as the checkout form (lib/checkout-validation.ts).
+     * The answer's details name each field as "shipping_address.<field>", which the form maps
+     * back onto its own fields.
      */
     private function validateShippingAddressFields(array $address): void
     {
@@ -843,8 +852,48 @@ class CheckoutService
 
         if (!empty($missing)) {
             $firstMsg = reset($missing);
-            throw new InvalidArgumentException("Incomplete shipping address: {$firstMsg}");
+            throw new ValidationFailed("Incomplete shipping address: {$firstMsg}", self::shippingDetails($missing));
         }
+
+        $errors = [];
+        $name = Input::text($address['full_name'] ?? null);
+        if (preg_match_all('/\p{L}/u', $name) < 2) {
+            $errors['full_name'] = 'Enter your full name (at least 2 letters).';
+        } elseif (Input::tooLong($name, 255)) {
+            $errors['full_name'] = 'Your name can be at most 255 characters.';
+        }
+        if (!PhoneNumber::isNigerian(Input::text($address['phone'] ?? null))) {
+            $errors['phone'] = PhoneNumber::NIGERIAN_RULE;
+        }
+        $street = Input::text($address['address_line1'] ?? null);
+        if (mb_strlen($street) < 3) {
+            $errors['address_line1'] = 'Enter your street address (at least 3 characters).';
+        } elseif (Input::tooLong($street, 500)) {
+            $errors['address_line1'] = 'Your street address can be at most 500 characters.';
+        }
+        $city = Input::text($address['city'] ?? null);
+        if (mb_strlen($city) < 3) {
+            $errors['city'] = 'Enter your city or town (at least 3 characters).';
+        } elseif (Input::tooLong($city, 100)) {
+            $errors['city'] = 'Your city or town can be at most 100 characters.';
+        }
+
+        if (!empty($errors)) {
+            throw new ValidationFailed(reset($errors), self::shippingDetails($errors));
+        }
+    }
+
+    /**
+     * @param array<string, string> $errors field => message
+     * @return array<string, string>
+     */
+    private static function shippingDetails(array $errors): array
+    {
+        $details = [];
+        foreach ($errors as $field => $message) {
+            $details["shipping_address.{$field}"] = $message;
+        }
+        return $details;
     }
 
     /**

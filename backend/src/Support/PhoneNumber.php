@@ -9,6 +9,16 @@ namespace App\Support;
  */
 final class PhoneNumber
 {
+    /** What a customer's phone number must be: the same rule as lib/checkout-validation.ts. */
+    public const NIGERIAN_RULE = 'Enter a Nigerian phone number: 11 digits starting with 0, or +234 and 10 digits.';
+
+    /** 11 digits starting with 0, or +234 and 10 digits; spaces, dashes and brackets are ignored. */
+    public static function isNigerian(string $raw): bool
+    {
+        $clean = preg_replace('/[\s()-]/u', '', $raw) ?? '';
+        return preg_match('/^(?:0[0-9]{10}|\+234[0-9]{10})$/', $clean) === 1;
+    }
+
     /**
      * Normalise a number typed in Nigerian local format to "+234...".
      *   0803 123 4567     -> +2348031234567

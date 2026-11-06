@@ -14,4 +14,7 @@ $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if ($path !== '/' && !str_contains($path, '..') && is_file(__DIR__ . '/public' . $path)) {
     return false;
 }
+// With a dot in the address, php -S takes it for a file and sets SCRIPT_NAME to it, which the API's
+// router would then strip from the path. On a real web server this is always the entry file.
+$_SERVER['SCRIPT_NAME'] = '/index.php';
 require __DIR__ . '/public/index.php';

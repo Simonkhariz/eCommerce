@@ -10,9 +10,10 @@ use App\Database\Database;
 /**
  * Which payment methods customers can choose at checkout.
  *
- * A method is offered only when both switches are on:
- *  - the server allows it (PAYMENT_<NAME>_ENABLED in backend/.env, default on), and
- *  - the admin has not switched it off in Store settings (store_settings payment_<name>_enabled).
+ * A method is offered only when both switches are on and it is set up:
+ *  - the server allows it (PAYMENT_<NAME>_ENABLED in backend/.env, default on),
+ *  - the admin has not switched it off in Store settings (store_settings payment_<name>_enabled), and
+ *  - it can work: see configured().
  */
 final class PaymentMethods
 {
@@ -52,7 +53,7 @@ final class PaymentMethods
 
     public static function isEnabled(string $method, ?Database $db = null): bool
     {
-        return self::serverAllows($method) && (self::adminSwitches($db)[$method] ?? false);
+        return self::serverAllows($method) && (self::adminSwitches($db)[$method] ?? false) && self::configured($method);
     }
 
     /**
@@ -87,12 +88,16 @@ final class PaymentMethods
         return in_array($value, self::GATEWAYS, true) ? $value : 'monnify';
     }
 
-    /** The gateway's keys are set in backend/.env (the same test admin Settings shows). */
+    /**
+     * The method has what it needs to work: a gateway's keys in backend/.env (the same test admin
+     * Settings shows), and for WhatsApp a number to send the customer to.
+     */
     public static function configured(string $gateway): bool
     {
         return match ($gateway) {
             'kora' => trim((string) Env::get('KORA_SECRET_KEY', '')) !== '',
             'monnify' => trim((string) Env::get('MONNIFY_API_KEY', '')) !== '' && trim((string) Env::get('MONNIFY_CONTRACT_CODE', '')) !== '',
+            'whatsapp' => CheckoutService::supportWhatsAppPhone() !== '',
             default => true,
         };
     }

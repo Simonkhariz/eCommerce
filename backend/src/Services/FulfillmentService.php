@@ -248,6 +248,10 @@ class FulfillmentService
         if ($trackingNumber !== null && mb_strlen($trackingNumber) > 100) {
             throw new InvalidArgumentException('Tracking number can be at most 100 characters.');
         }
+        // Customers look the code up in a web address, and most web servers refuse a slash there.
+        if ($trackingNumber !== null && strpbrk($trackingNumber, '/\\') !== false) {
+            throw new InvalidArgumentException('Tracking number cannot contain a slash: customers could not look it up. Spaces, dots and dashes are fine.');
+        }
         if ($trackingUrl !== null && mb_strlen($trackingUrl) > 500) {
             throw new InvalidArgumentException('Tracking URL can be at most 500 characters.');
         }
@@ -545,11 +549,15 @@ class FulfillmentService
         return $payments;
     }
 
-    /** What a refund can return on a payment: its amount, or less if the customer underpaid. */
+    /**
+     * What a refund can return on a payment: all the money that came in, more than the order's
+     * amount if the customer overpaid, less if they underpaid. Rows from before amounts were
+     * recorded count as the amount charged.
+     */
     private static function receivedOn(array $payment): float
     {
         $received = $payment['amount_received'] ?? null;
-        return $received !== null && (float) $received < (float) $payment['amount'] ? (float) $received : (float) $payment['amount'];
+        return $received !== null ? (float) $received : (float) $payment['amount'];
     }
 
     /**

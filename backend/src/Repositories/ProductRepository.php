@@ -98,7 +98,7 @@ class ProductRepository
         if (!empty($filters['colors']) || !empty($filters['color'])) {
             $rawColors = !empty($filters['colors']) 
                 ? (is_array($filters['colors']) ? $filters['colors'] : explode(',', (string) $filters['colors'])) 
-                : [(string) $filters['color']];
+                : [Input::text($filters['color'])];
             
             $colorFamilies = [
                 'black' => ['black', 'onyx', 'pitch', 'midnight', 'charcoal', 'dark', 'ebony', 'gray', 'grey'],
@@ -115,7 +115,7 @@ class ProductRepository
 
             $colorConditions = [];
             foreach ($rawColors as $col) {
-                $trimmed = strtolower(trim($col));
+                $trimmed = strtolower(Input::text($col));
                 if ($trimmed !== '') {
                     $familyWords = $colorFamilies[$trimmed] ?? [$trimmed];
                     $subConditions = [];
@@ -139,11 +139,11 @@ class ProductRepository
         if (!empty($filters['sizes']) || !empty($filters['size'])) {
             $rawSizes = !empty($filters['sizes']) 
                 ? (is_array($filters['sizes']) ? $filters['sizes'] : explode(',', (string) $filters['sizes'])) 
-                : [(string) $filters['size']];
+                : [Input::text($filters['size'])];
 
             $sizeConditions = [];
             foreach ($rawSizes as $sz) {
-                $trimmed = trim($sz);
+                $trimmed = Input::text($sz);
                 if ($trimmed !== '') {
                     $sizeConditions[] = "LOWER(pv_s.size) = LOWER(?)";
                     $params[] = $trimmed;
@@ -389,6 +389,9 @@ class ProductRepository
             $v['price_override'] = ($v['price_override'] !== null && (float) $v['price_override'] > 0) ? (float) $v['price_override'] : null;
             $v['stock_quantity'] = (int) $v['stock_quantity'];
             $v['in_stock'] = $v['stock_quantity'] > 0;
+            if (!$allowDraft) {
+                unset($v['low_stock_threshold']); // how the store manages stock: admin only
+            }
         }
         unset($v);
 
@@ -405,6 +408,9 @@ class ProductRepository
             }
         }
 
+        if (!$allowDraft) {
+            unset($product['units_sold']); // sales figures: admin only
+        }
         $product['id'] = $productId;
         $product['base_price'] = (float) $product['base_price'];
         $product['original_price'] = $product['original_price'] !== null ? (float) $product['original_price'] : null;

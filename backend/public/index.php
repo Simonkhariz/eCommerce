@@ -147,7 +147,8 @@ $router->post('/api/v1/checkout/cart-check', [CheckoutController::class, 'cartCh
 $router->post('/api/v1/checkout/validate-promo', [CheckoutController::class, 'validatePromo']);
 $router->post('/api/v1/checkout/orders', [CheckoutController::class, 'createOrder']);
 $router->get('/api/v1/checkout/shipping-zones', [CheckoutController::class, 'shippingZones']);
-$router->get('/api/v1/checkout/orders/{orderNumber}', [CheckoutController::class, 'show']);
+// Also takes courier tracking codes, which can have spaces and dots.
+$router->get('/api/v1/checkout/orders/{orderNumber:[^/]+}', [CheckoutController::class, 'show']);
 $router->post('/api/v1/checkout/orders/{orderNumber}/initialize-payment', [CheckoutController::class, 'initializePayment']);
 $router->get('/api/v1/checkout/orders/{orderNumber}/verify-payment', [CheckoutController::class, 'verifyPayment']);
 $router->get('/api/v1/checkout/orders/{orderNumber}/events', [CheckoutController::class, 'paymentEvents']);

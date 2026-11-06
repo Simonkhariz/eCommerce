@@ -6,6 +6,8 @@ namespace App\Services;
 
 use App\Config\Env;
 use App\Database\Database;
+use App\Support\RateLimiter;
+use App\Support\RequestContext;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -89,9 +91,8 @@ class MonnifyService
     public function initializeCheckout(string|int $orderIdOrNumber, ?string $redirectUrl = null): array
     {
         if ($this->contractCode === '') {
-            throw new RuntimeException(
-                'Monnify is not fully configured: set MONNIFY_CONTRACT_CODE in backend/.env (Monnify Dashboard > Developers > API Keys & Contracts).'
-            );
+            error_log('[Monnify] Not fully configured: set MONNIFY_CONTRACT_CODE in backend/.env (Monnify Dashboard > Developers > API Keys & Contracts).');
+            throw new RuntimeException('Monnify payments are not configured on this store yet.');
         }
 
         $order = $this->loadOrder($orderIdOrNumber);
@@ -223,6 +224,9 @@ class MonnifyService
         $signature = strtolower(trim($signatureHeader));
         $computed = hash_hmac('sha512', $rawBody, $this->secretKey);
         if ($signature === '' || !hash_equals($computed, $signature)) {
+            // A short record only (never the body), and only so many per connection: unsigned
+            // requests must not be able to fill the database. Signed ones never reach this limit.
+            RateLimiter::attempt(KoraService::BAD_SIGNATURE_BUCKET, RequestContext::clientIp(), KoraService::BAD_SIGNATURE_LIMIT, KoraService::BAD_SIGNATURE_WINDOW);
             $this->recordWebhookEvent('invalid-signature:' . substr(hash('sha256', $rawBody), 0, 32), 'unknown', 0, 'failed', [
                 'error' => $signature === '' ? 'MISSING_SIGNATURE' : 'SIGNATURE_VERIFICATION_FAILED',
             ]);

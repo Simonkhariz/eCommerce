@@ -1361,9 +1361,18 @@ class AdminOperationsController
         if ($fullName === '') {
             Response::error('Name cannot be empty.', 422, 'VALIDATION_ERROR', ['full_name' => 'Name cannot be empty.']);
         }
+        if (Input::tooLong($fullName, 255)) {
+            Response::error('Name can be at most 255 characters.', 422, 'VALIDATION_ERROR', ['full_name' => 'At most 255 characters.']);
+        }
+        if (Input::tooLong($phone, 50)) {
+            Response::error('Phone can be at most 50 characters.', 422, 'VALIDATION_ERROR', ['phone' => 'At most 50 characters.']);
+        }
 
         // Validate the password change before writing anything.
         if ($newPassword !== '') {
+            if (str_contains($newPassword, "\0")) {
+                Response::error('New password contains a character that cannot be used.', 422, 'VALIDATION_ERROR', ['new_password' => 'Contains a character that cannot be used.']);
+            }
             if ($currentPassword === '' || !password_verify($currentPassword, $user['password_hash'] ?? '')) {
                 Response::error('Your current password is incorrect.', 422, 'INVALID_CURRENT_PASSWORD', ['current_password' => 'Incorrect password.']);
             }

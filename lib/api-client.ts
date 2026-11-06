@@ -754,20 +754,23 @@ export interface ApiSavedCartItem {
   image_url: string | null;
 }
 
-export interface CartLineCheck {
-  variant_id: number;
-  product_id: number;
-  sku: string;
-  size: string;
-  color_name: string;
-  color_hex: string;
-  unit_price: number;
-  original_price: number | null;
-  stock_quantity: number;
-  product_name: string;
-  product_slug: string;
-  available: boolean;
-}
+/** A line that can't be bought says only that: nothing about an unpublished product is sent. */
+export type CartLineCheck =
+  | { variant_id: number; available: false }
+  | {
+      variant_id: number;
+      product_id: number;
+      sku: string;
+      size: string;
+      color_name: string;
+      color_hex: string;
+      unit_price: number;
+      original_price: number | null;
+      stock_quantity: number;
+      product_name: string;
+      product_slug: string;
+      available: true;
+    };
 
 /**
  * Live price, stock and availability for cart lines (no sign-in needed).

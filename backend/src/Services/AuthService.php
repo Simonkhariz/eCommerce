@@ -9,6 +9,8 @@ use App\Repositories\SessionRepository;
 use App\Repositories\StoreSettingsRepository;
 use App\Repositories\TokenRepository;
 use App\Repositories\UserRepository;
+use App\Support\Input;
+use App\Support\PhoneNumber;
 use App\Support\RateLimiter;
 use App\Support\RequestContext;
 use App\Support\Response;
@@ -22,6 +24,12 @@ use App\Support\SessionCookie;
  */
 class AuthService
 {
+    /** Failed sign-ins allowed from one connection in 15 minutes, whichever emails it tries. */
+    private const LOGIN_IP_LIMIT = 50;
+
+    /** Same cost as real passwords: checked when there is no password, so both take equally long. */
+    private const DUMMY_PASSWORD_HASH = '$2y$12$ATSd8EiXKf2SP2G.MdtZkevacF1QwE2x7tSJoq/4oWlfJfD0HGh06';
+
     private UserRepository $userRepo;
     private SessionRepository $sessionRepo;
     private TokenRepository $tokenRepo;
@@ -71,6 +79,8 @@ class AuthService
         }
         if (strlen($password) < 10) {
             $errors['password'] = 'Password must be at least 10 characters long.';
+        } elseif (str_contains($password, "\0")) {
+            $errors['password'] = 'Password contains a character that cannot be used.';
         }
         if ($storeName === '') {
             $errors['store_name'] = 'Store name is required.';
@@ -151,26 +161,35 @@ class AuthService
     {
         RateLimiter::attempt('register', RequestContext::clientIp(), 10, 3600, 'Too many sign-up attempts. Please try again later.');
 
-        $name = trim((string) ($input['full_name'] ?? $input['name'] ?? ''));
-        $email = trim(strtolower((string) ($input['email'] ?? '')));
-        $password = (string) ($input['password'] ?? '');
-        $phone = isset($input['phone']) ? trim((string) $input['phone']) : null;
+        $name = Input::text($input['full_name'] ?? $input['name'] ?? null);
+        $email = strtolower(Input::text($input['email'] ?? null));
+        $password = is_scalar($input['password'] ?? null) ? (string) $input['password'] : '';
+        $phone = isset($input['phone']) ? Input::text($input['phone']) : null;
 
         $errors = [];
         if ($name === '') {
             $errors['full_name'] = 'Full name is required.';
+        } elseif (Input::tooLong($name, 255)) {
+            $errors['full_name'] = 'Full name can be at most 255 characters.';
         }
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $errors['email'] = 'A valid email address is required.';
         }
         if (strlen($password) < 8) {
             $errors['password'] = 'Password must be at least 8 characters long.';
+        } elseif (str_contains($password, "\0")) {
+            $errors['password'] = 'Password contains a character that cannot be used.';
+        }
+        if ($phone !== null && $phone !== '' && !PhoneNumber::isNigerian($phone)) {
+            $errors['phone'] = PhoneNumber::NIGERIAN_RULE;
         }
 
         if (!empty($errors)) {
             Response::error('Registration validation failed.', 422, 'VALIDATION_ERROR', $errors);
         }
 
+        // Saying the address is taken is a known trade-off: the sign-up limit above slows anyone
+        // listing addresses, and "use a sign-in link" helps a real customer who forgot.
         $existing = $this->userRepo->findByEmail($email);
         if ($existing !== null) {
             Response::error(
@@ -206,11 +225,25 @@ class AuthService
         $ip = RequestContext::clientIp();
         $ipKey = $ip . '|' . $email;
 
+        RateLimiter::guard('login_ip', $ip, self::LOGIN_IP_LIMIT, 900, 'Too many failed sign-in attempts from this connection. Please wait 15 minutes and try again.');
+
+        // The database ignores accents when comparing emails, so "ádmin@..." would load the real
+        // admin row under limit counters of its own. Addresses here are plain ASCII (sign-up and
+        // setup use this same check), so one that fails it can only be wrong.
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            RateLimiter::hit('login_ip', $ip, 900);
+            Response::error('Invalid email or password.', 401, 'INVALID_CREDENTIALS');
+        }
+
         RateLimiter::guard('login_ip_email', $ipKey, 5, 900, 'Too many failed sign-in attempts. Please wait 15 minutes and try again.');
         RateLimiter::guard('login_email', $email, 20, 3600, 'Too many failed sign-in attempts for this account. Please try again later.');
 
         $user = $this->userRepo->findByEmail($email);
-        if ($user === null || empty($user['password_hash']) || !password_verify($password, $user['password_hash'])) {
+        // Always one password check, so an unknown email takes as long as a wrong password.
+        $hash = (string) ($user['password_hash'] ?? '');
+        $passwordOk = password_verify($password, $hash !== '' ? $hash : self::DUMMY_PASSWORD_HASH);
+        if ($user === null || $hash === '' || !$passwordOk) {
+            RateLimiter::hit('login_ip', $ip, 900);
             RateLimiter::hit('login_ip_email', $ipKey, 900);
             RateLimiter::hit('login_email', $email, 3600);
             Response::error('Invalid email or password.', 401, 'INVALID_CREDENTIALS');

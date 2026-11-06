@@ -309,6 +309,44 @@ try {
         $logged = $db->fetchOne("SELECT 1 AS x FROM `payment_webhook_events` WHERE `provider` = 'kora' AND `signature_valid` = 0 AND `id` > ?", 'i', [$maxIds['payment_webhook_events']]);
         check('rejected webhook is recorded (not rolled back)', $logged !== null);
 
+        // Unsigned requests can't fill the database: a short record, a capped reference, a limit.
+        $db->execute("DELETE FROM `rate_limits`");
+        $badCount = static fn (): int => (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `payment_webhook_events` WHERE `signature_valid` = 0")['c'];
+        $badBefore = $badCount();
+        $badRow = str_repeat('R', 5000);
+        $badBody = static fn (int $i): string => json_encode(['event' => 'charge.success', 'nonce' => $i, 'filler' => str_repeat('x', 2000), 'data' => ['reference' => $badRow]]);
+        $badHeaders = ['Content-Type: application/json', 'x-korapay-signature: ' . str_repeat('0', 64)];
+        $statuses = [];
+        for ($i = 1; $i <= \App\Services\KoraService::BAD_SIGNATURE_LIMIT; $i++) {
+            $statuses[] = http('POST', "{$api}/webhooks/kora", $badBody($i), $badHeaders)['status'];
+        }
+        check('wrong signatures up to the limit -> 401', array_unique($statuses) === [401], json_encode(array_unique($statuses)));
+        check('each leaves one record', $badCount() === $badBefore + \App\Services\KoraService::BAD_SIGNATURE_LIMIT, (string) ($badCount() - $badBefore));
+        $badMeta = (string) $db->fetchOne("SELECT `payload_metadata` AS m FROM `payment_webhook_events` WHERE `signature_valid` = 0 ORDER BY `id` DESC LIMIT 1")['m'];
+        check('the unsigned reference is capped at 100 characters', strlen((string) (json_decode($badMeta, true)['reference'] ?? '')) === 100, $badMeta);
+        check('and the body is not kept', strlen($badMeta) < 300 && !str_contains($badMeta, 'xxxx'), (string) strlen($badMeta));
+        $overLimit = http('POST', "{$api}/webhooks/kora", $badBody(0), $badHeaders);
+        check('past the limit -> 429', $overLimit['status'] === 429, (string) $overLimit['status']);
+        check('and nothing more is stored', $badCount() === $badBefore + \App\Services\KoraService::BAD_SIGNATURE_LIMIT, (string) ($badCount() - $badBefore));
+        $monnifyBad = http('POST', "{$api}/webhooks/monnify", '{"eventType":"x"}', ['Content-Type: application/json', 'monnify-signature: ' . str_repeat('0', 128)]);
+        if (trim((string) Env::get('MONNIFY_SECRET_KEY', '')) !== '') {
+            check('Monnify shares the limit', $monnifyBad['status'] === 429, (string) $monnifyBad['status']);
+        }
+
+        // A signature covers the first "data"; a second one added to the body must be ignored.
+        $o2b = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);
+        $o2bRef = $koraMock->initializeCheckout($o2b['order_number'])['provider_reference'];
+        [$failedBody, $failedSig] = $signedKora('charge.failed', $o2bRef, number_format((float) $o2b['grand_total'], 2, '.', ''), 'NGN', 'failed');
+        $forged = substr($failedBody, 0, -1) . ',"data":{"reference":"' . $o2bRef . '","status":"success","amount":' . (float) $o2b['grand_total'] . ',"currency":"NGN"}}';
+        $forgedEvent = str_replace('"charge.failed"', '"charge.success"', $forged);
+        check('(json_decode really keeps the last "data")', json_decode($forgedEvent, true)['data']['status'] === 'success');
+        $forgedRes = http('POST', "{$api}/webhooks/kora", $forgedEvent, ['Content-Type: application/json', 'x-korapay-signature: ' . $failedSig]);
+        check('a forged second "data" does not pay the order', orderRow($o2b['order_number'])['order_status'] === 'pending_payment', $forgedRes['text']);
+        check('the signed member is what was processed', (string) $db->fetchOne("SELECT `status` FROM `payments` WHERE `provider_reference` = ?", 's', [$o2bRef])['status'] === 'failed', $forgedRes['text']);
+        $storedPayload = (string) $db->fetchOne("SELECT `provider_payload_redacted` AS p FROM `payments` WHERE `provider_reference` = ?", 's', [$o2bRef])['p'];
+        check('and is what the payment record keeps', (json_decode($storedPayload, true)['data']['status'] ?? '') === 'failed', $storedPayload);
+        $db->execute("DELETE FROM `rate_limits`");
+
         $ok = http('POST', "{$api}/webhooks/kora", $body, ['Content-Type: application/json', 'x-korapay-signature: ' . $sig]);
         check('signed Kora webhook (raw-byte signature) -> 200', $ok['status'] === 200, $ok['text']);
         check('order marked paid', orderRow($o2['order_number'])['order_status'] === 'paid');
@@ -640,6 +678,100 @@ try {
     $fs->resolveRefund($firstId, 'completed', null);
     check('when the order becomes fully refunded the items go back to stock, once', stockOf($variantA) === $stockAfterSale + 2, stockOf($variantA) . " vs {$stockAfterSale}+2");
     check('and exactly one refund is marked as the one that restocked', (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `refunds` WHERE `order_id` = ? AND `restocked` = 1", 'i', [$r5Id])['c'] === 1 && (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `refunds` WHERE `order_id` = ? AND `restocked` = 2", 'i', [$r5Id])['c'] === 0);
+
+    // The provider's own words stay in the log and the payment record.
+    $koraRejecting = new KoraService($db, static fn (): array => ['status_code' => 400, 'error' => null, 'body' => json_encode(['status' => false, 'message' => 'Merchant account mx_12345 is not activated'])]);
+    $envVarsK = new ReflectionProperty(Env::class, 'vars');
+    $envVarsK->setAccessible(true);
+    $rejected = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);
+    try {
+        $koraRejecting->initializeCheckout($rejected['order_number']);
+        check('a provider rejection fails', trim((string) Env::get('KORA_SECRET_KEY', '')) === '');
+    } catch (RuntimeException $e) {
+        check('a provider rejection does not repeat the provider\'s message', !str_contains($e->getMessage(), 'mx_12345'), $e->getMessage());
+        check('the payment record keeps it for the store', str_contains((string) $db->fetchOne("SELECT `provider_payload_redacted` AS p FROM `payments` p2 JOIN `orders` o ON o.`id` = p2.`order_id` WHERE o.`order_number` = ? ORDER BY p2.`id` DESC LIMIT 1", 's', [$rejected['order_number']])['p'], 'mx_12345'));
+    }
+
+    // Monnify without a contract code: not offered, and its reason is not for the customer.
+    $savedVars = $envVarsK->getValue();
+    $envVarsK->setValue(null, ['MONNIFY_API_KEY' => 'made-up', 'MONNIFY_SECRET_KEY' => 'made-up', 'MONNIFY_CONTRACT_CODE' => ''] + $savedVars);
+    $monnifyEnabled = PaymentMethods::isEnabled('monnify', $db);
+    $monnifyMessage = '';
+    try {
+        (new MonnifyService($db, static fn (): array => ['status_code' => 500, 'error' => null, 'body' => '{}']))->initializeCheckout($rejected['order_number']);
+    } catch (RuntimeException $e) {
+        $monnifyMessage = $e->getMessage();
+    }
+    $envVarsK->setValue(null, $savedVars);
+    check('Monnify without a contract code is not enabled', $monnifyEnabled === false);
+    check('and its error does not name the setting', $monnifyMessage !== '' && !str_contains($monnifyMessage, 'MONNIFY_CONTRACT_CODE'), $monnifyMessage);
+
+    // Overpaid N+2,000: the money that came in can all go back.
+    $overpay = static function () use ($placeOrder, $koraMock, $finalizer, $productId, $variantA): array {
+        $order = $placeOrder([['product_id' => $productId, 'variant_id' => $variantA, 'quantity' => 1]]);
+        $reference = $koraMock->initializeCheckout($order['order_number'])['provider_reference'];
+        $total = (float) $order['grand_total'];
+        $finalizer->finalizeSuccess($reference, ['amount' => $total + 2000, 'currency' => 'NGN', 'label' => 'Kora']);
+        return [(int) orderRow($order['order_number'])['id'], $total, $order['order_number'], $reference];
+    };
+    [$ov1Id, $ov1Total, $ov1Num, $ov1Ref] = $overpay();
+    check('an overpaid order is paid and flagged', orderRow($ov1Num)['order_status'] === 'paid' && (int) orderRow($ov1Num)['requires_attention'] === 1);
+    check('all the money shows as refundable', abs($fs->moneyOnOrder($db, $ov1Id)[0]['left'] - ($ov1Total + 2000)) < 0.01);
+    $fs->recordRefund($ov1Id, 2000, 'Overpaid: the difference', 'completed', false, null);
+    check('the difference can be refunded', abs($fs->moneyOnOrder($db, $ov1Id)[0]['left'] - $ov1Total) < 0.01);
+    check('and the order is still paid and being fulfilled', orderRow($ov1Num)['order_status'] === 'paid' && orderRow($ov1Num)['payment_status'] === 'partially_refunded');
+    $fs->recordRefund($ov1Id, $ov1Total, 'Changed their mind', 'completed', false, null);
+    check('refunding the rest refunds the order', orderRow($ov1Num)['order_status'] === 'refunded' && orderRow($ov1Num)['payment_status'] === 'refunded');
+
+    [$ov2Id, $ov2Total, $ov2Num, $ov2Ref] = $overpay();
+    $fs->updateOrderStatus($ov2Id, 'cancelled', 'Out of stock', null);
+    expectThrows('more than came in is still refused', fn () => $fs->recordRefund($ov2Id, $ov2Total + 2000.5, 'Too much', 'completed', false, null), 'exceeds');
+    $fs->recordRefund($ov2Id, $ov2Total + 2000, 'Cancelled: all of it', 'completed', false, null);
+    check('a cancelled overpaid order: the whole amount goes back', $db->fetchOne("SELECT `status` FROM `payments` WHERE `provider_reference` = ?", 's', [$ov2Ref])['status'] === 'refunded');
+    check('it stays cancelled', orderRow($ov2Num)['order_status'] === 'cancelled' && orderRow($ov2Num)['payment_status'] === 'refunded');
+    check('with nothing left to refund', $fs->moneyOnOrder($db, $ov2Id)[0]['left'] < 0.01);
+
+    // Two submissions at once for the last unit, same key: both get the one order.
+    $lastUnitSku = "P2-LAST-{$stamp}";
+    $lastVariant = (int) $db->insert(
+        "INSERT INTO `product_variants` (`product_id`, `sku`, `size`, `color_name`, `color_hex`, `stock_quantity`) VALUES (?, ?, 'Z', 'Last', '#000000', 1)",
+        'is',
+        [$productId, $lastUnitSku]
+    );
+    $idemKey = 'lastunit' . bin2hex(random_bytes(10));
+    $lock = new mysqli((string) Env::get('DB_HOST', '127.0.0.1'), (string) Env::get('DB_USERNAME', 'root'), (string) Env::get('DB_PASSWORD', ''), (string) Env::get('DB_DATABASE', ''), Env::int('DB_PORT', 3306));
+    $lock->begin_transaction();
+    $lock->query("SELECT `id` FROM `product_variants` WHERE `id` = {$lastVariant} FOR UPDATE");
+    $childInput = json_encode([
+        'email' => "p2.last.{$stamp}@example.test",
+        'items' => [['product_id' => $productId, 'variant_id' => $lastVariant, 'quantity' => 1]],
+        'shipping_address' => $address,
+        'shipping_zone_id' => (int) $zone['id'],
+    ]);
+    $children = [];
+    foreach ([1, 2] as $_) {
+        $children[] = proc_open([PHP_BINARY, __DIR__ . '/support/place_order.php', $childInput, $idemKey], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $childPipes, BASE_PATH, getenv());
+        $childOut[] = $childPipes;
+    }
+    sleep(2); // both have read 1 in stock and now wait for the row this test holds
+    $lock->commit();
+    $lock->close();
+    $answers = [];
+    foreach ($children as $i => $child) {
+        $text = stream_get_contents($childOut[$i][1]);
+        stream_get_contents($childOut[$i][2]);
+        proc_close($child);
+        $answers[] = json_decode((string) strrchr("\n" . trim((string) $text), "\n"), true) ?? ['raw' => $text];
+    }
+    $lastOrder = (string) ($answers[0]['order_number'] ?? '');
+    if ($lastOrder !== '') {
+        $created['orders'][] = $lastOrder;
+    }
+    check('the loser gets the winner\'s order, not a false "sold out"', $lastOrder !== '' && $lastOrder === ($answers[1]['order_number'] ?? null), json_encode($answers));
+    check('one order for the key', (int) $db->fetchOne("SELECT COUNT(*) AS c FROM `orders` WHERE `idempotency_key` = ?", 's', [$idemKey])['c'] === 1);
+    check('one unit taken', stockOf($lastVariant) === 0, (string) stockOf($lastVariant));
+    $another = static fn () => $checkout->createOrder(['email' => "p2.other.{$stamp}@example.test", 'items' => [['product_id' => $productId, 'variant_id' => $lastVariant, 'quantity' => 1]], 'shipping_address' => $address, 'shipping_zone_id' => (int) $zone['id']], null, 'lastunit' . bin2hex(random_bytes(10)));
+    expectThrows('a different customer still gets the real "sold out"', $another, 'Insufficient stock');
 
     // "Pay now" never points at a gateway without keys (made-up keys here; the real ones are put back).
     $envVars = new ReflectionProperty(Env::class, 'vars');

@@ -64,6 +64,8 @@ $overrides = [
     'S3_SECRET_ACCESS_KEY' => '',
     // Never a real Redis either (.env may point at Upstash): RedisCacheTest starts its own stand-in.
     'REDIS_URL' => '',
+    // WhatsApp is only offered with a number; StorefrontFlowTest tests it without one.
+    'STORE_WHATSAPP_PHONE' => '+2348000000001',
     // Dev mode pages are tested by their own suites; DevModeTest turns it off to test the refusal.
     'DEV_MODE_DEFAULT' => 'true',
 ];
