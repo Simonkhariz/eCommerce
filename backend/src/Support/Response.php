@@ -169,9 +169,9 @@ class Response
 
     /**
      * Hand the finished response to the client now, so work done after this (sending email,
-     * refreshing the storefront) never makes the shopper or admin wait. Under PHP-FPM the
-     * request is completed; elsewhere the buffered response is flushed, and the client, which
-     * knows its length, does not wait for the rest.
+     * refreshing the storefront) never makes the shopper or admin wait. Under PHP-FPM or LiteSpeed
+     * (most shared hosts) the request is completed; elsewhere the buffered response is flushed,
+     * and the client, which knows its length, does not wait for the rest.
      */
     public static function finishForClient(): void
     {
@@ -189,6 +189,9 @@ class Response
             }
         }
         @flush();
+        if (function_exists('litespeed_finish_request')) {
+            litespeed_finish_request();
+        }
     }
 
     public static bool $exitOnResponse = true;

@@ -12,7 +12,10 @@ param(
     [Parameter(Mandatory = $true)][string]$ApiUrl,
     [string]$OutDir = "$env:USERPROFILE\Desktop\shopco-cpanel",
     [ValidateSet('x64', 'arm64')][string]$Cpu = 'x64',
-    [switch]$AllowHttp
+    [switch]$AllowHttp,
+    # For a host whose Linux is too old for the picture library (check-host.php says so), or that
+    # runs out of processes resizing pictures: pictures are sent at their full size instead.
+    [switch]$NoImageResizing
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -51,8 +54,10 @@ Step "Building the storefront for $ApiUrl"
 $env:SHOPCO_STANDALONE = 'true'
 $env:BACKEND_ORIGIN = $ApiUrl
 $env:NEXT_TELEMETRY_DISABLED = '1'
+if ($NoImageResizing) { $env:SHOPCO_NO_IMAGE_RESIZING = 'true' }
 Run npx @('next', 'build')
 Remove-Item Env:SHOPCO_STANDALONE
+Remove-Item Env:SHOPCO_NO_IMAGE_RESIZING -ErrorAction SilentlyContinue
 
 $standalone = Join-Path $src '.next\standalone'
 if (-not (Test-Path (Join-Path $standalone 'server.js'))) { throw 'The build did not produce a standalone server.' }
@@ -103,10 +108,9 @@ New-Item -ItemType Directory -Force $OutDir | Out-Null
 $webZip = Join-Path $OutDir 'shopco-web.zip'
 $apiZip = Join-Path $OutDir 'shopco-api.zip'
 foreach ($zip in $webZip, $apiZip) { if (Test-Path $zip) { Remove-Item $zip -Force } }
-Set-Location $web
-Run $tar @('-a', '-c', '-f', $webZip, '.')
-Set-Location $api
-Run $tar @('-a', '-c', '-f', $apiZip, '.')
+$pack = Join-Path $PSScriptRoot 'pack.mjs'
+Run node @($pack, $web, $webZip)
+Run node @($pack, $api, $apiZip)
 Copy-Item (Join-Path $src 'deploy\cpanel\check-host.php') (Join-Path $OutDir 'check-host.php') -Force
 Set-Location $repo
 cmd /c rmdir /s /q "$work" | Out-Null

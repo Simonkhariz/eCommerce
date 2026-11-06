@@ -50,6 +50,20 @@ foreach (['Cloudflare R2 (pictures)' => 'https://r2.cloudflarestorage.com', 'Res
 $disabled = array_map('trim', explode(',', (string) ini_get('disable_functions')));
 $add('Backups with mysqldump', function_exists('proc_open') && !in_array('proc_open', $disabled, true) ? true : null, 'optional; the shop writes the backup itself if not');
 
+// What decides which build to upload. Node.js and the picture library need a reasonably new Linux.
+$machine = php_uname('m');
+$add('Processor', in_array($machine, ['x86_64', 'amd64'], true) ? true : null, $machine . (in_array($machine, ['aarch64', 'arm64'], true) ? ': build with -Cpu arm64' : ''));
+$osRelease = @is_readable('/etc/os-release') ? (string) @file_get_contents('/etc/os-release') : '';
+$osName = preg_match('/^PRETTY_NAME="?([^"\n]+)/m', $osRelease, $m) ? $m[1] : php_uname('s');
+$oldLinux = (bool) preg_match('/(CloudLinux|CentOS|Red Hat|AlmaLinux|Rocky)[^\n]*\b[67](\.|\b)/i', $osName);
+$add('Linux new enough for the picture library', $oldLinux ? false : null, $osName . ($oldLinux ? ': too old; build with -NoImageResizing, or choose another host' : ' (version 8 or newer of CloudLinux/AlmaLinux is fine)'));
+$software = (string) ($_SERVER['SERVER_SOFTWARE'] ?? 'unknown');
+$add('Web server', null, $software . (stripos($software, 'litespeed') !== false ? ' (fine; the guide covers LiteSpeed)' : ''));
+$nodes = array_map(static fn (string $p): string => basename($p), glob('/opt/alt/alt-nodejs*') ?: []);
+$add('Node.js versions seen', null, $nodes === [] ? 'not visible from PHP; look in Setup Node.js App' : implode(', ', $nodes) . ' (20 or newer is needed)');
+$memory = (string) ini_get('memory_limit');
+$add('PHP memory for one request', $memory === '-1' || $bytes($memory) >= 128 * 1048576, $memory);
+
 $jsCheck = isset($_SERVER['HTTP_COOKIE']) && str_contains((string) $_SERVER['HTTP_COOKIE'], '__test=');
 $add('No browser check in front of the site', $jsCheck ? false : null, $jsCheck ? 'a __test cookie suggests one: webhooks and the storefront would be refused' : 'not seen; test it from a server too: curl -i <this page>');
 
@@ -67,6 +81,6 @@ $add('No browser check in front of the site', $jsCheck ? false : null, $jsCheck 
 </tr>
 <?php endforeach; ?>
 </table>
-<p>Also look in cPanel for: <b>Setup Node.js App</b> offering Node.js 20.9 or newer, <b>Cron Jobs</b>, <b>MySQL Databases</b>, and <b>Domains</b> or <b>Subdomains</b> (two addresses are needed).</p>
+<p>Also look in the control panel for: <b>Setup Node.js App</b> offering Node.js 20.9 or newer, <b>Cron Jobs</b>, <b>MySQL Databases</b>, and <b>Domains</b> or <b>Subdomains</b> (two addresses are needed). phpMyAdmin's first page shows the database version: MySQL 8 or MariaDB 10.4 or newer.</p>
 <p><b>Delete this file now.</b></p>
 </body>

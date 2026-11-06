@@ -8,7 +8,7 @@
 -- Existing codes keep working unchanged: they are 'percent' with no minimum and no cap.
 
 ALTER TABLE `promotions`
-    ADD COLUMN IF NOT EXISTS `discount_type` ENUM('percent', 'fixed') NOT NULL DEFAULT 'percent' AFTER `description`,
-    ADD COLUMN IF NOT EXISTS `discount_amount` DECIMAL(12,2) NULL AFTER `discount_percent`,
-    ADD COLUMN IF NOT EXISTS `min_order_amount` DECIMAL(12,2) NULL AFTER `discount_amount`,
-    ADD COLUMN IF NOT EXISTS `max_discount_amount` DECIMAL(12,2) NULL AFTER `min_order_amount`;
+    ADD COLUMN `discount_type` ENUM('percent', 'fixed') NOT NULL DEFAULT 'percent' AFTER `description`,
+    ADD COLUMN `discount_amount` DECIMAL(12,2) NULL AFTER `discount_percent`,
+    ADD COLUMN `min_order_amount` DECIMAL(12,2) NULL AFTER `discount_amount`,
+    ADD COLUMN `max_discount_amount` DECIMAL(12,2) NULL AFTER `min_order_amount`;

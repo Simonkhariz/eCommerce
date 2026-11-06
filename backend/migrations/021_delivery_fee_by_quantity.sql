@@ -7,5 +7,5 @@
 -- Defaults (1 item included, 0 per extra item) keep every zone's fee exactly as it was.
 
 ALTER TABLE `shipping_zones`
-    ADD COLUMN IF NOT EXISTS `items_included` INT NOT NULL DEFAULT 1 AFTER `fee`,
-    ADD COLUMN IF NOT EXISTS `extra_item_fee` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `items_included`;
+    ADD COLUMN `items_included` INT NOT NULL DEFAULT 1 AFTER `fee`,
+    ADD COLUMN `extra_item_fee` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `items_included`;

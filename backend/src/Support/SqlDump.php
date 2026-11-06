@@ -29,10 +29,18 @@ final class SqlDump
      * Dump every table of $conn's current database through $write (called with each piece of
      * SQL). $conn should be a connection of its own: the dump opens a transaction on it.
      *
+     * $keepRows limits the rows, for scripts/export_for_host.php: table name => WHERE condition
+     * ('' for all its rows). A table not listed is written with its structure only, and starts
+     * counting from 1 again. Null (the default, used by every backup) keeps everything.
+     * $replace writes a fixed value instead of what a column holds, so the real value never
+     * reaches the file: table name => [column => value or null].
+     *
      * @param callable(string): void $write
+     * @param array<string, string>|null $keepRows
+     * @param array<string, array<string, ?string>> $replace
      * @return array<string, int> rows written per table
      */
-    public static function dump(mysqli $conn, callable $write): array
+    public static function dump(mysqli $conn, callable $write, ?array $keepRows = null, array $replace = []): array
     {
         $database = (string) $conn->query('SELECT DATABASE()')->fetch_row()[0];
         if ($database === '') {
@@ -56,8 +64,12 @@ final class SqlDump
             foreach ($tables as $table) {
                 $quoted = self::name($table);
                 $create = (string) $conn->query("SHOW CREATE TABLE {$quoted}")->fetch_row()[1];
+                $structureOnly = $keepRows !== null && !array_key_exists($table, $keepRows);
+                if ($structureOnly) {
+                    $create = (string) preg_replace('/ AUTO_INCREMENT=\d+/', '', $create);
+                }
                 $write("DROP TABLE IF EXISTS {$quoted};\n{$create};\n");
-                $counts[$table] = self::rows($conn, $table, $write);
+                $counts[$table] = $structureOnly ? 0 : self::rows($conn, $table, $write, $keepRows[$table] ?? '', $replace[$table] ?? []);
                 $write("\n");
             }
             $conn->query('COMMIT');
@@ -72,11 +84,11 @@ final class SqlDump
     }
 
     /** @param callable(string): void $write */
-    private static function rows(mysqli $conn, string $table, callable $write): int
+    private static function rows(mysqli $conn, string $table, callable $write, string $where = '', array $replace = []): int
     {
         $quoted = self::name($table);
         // Unbuffered: rows stream from the server, so a large table never fills PHP's memory.
-        $result = $conn->query("SELECT * FROM {$quoted}", MYSQLI_USE_RESULT);
+        $result = $conn->query("SELECT * FROM {$quoted}" . ($where === '' ? '' : " WHERE {$where}"), MYSQLI_USE_RESULT);
         $fields = $result->fetch_fields();
         $columns = implode(', ', array_map(static fn ($f): string => self::name((string) $f->name), $fields));
         $binary = array_map(static fn ($f): bool => (int) $f->charsetnr === self::BINARY_CHARSET && self::isByteString((int) $f->type), $fields);
@@ -87,6 +99,10 @@ final class SqlDump
         while (($row = $result->fetch_row()) !== null) {
             $values = [];
             foreach ($row as $i => $value) {
+                $column = (string) $fields[$i]->name;
+                if (array_key_exists($column, $replace)) {
+                    $value = $replace[$column];
+                }
                 if ($value === null) {
                     $values[] = 'NULL';
                 } elseif ($binary[$i]) {

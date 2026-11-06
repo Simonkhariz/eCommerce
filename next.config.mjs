@@ -47,6 +47,8 @@ const nextConfig = {
   images: {
     formats: ['image/webp'],
     minimumCacheTTL: 86400,
+    // deploy/cpanel/build.ps1 -NoImageResizing, for a host that can't run the picture library.
+    ...(process.env.SHOPCO_NO_IMAGE_RESIZING === 'true' ? { unoptimized: true } : {}),
   },
 };
 
