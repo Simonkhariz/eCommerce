@@ -78,6 +78,8 @@ function TrackOrderContent() {
   const { user, refreshUser } = useAuth();
   const viewerId = user?.id ?? null;
   const [lastViewerId, setLastViewerId] = useState(viewerId);
+  // Signing in (again) can open an order from the address that couldn't be opened before.
+  const [lookupAttempt, setLookupAttempt] = useState(0);
   if (viewerId !== lastViewerId) {
     setLastViewerId(viewerId);
     if (viewerId === null) {
@@ -85,6 +87,10 @@ function TrackOrderContent() {
       setOrderNumber('');
       setLookupEmail('');
       setVerificationInput('');
+      setLookupError(null);
+    } else if (queryOrder && !order) {
+      setLookupAttempt((n) => n + 1);
+      setIsLoading(true);
       setLookupError(null);
     }
   }
@@ -163,7 +169,7 @@ function TrackOrderContent() {
     return () => {
       current = false;
     };
-  }, [queryOrder, queryToken]);
+  }, [queryOrder, queryToken, lookupAttempt]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

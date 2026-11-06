@@ -124,7 +124,7 @@ export function OrderManagement() {
           label="Search orders"
           value={searchText}
           onChange={setSearchText}
-          placeholder="Order number, email, name or tracking no."
+          placeholder="Order number, email, name, phone or tracking no."
         />
         <FilterSelect label="Order status" value={filters.status} onChange={(status) => setFilters({ status })} options={STATUS_OPTIONS} />
       </Toolbar>

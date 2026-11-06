@@ -943,7 +943,7 @@ export function ProductManagement() {
                             className="h-9 w-full cursor-pointer rounded border border-[#d1d5db] bg-white p-0.5 lg:h-8 lg:w-10"
                           />
                         </label>
-                        <label className={VARIANT_FIELD}>
+                        <label className={`${VARIANT_FIELD} col-span-2 sm:col-span-1`}>
                           <span className={VARIANT_LABEL}>SKU</span>
                           <input
                             aria-label={`${label} SKU`}
@@ -963,7 +963,7 @@ export function ProductManagement() {
                             aria-label={`${label} price`}
                             value={v.price_override}
                             onChange={(e) => updateVariant(idx, { price_override: e.target.value })}
-                            placeholder="Product price"
+                            placeholder="Price"
                             className={`${inputClass} h-9 w-full py-1 lg:h-8`}
                           />
                         </label>
