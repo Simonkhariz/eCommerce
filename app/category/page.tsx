@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { CatalogClient, type CatalogSeed } from '@/components/catalog/CatalogClient';
 import type { ApiProductSummary, CatalogFacets, PaginationMeta } from '@/lib/api-client';
@@ -5,6 +6,11 @@ import { buildCatalogUrl, catalogApiParams, parseCatalogParams, productListFrom,
 import { serverApiGet, serverApiGetFull } from '@/lib/server-api';
 
 type SearchParams = Record<string, string | string[] | undefined>;
+
+export const metadata: Metadata = {
+  title: 'Shop all products | SHOP.CO',
+  description: 'Browse every product in the SHOP.CO catalogue, with filters for category, colour, size, style and price.',
+};
 
 /**
  * The catalogue is sent with its first results and filter options already in the page, like

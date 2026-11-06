@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import { ProductDetailClient } from '@/components/product/ProductDetailClient';
 import type { ApiProductDetail } from '@/lib/api-client';
@@ -12,13 +13,16 @@ type ProductMeta = ApiProductDetail & {
 /**
  * Server-side product lookup, shared by the metadata and the page (Next.js runs the fetch once),
  * so the page is sent with the product already in it; the client then refreshes stock.
- * Returns 'missing' only when the API says the product does not exist; network errors return null.
+ * Returns 'missing' only when the API says the product does not exist; network errors and a slow
+ * API (the same 4 s as lib/server-api.ts) return null, and the browser then loads the product.
+ * A fetch with a signal isn't shared by Next.js, hence React's cache() around it.
  */
-async function lookupProduct(idOrSlug: string): Promise<ProductMeta | 'missing' | null> {
+const lookupProduct = cache(async (idOrSlug: string): Promise<ProductMeta | 'missing' | null> => {
   try {
     const res = await fetch(`${BACKEND_ORIGIN}/api/v1/products/${encodeURIComponent(idOrSlug)}`, {
       headers: { Accept: 'application/json' },
       next: { revalidate: 60 },
+      signal: AbortSignal.timeout(4000),
     });
     if (res.status === 404) return 'missing';
     if (!res.ok) return null;
@@ -27,7 +31,7 @@ async function lookupProduct(idOrSlug: string): Promise<ProductMeta | 'missing' 
   } catch {
     return null;
   }
-}
+});
 
 function summarise(text: string | null | undefined, max = 155): string | undefined {
   const clean = (text ?? '').replace(/\s+/g, ' ').trim();
@@ -38,8 +42,11 @@ function summarise(text: string | null | undefined, max = 155): string | undefin
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const product = await lookupProduct(id);
-  if (!product || product === 'missing') {
-    return { title: 'Product | SHOP.CO' };
+  if (product === 'missing') {
+    return { title: 'Product not found | SHOP.CO', robots: { index: false, follow: false } };
+  }
+  if (!product) {
+    return { title: 'Shop | SHOP.CO' };
   }
 
   const description = summarise(product.description);
