@@ -39,11 +39,16 @@ $outbound = static function (string $url): array {
     curl_exec($c);
     $code = (int) curl_getinfo($c, CURLINFO_RESPONSE_CODE);
     $error = curl_error($c);
-    curl_close($c);
     return [$code > 0, $code > 0 ? 'reached' : ('blocked: ' . $error)];
 };
 foreach (['Cloudflare R2 (pictures)' => 'https://r2.cloudflarestorage.com', 'Resend (email)' => 'https://api.resend.com', 'Kora (payments)' => 'https://api.korapay.com', 'Monnify (payments)' => 'https://api.monnify.com'] as $name => $url) {
     [$ok, $detail] = $outbound($url);
+    // Cloudflare let the certificate on this bare test address expire (9 Sep 2026); account
+    // addresses (<id>.r2.cloudflarestorage.com) are fine. Reaching the expired certificate still
+    // proves the host isn't blocking R2. The real bucket is checked in Admin → System status.
+    if (!$ok && str_contains($url, 'r2.cloudflarestorage.com') && stripos($detail, 'certificate has expired') !== false) {
+        [$ok, $detail] = [null, "reached Cloudflare; its certificate on this test address expired (Cloudflare's side, not the host). After setup, Admin → System status checks the real bucket"];
+    }
     $add("This host can reach {$name}", $ok, $detail);
 }
 
