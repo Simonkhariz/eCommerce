@@ -293,3 +293,4 @@ keep the Node.js app from being put to sleep by the host.
 | 8 Nov 2026 | Resend verified on `shopco.kharizdigital.com.ng`, test and sample emails delivered; https live; database created, imported and up to date (MySQL 8.4) |
 | 8 Nov 2026 | API online after the 403 fix: `/api/v1/health` answers healthy, database up |
 | 8 Nov 2026 | Storefront online in Setup Node.js App (Node 20) on the first try; pages, API calls, R2 pictures and page refresh checked from outside |
+| 9 Nov 2026 | Admin sign-in works after the `TRUSTED_PROXIES` fix; Monnify and Kora show as Sandbox in Payment methods |
