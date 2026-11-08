@@ -128,9 +128,27 @@ slower than the 150 ms the shop allows per reply, and on one server the built-in
    (`X-Upload-Source: s3`) and are resized on the host, and `/api/revalidate` refuses a call without the
    secret (401), which shows the secret is set.
 
+### Admin sign-in on the live shop
+
+Sign in at `https://shopco.kharizdigital.com.ng/admin`. The export carries the PC's administrators
+with their PC passwords: `admin@shopco.ng` (the owner) and `achmad.hakim@shop.co` (a test account:
+remove it). To give an account a new password without the old one:
+
+1. On the PC, make the scrambled form (bcrypt, cost 12, as the shop uses):
+   `php -r "echo password_hash('NEW-PASSWORD', PASSWORD_BCRYPT, ['cost' => 12]);"`
+2. phpMyAdmin → `oqlfyktj_shopco` → **SQL** tab:
+   ```sql
+   UPDATE `users` SET `password_hash` = '<the $2y$12$... text>' WHERE `email` = 'admin@shopco.ng' AND `role` = 'admin';
+   ```
+   It should say "1 row affected". Then change it again in admin → My account if you like.
+
 ## 5. Scheduled jobs (Cron Jobs)
 
-Add `>/dev/null 2>&1` at the end if the host emails you every run.
+cPanel → **Cron Jobs**. Clear **Cron Email** first (else an email every run). For each job, type the
+time into the five boxes (Minute, Hour, Day, Month, Weekday) instead of using Common Settings, which has
+no 10-minute choice: every 5 minutes is `*/5 * * * *`, every 10 is `*/10 * * * *`, 03:00 daily is
+`0 3 * * *`, 02:30 daily is `30 2 * * *`. The server clock is the host's (USA), not Lagos time.
+Add `>/dev/null 2>&1` at the end of each command.
 
 | How often | Command |
 |---|---|
@@ -140,6 +158,23 @@ Add `>/dev/null 2>&1` at the end if the host emails you every run.
 | Daily 02:30 | `/usr/local/bin/php /home/oqlfyktj/shopco-api/scripts/backup.php && /usr/local/bin/php /home/oqlfyktj/shopco-api/scripts/backup_to_bucket.php` |
 
 *Status: to be added.*
+
+## Card payments in test mode (sandbox)
+
+The demo shows Monnify and Kora with their **sandbox** keys (the same test keys as the PC): the
+checkout, payment pages and automatic confirmation all work, and no real money moves. Without keys a
+gateway isn't offered at all, which is why the shop first showed WhatsApp only.
+
+1. In the API's `.env`: `PAYMENT_MONNIFY_ENABLED=true`, `PAYMENT_KORA_ENABLED=true`, and every
+   `MONNIFY_...` and `KORA_...` line from the PC's `backend/.env` (`MONNIFY_API_BASE_URL=https://sandbox.monnify.com`,
+   Kora's `pk_test_`/`sk_test_` keys). The Desktop copy (`api-settings\.env`) has them.
+2. Admin → Settings → **Payment methods**: both show as **sandbox**; choose which one **Pay now** uses.
+3. **Monnify only:** in the Monnify dashboard (sandbox), set the webhook address to
+   `https://shopco.kharizdigital.com.ng/api/v1/webhooks/monnify`. Kora needs nothing: each payment
+   tells Kora to notify `APP_URL/api/v1/webhooks/kora`.
+4. Test with the gateways' test cards (shown on their sandbox payment pages and in their docs).
+5. System status warns that test keys are in use: expected for the demo. For real customers, replace
+   them with live keys (`MONNIFY_API_BASE_URL=https://api.monnify.com`, `sk_live_` for Kora).
 
 ## 6. Final checks
 
@@ -234,6 +269,7 @@ keep the Node.js app from being put to sleep by the host.
 | 8 Nov 2026 | API subdomain's folder created at `/home/oqlfyktj/home/oqlfyktj/...` | Full path typed in the document root box; changed to `shopco-api/public` |
 | 8 Nov 2026 | No "Select PHP Version" in cPanel | Truehost uses MultiPHP Manager and MultiPHP INI Editor |
 | 8 Nov 2026 | API answered 403 Forbidden to everything | Parent `.htaccess` applied by LiteSpeed; `Require all granted` in `public/.htaccess` |
+| 8 Nov 2026 | Admin sign-in failed in the browser although the password was right (the same sign-in worked from the PC with curl) | The storefront reaches the API over the server's public address `102.203.116.19`, which wasn't in `TRUSTED_PROXIES`, so every visitor looked like one person and the failed tries locked sign-in for 15 minutes. Fix: `TRUSTED_PROXIES=127.0.0.1,::1,102.203.116.19` in the API's `.env` (confirm in System status → Visitor addresses) |
 
 ## Log
 
