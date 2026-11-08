@@ -108,7 +108,7 @@ final class MailTemplates
             . $this->totalsTable($p, 'Total to pay')
             . $this->addressBlock($p)
             . $this->button($this->trackUrl($num), 'View order and pay')
-            . '<p style="margin:16px 0 0;color:#6b7280;font-size:13px">To open your order, use this order number with the email you checked out with.</p>'
+            . '<p style="margin:16px 0 0;color:#666666;font-size:13px">To open your order, use this order number with the email you checked out with.</p>'
         );
 
         $text = "Hi {$this->firstName($p)},\n\n"
@@ -174,7 +174,7 @@ final class MailTemplates
             . '<p style="margin:0 0 16px">Order <strong>' . $this->e($num) . '</strong> has been handed to the courier.</p>'
             . $this->keyValueTable($rows)
             . ($trackingUrl !== '' ? $this->button($trackingUrl, 'Track with the courier') : '')
-            . '<p style="margin:16px 0 0"><a href="' . $this->e($this->trackUrl($num)) . '" style="color:#111827">See your order</a></p>'
+            . '<p style="margin:16px 0 0"><a href="' . $this->e($this->trackUrl($num)) . '" style="color:#000000">See your order</a></p>'
         );
 
         $text = "Hi {$this->firstName($p)},\n\nOrder {$num} has been handed to the courier.\n\n"
@@ -201,7 +201,7 @@ final class MailTemplates
             'Order cancelled',
             '<p style="margin:0 0 12px">Hi ' . $this->e($this->firstName($p)) . ',</p>'
             . '<p style="margin:0 0 12px">Order <strong>' . $this->e($num) . '</strong> has been cancelled.</p>'
-            . ($reason !== '' ? '<p style="margin:0 0 12px;color:#4b5563">Reason: ' . $this->e($reason) . '</p>' : '')
+            . ($reason !== '' ? '<p style="margin:0 0 12px;color:#666666">Reason: ' . $this->e($reason) . '</p>' : '')
             . '<p style="margin:0 0 16px">' . $body . '</p>'
             . $this->contactLine()
         );
@@ -332,7 +332,7 @@ final class MailTemplates
             '<p style="margin:0 0 12px">Hi ' . $this->e($this->firstName($p)) . ',</p>'
             . '<p style="margin:0 0 16px">' . $line . '</p>'
             . $this->itemsTable($p)
-            . '<p style="margin:16px 0 0"><a href="' . $this->e($this->trackUrl($num)) . '" style="color:#111827">See your order</a></p>'
+            . '<p style="margin:16px 0 0"><a href="' . $this->e($this->trackUrl($num)) . '" style="color:#000000">See your order</a></p>'
             . ($delivered ? $this->contactLine() : '')
         );
         $text = "Hi {$this->firstName($p)},\n\n"
@@ -393,9 +393,9 @@ final class MailTemplates
             '<p style="margin:0 0 12px">Hi ' . $this->e(trim((string) ($p['name'] ?? '')) ?: 'there') . ',</p>'
             . '<p style="margin:0 0 16px">Your admin account asked to permanently delete old data from the store. Type this code in admin to confirm'
             . ($expires !== '' ? ' (it works until <strong>' . $this->e($expires) . '</strong>, once)' : '') . ':</p>'
-            . '<p style="margin:0 0 20px;font-size:28px;font-weight:bold;letter-spacing:6px;font-family:monospace">' . $this->e($code) . '</p>'
+            . '<p style="display:inline-block;margin:0 0 20px;padding:14px 28px;background:#F0F0F0;border-radius:20px;font-size:30px;font-weight:700;letter-spacing:8px;font-family:Menlo,Consolas,monospace">' . $this->e($code) . '</p>'
             . $this->keyValueTable($rows)
-            . '<p style="margin:0 0 16px;color:#b91c1c"><strong>If this wasn\'t you, don\'t share the code: change your admin password now.</strong></p>'
+            . '<p style="margin:0 0 16px;color:#FF3333"><strong>If this wasn\'t you, don\'t share the code: change your admin password now.</strong></p>'
         );
 
         $text = "Your admin account asked to permanently delete old data from the store.\n"
@@ -481,7 +481,7 @@ final class MailTemplates
         }
 
         $footer = $unsubscribe !== ''
-            ? '<p style="margin:16px 0 0;font-size:12px;color:#6b7280">You are receiving this because you subscribed to the ' . $this->e($this->store['name']) . ' newsletter. <a href="' . $this->e($unsubscribe) . '" style="color:#6b7280">Unsubscribe</a></p>'
+            ? '<p style="margin:16px 0 0;font-size:12px;color:#666666">You are receiving this because you subscribed to the ' . $this->e($this->store['name']) . ' newsletter. <a href="' . $this->e($unsubscribe) . '" style="color:#666666">Unsubscribe</a></p>'
             : '';
 
         $html = $this->layout($subject, $htmlBody . $this->button($this->frontendUrl . '/category', 'Visit the store') . $footer);
@@ -502,7 +502,7 @@ final class MailTemplates
             'Sign in',
             '<p style="margin:0 0 16px">Use the button below to sign in. The link works once and expires in ' . $minutes . ' minutes.</p>'
             . $this->button($link, 'Sign in')
-            . '<p style="margin:16px 0 0;font-size:12px;color:#6b7280">If you did not ask for this, you can ignore this email.</p>'
+            . '<p style="margin:16px 0 0;font-size:12px;color:#666666">If you did not ask for this, you can ignore this email.</p>'
         );
         $text = "Sign in to {$this->store['name']}:\n{$link}\n\nThe link works once and expires in {$minutes} minutes.\nIf you did not ask for this, you can ignore this email.\n";
 
@@ -513,26 +513,53 @@ final class MailTemplates
     // Building blocks
     // -------------------------------------------------------------------------
 
+    /*
+     * The look follows the storefront: white page cards on #F0F0F0, the black SHOP.CO wordmark,
+     * bold uppercase headings (Space Grotesk where the mail app loads it, else a heavy Arial),
+     * 20px rounded panels with a faint black border, black pill buttons and red (#FF3333) for
+     * discounts and warnings. Tables and inline styles only, because mail apps drop most CSS.
+     */
+    private const HEADING_FONT = "'Space Grotesk','Arial Black',Arial,Helvetica,sans-serif";
+    private const BODY_FONT = "'Helvetica Neue',Helvetica,Arial,sans-serif";
+
     private function layout(string $heading, string $body): string
     {
         $name = $this->e($this->store['name']);
         $headingE = $this->e($heading);
         $footer = $this->footerHtml();
+        $home = $this->e($this->frontendUrl !== '' ? $this->frontendUrl : '#');
+        $hf = self::HEADING_FONT;
+        $bf = self::BODY_FONT;
+        // The grey preview line under the subject in most inboxes: the first sentences, not the greeting.
+        $preview = trim((string) preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(str_replace(['</p>', '<br>'], ' ', $body)), ENT_QUOTES, 'UTF-8')));
+        $preview = $this->e(mb_substr((string) preg_replace('/^Hi [^,]{1,60},\s*/u', '', $preview), 0, 140));
 
         return <<<HTML
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{$headingE}</title></head>
-<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111827">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 12px">
-  <tr><td align="center">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px">
-      <tr><td style="background:#111827;padding:20px 24px;border-radius:12px 12px 0 0;color:#ffffff;font-size:20px;font-weight:bold;letter-spacing:1px">{$name}</td></tr>
-      <tr><td style="padding:24px;font-size:15px;line-height:1.5">
-        <h1 style="margin:0 0 16px;font-size:20px">{$headingE}</h1>
-        {$body}
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light">
+<title>{$headingE}</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&display=swap" rel="stylesheet">
+</head>
+<body style="margin:0;padding:0;background:#F0F0F0;font-family:{$bf};color:#000000;-webkit-text-size-adjust:100%">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#F0F0F0">{$preview}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F0F0F0">
+  <tr><td align="center" style="padding:32px 12px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px">
+      <tr><td style="background:#ffffff;border:1px solid #E6E6E6;border-radius:20px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr><td style="padding:24px 28px;border-bottom:1px solid #E6E6E6">
+            <a href="{$home}" style="font-family:{$hf};font-size:28px;font-weight:700;letter-spacing:-1px;text-transform:uppercase;color:#000000;text-decoration:none">{$name}</a>
+          </td></tr>
+          <tr><td style="padding:28px;font-size:16px;line-height:1.55;color:#000000">
+            <h1 style="margin:0 0 18px;font-family:{$hf};font-size:28px;line-height:1.1;font-weight:700;text-transform:uppercase;letter-spacing:-0.5px;color:#000000">{$headingE}</h1>
+            {$body}
+          </td></tr>
+        </table>
       </td></tr>
-      <tr><td style="padding:16px 24px;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280">{$footer}</td></tr>
+      <tr><td style="padding:28px 16px 8px;text-align:center;font-size:13px;line-height:1.6;color:#666666">{$footer}</td></tr>
     </table>
   </td></tr>
 </table>
@@ -543,14 +570,22 @@ HTML;
 
     private function footerHtml(): string
     {
-        $parts = [$this->e($this->store['name'])];
+        $hf = self::HEADING_FONT;
+        $name = $this->e($this->store['name']);
+        $contact = [];
         if ($this->store['email'] !== '') {
-            $parts[] = '<a href="mailto:' . $this->e($this->store['email']) . '" style="color:#6b7280">' . $this->e($this->store['email']) . '</a>';
+            $contact[] = '<a href="mailto:' . $this->e($this->store['email']) . '" style="color:#666666">' . $this->e($this->store['email']) . '</a>';
         }
         if ($this->store['phone'] !== '') {
-            $parts[] = $this->e($this->store['phone']);
+            $contact[] = $this->e($this->store['phone']);
         }
-        return implode(' · ', $parts);
+        if ($this->store['whatsapp'] !== '' && $this->store['whatsapp'] !== $this->store['phone']) {
+            $contact[] = 'WhatsApp ' . $this->e($this->store['whatsapp']);
+        }
+        return '<div style="font-family:' . $hf . ';font-size:20px;font-weight:700;letter-spacing:-0.5px;text-transform:uppercase;color:#000000">' . $name . '</div>'
+            . '<div style="margin:6px 0 0">Clothes that suit your style and that you&#39;re proud to wear, delivered across Nigeria.</div>'
+            . ($contact !== [] ? '<div style="margin:8px 0 0">' . implode(' &middot; ', $contact) . '</div>' : '')
+            . '<div style="margin:12px 0 0;color:#999999">&copy; ' . date('Y') . ' ' . $name . '. All rights reserved.</div>';
     }
 
     private function footerText(): string
@@ -563,19 +598,33 @@ HTML;
     {
         $ways = [];
         if ($this->store['email'] !== '') {
-            $ways[] = 'email <a href="mailto:' . $this->e($this->store['email']) . '" style="color:#111827">' . $this->e($this->store['email']) . '</a>';
+            $ways[] = 'email <a href="mailto:' . $this->e($this->store['email']) . '" style="color:#000000">' . $this->e($this->store['email']) . '</a>';
         }
         if ($this->store['whatsapp'] !== '') {
             $ways[] = 'WhatsApp ' . $this->e($this->store['whatsapp']);
         }
-        return $ways === [] ? '' : '<p style="margin:0;color:#4b5563">Questions? ' . implode(' or ', $ways) . '.</p>';
+        return $ways === [] ? '' : '<p style="margin:16px 0 0;color:#666666">Questions? ' . implode(' or ', $ways) . '.</p>';
     }
 
     private function button(string $url, string $label): string
     {
-        return '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:20px 0 0"><tr><td style="background:#111827;border-radius:999px">'
-            . '<a href="' . $this->e($url) . '" style="display:inline-block;padding:12px 24px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px">' . $this->e($label) . '</a>'
+        return '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0"><tr><td style="background:#000000;border-radius:62px">'
+            . '<a href="' . $this->e($url) . '" style="display:inline-block;padding:16px 40px;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;border-radius:62px">' . $this->e($label) . '</a>'
             . '</td></tr></table>';
+    }
+
+    /** A section title inside the email, like the storefront's "Order Summary". */
+    private function sectionTitle(string $title): string
+    {
+        return '<p style="margin:24px 0 10px;font-family:' . self::HEADING_FONT . ';font-size:18px;font-weight:700;color:#000000">' . $this->e($title) . '</p>';
+    }
+
+    /** The rounded, faintly bordered panel the storefront uses for the cart and order summary. */
+    private function panel(string $inner, bool $grey = false): string
+    {
+        $style = $grey ? 'background:#F0F0F0;border-radius:20px' : 'background:#ffffff;border:1px solid #E6E6E6;border-radius:20px';
+        return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;' . $style . '"><tr><td style="padding:8px 18px">'
+            . $inner . '</td></tr></table>';
     }
 
     private function itemsTable(array $p): string
@@ -586,17 +635,20 @@ HTML;
         }
         $currency = (string) ($p['currency'] ?? 'NGN');
         $rows = '';
-        foreach ($items as $item) {
+        $last = count($items) - 1;
+        foreach (array_values($items) as $i => $item) {
             $options = trim((string) ($item['options'] ?? ''));
+            $line = $i === $last ? '' : 'border-bottom:1px solid #E6E6E6;';
             $rows .= '<tr>'
-                . '<td style="padding:8px 0;border-bottom:1px solid #f3f4f6">' . $this->e((string) $item['name'])
-                . ($options !== '' ? '<br><span style="color:#6b7280;font-size:13px">' . $this->e($options) . '</span>' : '')
+                . '<td style="padding:14px 0;' . $line . 'vertical-align:top"><span style="font-weight:700;font-size:15px">' . $this->e((string) $item['name']) . '</span>'
+                . ($options !== '' ? '<br><span style="color:#666666;font-size:13px">' . $this->e($options) . '</span>' : '')
                 . '</td>'
-                . '<td style="padding:8px 0;border-bottom:1px solid #f3f4f6;text-align:center;white-space:nowrap">× ' . (int) $item['quantity'] . '</td>'
-                . '<td style="padding:8px 0;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap">' . $this->e($this->money($item['line_total'], $currency)) . '</td>'
+                . '<td style="padding:14px 8px;' . $line . 'text-align:center;white-space:nowrap;vertical-align:top;color:#666666;font-size:14px">&times; ' . (int) $item['quantity'] . '</td>'
+                . '<td style="padding:14px 0;' . $line . 'text-align:right;white-space:nowrap;vertical-align:top;font-weight:700;font-size:15px">' . $this->e($this->money($item['line_total'], $currency)) . '</td>'
                 . '</tr>';
         }
-        return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;font-size:14px">' . $rows . '</table>';
+        return $this->sectionTitle('Your items')
+            . $this->panel('<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' . $rows . '</table>');
     }
 
     private function itemsText(array $p): string
@@ -632,10 +684,19 @@ HTML;
         $html = '';
         $last = count($rows) - 1;
         foreach ($rows as $i => [$label, $value]) {
-            $style = $i === $last ? 'padding:8px 0 0;border-top:1px solid #e5e7eb;font-weight:bold;font-size:16px' : 'padding:2px 0;color:#4b5563';
-            $html .= '<tr><td style="' . $style . '">' . $this->e($label) . '</td><td style="' . $style . ';text-align:right">' . $this->e($value) . '</td></tr>';
+            if ($i === $last) {
+                $cell = 'padding:14px 0 12px;border-top:1px solid #E6E6E6;';
+                $html .= '<tr><td style="' . $cell . 'font-size:17px;color:#000000">' . $this->e($label) . '</td>'
+                    . '<td style="' . $cell . 'text-align:right;font-size:20px;font-weight:700;color:#000000;white-space:nowrap">' . $this->e($value) . '</td></tr>';
+                continue;
+            }
+            // Discounts are red, as on the storefront's order summary.
+            $valueColour = str_starts_with($value, '−') ? '#FF3333' : '#000000';
+            $html .= '<tr><td style="padding:8px 0;font-size:15px;color:#666666">' . $this->e($label) . '</td>'
+                . '<td style="padding:8px 0;text-align:right;font-size:15px;font-weight:700;color:' . $valueColour . ';white-space:nowrap">' . $this->e($value) . '</td></tr>';
         }
-        return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;font-size:14px">' . $html . '</table>';
+        return $this->sectionTitle('Order summary')
+            . $this->panel('<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' . $html . '</table>');
     }
 
     private function totalsText(array $p, string $totalLabel): string
@@ -651,10 +712,11 @@ HTML;
             if (trim($value) === '') {
                 continue;
             }
-            $html .= '<tr><td style="padding:4px 12px 4px 0;color:#6b7280;white-space:nowrap;vertical-align:top">' . $this->e($label)
-                . '</td><td style="padding:4px 0;font-weight:bold;word-break:break-all">' . $this->e($value) . '</td></tr>';
+            $html .= '<tr><td style="padding:7px 12px 7px 0;color:#666666;font-size:14px;vertical-align:top">' . $this->e($label)
+                // Short values (order numbers, amounts, times) stay on one line; long ones may wrap.
+                . '</td><td style="padding:7px 0;font-weight:700;font-size:14px;text-align:right;' . (mb_strlen($value) <= 22 ? 'white-space:nowrap' : 'word-break:break-word') . '">' . $this->e($value) . '</td></tr>';
         }
-        return $html === '' ? '' : '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;font-size:14px">' . $html . '</table>';
+        return $html === '' ? '' : $this->panel('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0">' . $html . '</table>', true);
     }
 
     /** @param list<array{0: string, 1: string}> $rows */
@@ -682,7 +744,8 @@ HTML;
         if ($lines === []) {
             return '';
         }
-        return '<p style="margin:0 0 8px;font-size:14px;color:#4b5563"><strong style="color:#111827">Delivering to</strong><br>'
+        return $this->sectionTitle('Delivering to')
+            . '<p style="margin:0;font-size:15px;line-height:1.6;color:#666666">'
             . implode('<br>', array_map(fn ($l) => $this->e((string) $l), $lines)) . '</p>';
     }
 
@@ -706,7 +769,8 @@ HTML;
     private function dateTime(string $value): string
     {
         $ts = strtotime($value);
-        return $ts === false ? $value : date('j M Y, g:i a', $ts);
+        // A no-break space keeps "1:42 am" together.
+        return $ts === false ? $value : date('j M Y, g:i', $ts) . "\u{00A0}" . date('a', $ts);
     }
 
     private function e(string $value): string
