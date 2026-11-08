@@ -100,7 +100,33 @@ slower than the 150 ms the shop allows per reply, and on one server the built-in
 
 ## 4. Put the storefront online
 
-*To be written as it is done.*
+1. **Clear the shop's web folder** `/home/oqlfyktj/shopco.kharizdigital.com.ng`: delete `check-host.php`
+   and any `index.html`/`index.php`. **Keep** `cgi-bin`, `.htaccess` (Setup Node.js App writes its
+   instructions there), `.user.ini`, `php.ini` and `.well-known` (renews the https certificate).
+2. In `/home/oqlfyktj`, make the folder `shopco-web`, upload `shopco-web.zip` into it, **Extract**,
+   delete the zip. Expect `server.js`, `package.json`, `node_modules`, `public` and the hidden `.next`.
+   **Keep `node_modules`:** it holds everything the app runs on, including the Linux picture library.
+3. cPanel → **Setup Node.js App** → **Create Application**:
+
+   | Setting | Value |
+   |---|---|
+   | Node.js version | 20.x |
+   | Application mode | Production |
+   | Application root | `shopco-web` |
+   | Application URL | `shopco.kharizdigital.com.ng` (nothing after it) |
+   | Application startup file | `server.js` |
+
+   Environment variables (from `node-app-variables.txt`): `NODE_ENV=production`,
+   `BACKEND_ORIGIN=https://shopco-api.kharizdigital.com.ng`, `REVALIDATE_SECRET` (the same value as the
+   API's `.env`), `UV_THREADPOOL_SIZE=2`, `VIPS_CONCURRENCY=1`.
+   **Don't click "Run NPM Install".** Create, then Start or Restart.
+   (CloudLinux sometimes refuses an app folder that has its own `node_modules`; it didn't here. If it
+   ever does: rename it `node_modules_bundle`, create the app, then move its contents into
+   `/nodevenv/shopco-web/20/lib/node_modules`, the folder cPanel's new `node_modules` link points to.)
+4. Open `https://shopco.kharizdigital.com.ng`. Checked from outside on 8 Nov 2026: pages answer in about
+   1 second, `/api/v1` and `/uploads` reach the API through the shop's address, pictures come from R2
+   (`X-Upload-Source: s3`) and are resized on the host, and `/api/revalidate` refuses a call without the
+   secret (401), which shows the secret is set.
 
 ## 5. Scheduled jobs (Cron Jobs)
 
@@ -120,6 +146,74 @@ Add `>/dev/null 2>&1` at the end if the host emails you every run.
 *To be written as they are done.* (Admin → dev mode → System status: visitor addresses show your own
 address, storage `s3 · writable`, email Resend; a test order from a phone on mobile data; one picture
 upload; UptimeRobot on the health address and the shop.)
+
+## How the storefront and the API work together
+
+The shop is two programs on the same hosting account:
+
+- **The storefront** (Next.js, Node.js app in `shopco-web`): every page shoppers and the admin see.
+  It holds no data of its own.
+- **The API** (PHP in `shopco-api`): all data and rules: products, carts, orders, payments, sign-in,
+  admin actions, emails. It talks to the MySQL database and to Cloudflare R2, Resend and (later) the
+  payment gateways.
+
+```mermaid
+flowchart LR
+    B[Shopper's or admin's browser] -->|"https://shopco.kharizdigital.com.ng<br>pages, /api/v1, /uploads"| N[Storefront<br>Node.js app]
+    N -->|"BACKEND_ORIGIN<br>https://shopco-api.kharizdigital.com.ng"| A[API<br>PHP]
+    A --> D[(MySQL 8.4<br>oqlfyktj_shopco)]
+    A -->|pictures and nightly backups| R[(Cloudflare R2<br>shopco-media)]
+    A -->|emails| M[Resend]
+    A -->|"after admin changes<br>POST /api/revalidate + secret"| N
+    C[Cron jobs] --> A
+```
+
+**The browser only ever talks to the shop's address.** Calls to `/api/v1/...` and `/uploads/...` on
+`shopco.kharizdigital.com.ng` are passed on by the storefront to the API's address (`BACKEND_ORIGIN`,
+set in Setup Node.js App; the rules are in `next.config.mjs`). Because everything is on one
+address, the sign-in cookie belongs to the shop's address, is hidden from JavaScript (HTTP-only)
+and needs no extra settings. The API's own address still works directly (for the health check and
+uptime monitors) but shoppers never see it.
+
+### The main flows
+
+**1. Opening a page.** The storefront builds the page on the server, asking the API for the
+catalogue, banners and settings (`lib/server-api.ts`). Those answers are kept for 60 seconds, so
+most visits never reach the API. The API keeps its own catalogue cache in files on the host
+(Redis isn't used).
+
+**2. Pictures.** A product picture's address is `/uploads/<name>.webp`. The storefront passes it to
+the API, which reads it from R2 and sends it back with long cache times. Pictures on pages go
+through `/_next/image`, which resizes them for the screen with the picture library (sharp) and keeps
+each size for a day.
+
+**3. Shopping and signing in.** Cart, sign-in, checkout and order tracking run in the browser and
+call `/api/v1/...` on the shop's address. The storefront adds the visitor's address
+(`X-Forwarded-For`) when it passes calls on; the API believes it only from addresses in
+`TRUSTED_PROXIES`, which is why step 6 checks "Visitor addresses" (limits on sign-in attempts and
+orders are counted per visitor).
+
+**4. An order.** Checkout → the API creates the order, reserves the stock and queues the emails
+(order received to the customer, new order to the admins). Each email gets one quick attempt
+through Resend right after the answer is sent; the `process_outbox` cron job sends anything left
+or retried. Unpaid orders expire after their deadline (the `expire_pending_orders` job) and their
+stock is released.
+
+**5. WhatsApp payment.** The customer transfers the money and taps "I've sent the transfer" → the
+admins get an email → an admin checks the bank and confirms the payment in admin → the customer gets
+"Payment received" and a receipt, and the order moves on to packing, shipping and delivery, each
+with its own email. Card payments (Kora, Monnify) are off until their keys are added.
+
+**6. Admin changes.** Saving a product, banner, coupon or setting in admin → the API clears its
+catalogue cache and calls the storefront's `/api/revalidate` with the shared `REVALIDATE_SECRET` →
+every page is rebuilt on its next visit, so changes show at once instead of within a minute.
+
+**7. Every night and day.** `backup.php` saves the database on the host and `backup_to_bucket.php`
+copies it to R2 under `backups/`. `check_database.php` emails the admins only if the database needs
+attention (nothing is ever deleted without the admin's password and an emailed code).
+
+**8. Watching.** UptimeRobot checks the health address and the shop every 5 minutes; its visits also
+keep the Node.js app from being put to sleep by the host.
 
 ## Updating later
 
@@ -147,3 +241,5 @@ upload; UptimeRobot on the health address and the shop.)
 |---|---|
 | 7 Nov 2026 | Bought Truehost Starter and `kharizdigital.com.ng`; created both subdomains; host check passed; upload files built |
 | 8 Nov 2026 | Resend verified on `shopco.kharizdigital.com.ng`, test and sample emails delivered; https live; database created, imported and up to date (MySQL 8.4) |
+| 8 Nov 2026 | API online after the 403 fix: `/api/v1/health` answers healthy, database up |
+| 8 Nov 2026 | Storefront online in Setup Node.js App (Node 20) on the first try; pages, API calls, R2 pictures and page refresh checked from outside |
