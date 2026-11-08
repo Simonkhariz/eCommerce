@@ -142,6 +142,19 @@ remove it). To give an account a new password without the old one:
    ```
    It should say "1 row affected". Then change it again in admin → My account if you like.
 
+**Give every admin a real email.** Admin emails (new orders, "customer says they paid", payments)
+go to every active admin, and the clean-up confirmation code goes to the admin who asks for it. The
+PC's accounts had made-up addresses (`admin@shopco.ng`, `achmad.hakim@shop.co`), which may be other
+people's real domains. Admin → My account can't change an email, so use phpMyAdmin → SQL:
+
+```sql
+UPDATE `users` SET `email` = 'khariz.digital@gmail.com' WHERE `email` = 'admin@shopco.ng' AND `role` = 'admin';
+UPDATE `users` SET `status` = 'suspended' WHERE `email` = 'achmad.hakim@shop.co' AND `role` = 'admin';
+```
+
+Then sign in with the Gmail address and the same password. A suspended admin can't sign in and gets
+no emails; it can be switched back with `status = 'active'`.
+
 ## 5. Scheduled jobs (Cron Jobs)
 
 cPanel → **Cron Jobs**. Clear **Cron Email** first (else an email every run). For each job, type the
@@ -269,6 +282,7 @@ keep the Node.js app from being put to sleep by the host.
 | 8 Nov 2026 | API subdomain's folder created at `/home/oqlfyktj/home/oqlfyktj/...` | Full path typed in the document root box; changed to `shopco-api/public` |
 | 8 Nov 2026 | No "Select PHP Version" in cPanel | Truehost uses MultiPHP Manager and MultiPHP INI Editor |
 | 8 Nov 2026 | API answered 403 Forbidden to everything | Parent `.htaccess` applied by LiteSpeed; `Require all granted` in `public/.htaccess` |
+| 9 Nov 2026 | The clean-up code went to `admin@shopco.ng`, not the owner's inbox | The code goes to the admin account's own email, which was the PC's made-up one; changed to the Gmail with SQL, test admin suspended (see "Admin sign-in") |
 | 8 Nov 2026 | Admin sign-in failed in the browser although the password was right (the same sign-in worked from the PC with curl) | The storefront reaches the API over the server's public address `102.203.116.19`, which wasn't in `TRUSTED_PROXIES`, so every visitor looked like one person and the failed tries locked sign-in for 15 minutes. Fix: `TRUSTED_PROXIES=127.0.0.1,::1,102.203.116.19` in the API's `.env` (confirm in System status → Visitor addresses) |
 
 ## Log
