@@ -167,6 +167,7 @@ final class SmtpTransport
             'Date: ' . date('r'),
             'From: ' . $this->encodeName($fromName) . ' <' . $this->fromAddress . '>',
             'To: <' . $to . '>',
+            ...(($replyTo = MailService::replyToAddress()) !== null ? ['Reply-To: <' . $this->clean($replyTo) . '>'] : []),
             'Subject: ' . $this->encodeText($subject),
             'Message-ID: <' . bin2hex(random_bytes(16)) . '@' . $domain . '>',
             'MIME-Version: 1.0',

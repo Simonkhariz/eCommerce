@@ -37,6 +37,10 @@ Set this in `backend/.env` on the server (never in the storefront's `.env.local`
 | `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_ENCRYPTION` | – | – | from your email provider |
 | `MAIL_FROM_ADDRESS` | – | e.g. `orders@mail.yourshop.com` (on the verified domain) | an address your provider lets you send from |
 | `MAIL_FROM_NAME` | – | optional, e.g. `Shop.co` (else the store name) | optional |
+| `MAIL_REPLY_TO` | – | optional: where customers' replies go, e.g. your Gmail | optional |
+
+The sender address needs no mailbox: any address on the verified domain works. Without a mailbox,
+a customer's **Reply** goes nowhere unless `MAIL_REPLY_TO` is set, so set it to an inbox you read.
 
 Also available: `MAIL_TIMEOUT_SECONDS` (default 10: how long one send may wait),
 `MAIL_SEND_IMMEDIATELY` (default true: one attempt right after the response) and
@@ -68,6 +72,7 @@ the email is retried, Resend recognises it and does not send it twice. With SMTP
    RESEND_API_KEY=re_...            # server-only
    MAIL_FROM_ADDRESS=orders@mail.yourshop.com
    MAIL_FROM_NAME="Shop.co"
+   MAIL_REPLY_TO=you@gmail.com      # optional: where replies go
    ```
 7. **Check** admin → **Store settings**, "Configured on the server": "Email delivery" should say
    **Resend**.

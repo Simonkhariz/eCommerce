@@ -11,7 +11,7 @@ use App\Config\Env;
  * A transport only: the outbox, retries and duplicate protection stay in MailService.
  *
  * Settings (backend/.env, server-only): MAIL_MAILER=resend, RESEND_API_KEY, MAIL_FROM_ADDRESS on a
- * domain verified in Resend, optional MAIL_FROM_NAME. RESEND_API_URL is only for tests.
+ * domain verified in Resend, optional MAIL_FROM_NAME and MAIL_REPLY_TO. RESEND_API_URL is only for tests.
  *
  * Every send carries an Idempotency-Key. Resend keeps it for 24 hours and answers a repeat with the
  * original result without sending again, so a retry after a lost answer never sends twice. The
@@ -42,6 +42,10 @@ final class ResendTransport
         $from = $fromName !== '' ? sprintf('%s <%s>', str_replace(['"', '<', '>', "\r", "\n"], '', $fromName), $fromAddress) : $fromAddress;
 
         $message = ['from' => $from, 'to' => [$to], 'subject' => $subject, 'html' => $html, 'text' => $text];
+        $replyTo = MailService::replyToAddress();
+        if ($replyTo !== null) {
+            $message['reply_to'] = [$replyTo];
+        }
         if ($extraHeaders !== []) {
             $message['headers'] = $extraHeaders;
         }

@@ -73,6 +73,16 @@ class MailService
         return ResendTransport::isConfigured() ? 'resend' : (SmtpTransport::isConfigured() ? 'smtp' : 'log_only');
     }
 
+    /**
+     * MAIL_REPLY_TO (optional): where a customer's "Reply" goes, for example the owner's Gmail,
+     * when the sender address has no mailbox. Null when unset or not a valid address.
+     */
+    public static function replyToAddress(): ?string
+    {
+        $address = trim((string) Env::get('MAIL_REPLY_TO', ''));
+        return $address !== '' && filter_var($address, FILTER_VALIDATE_EMAIL) !== false ? $address : null;
+    }
+
     // =========================================================================
     // Order emails. Payment, shipment, cancellation and refund emails are queued from beforeCommit
     // callbacks (in the same transaction as the change); order-received from afterCommit, so a

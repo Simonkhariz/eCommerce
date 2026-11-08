@@ -96,6 +96,17 @@ $t->check('to the recipient only', [$to], $req['body']['to'] ?? null);
 $t->ok('subject, HTML and plain text are sent', !empty($req['body']['subject']) && !empty($req['body']['html']) && !empty($req['body']['text']));
 $t->ok('carries an idempotency key for this outbox email', str_starts_with((string) ($req['key'] ?? ''), "shopco-outbox-{$id}-"), (string) ($req['key'] ?? ''));
 $t->check('the API key is never stored with the email', false, str_contains(json_encode($row($id)), $apiKey));
+$t->check('no reply-to unless MAIL_REPLY_TO is set', false, array_key_exists('reply_to', $req['body'] ?? []));
+
+$setEnv(['MAIL_REPLY_TO' => "owner@{$domain}"]);
+$id = $queue("replies@{$domain}");
+$mail->deliver($id);
+$all = $requests();
+$req = end($all) ?: [];
+$t->check('MAIL_REPLY_TO: replies go to the owner', ["owner@{$domain}"], $req['body']['reply_to'] ?? null);
+$setEnv(['MAIL_REPLY_TO' => 'not-an-address']);
+$t->check('an invalid MAIL_REPLY_TO is ignored', null, MailService::replyToAddress());
+$setEnv(['MAIL_REPLY_TO' => '']);
 
 $news = "reader@{$domain}";
 $t->db->execute("INSERT INTO `newsletter_subscribers` (`email`, `status`, `source`, `unsubscribe_token`) VALUES (?, 'active', 'test', ?)", 'ss', [$news, bin2hex(random_bytes(16))]);

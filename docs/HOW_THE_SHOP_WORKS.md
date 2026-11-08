@@ -59,7 +59,7 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **Daily database backups,** copied off the server to cloud storage, with a careful restore that
     works even on hosts without SSH.
 
-The backend has 1,671 automated checks in 22 test suites, the storefront 79 unit tests, and the
+The backend has 1,674 automated checks in 22 test suites, the storefront 79 unit tests, and the
 system has passed a full load test.
 
 ---
@@ -1451,7 +1451,7 @@ proposal.
 
 **Proof in numbers:**
 
-- **1,671 automated backend checks** in 22 test suites. They run against a throw-away database
+- **1,674 automated backend checks** in 22 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data, buckets and Redis are never touched.
 - Plus 79 storefront unit tests, type checks, lint and a production build. They are run by hand
   before changes are finished; there is no automatic build server yet.
@@ -1574,7 +1574,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive once." |
 | 5 | A clean-up button behind a password field and an emailed code | "No clean-up without your password and an emailed code." |
 | 6 | A calendar with a backup box every night, flying to a cloud | "Daily backups, copied off the server, with a careful restore." |
-| 7 | A counter climbing: 1,671 ✓ | "Over 1,600 automated backend checks." |
+| 7 | A counter climbing: 1,674 ✓ | "Over 1,600 automated backend checks." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
@@ -1680,7 +1680,7 @@ Honest list, so proposals never overclaim:
 | Pictures on Cloudflare R2 | **Built and in use** on the development shop (all pictures copied and checked), and set by the Oracle setup. The keys in use are test keys and must be replaced before real customers |
 | Redis | **Built and optional;** the catalogue cache was tried on a real Upstash database. Speed from a real server, in the same region, is still to be measured |
 | Real payment sandbox runs (Kora and Monnify) | Waiting for the owner's sandbox keys and the server (its sslip.io address is the public https address they need) |
-| Real email delivery | Waiting for the owner's Resend key and a domain (log-only mode until then; without a domain, Resend reaches only the account's own address) |
+| Real email delivery | Resend set up on `shopco.kharizdigital.com.ng` (SPF, DKIM and DMARC records in place) and a test email accepted on 8 Nov 2026. The shop itself sends through it once the key is in the host's `.env` |
 | Hosting | **Not yet online.** Oracle Always Free was first choice (`deploy/oracle/`), and its sign-up refused the owner with a generic error. Shared hosting prepared as the fallback (`deploy/cpanel/`). Neither has run on a real host. A paid plan is recommended for real payments (`docs/DEPLOYMENT.md`) |
 | Automatic test runs on a build server | **Planned.** Tests are run by hand today |
 | Several admin accounts, roles and invitations | **Planned.** One administrator level today, with no invite screen |
@@ -1785,3 +1785,4 @@ When something changes, update the matching section in the same commit:
 | 6 Nov 2026 | Full review of the shop, admin and customer API, and fixes for what it found. **Money:** refunds go one payment at a time, newest first; underpaid and overpaid money can be refunded; an order becomes Refunded only when no money remains. **Flags:** "Mark as resolved" with a note; reported transfers that expire are flagged, can be recorded as late payments and stay out of the clean-up (migration 022 flagged older ones); a failed gateway check gets a grace period. **Reports:** one net sales definition on Overview and Analytics, sales count money received, item sales and units leave out cancelled and refunded orders, All time is all time. **Admin:** limits on prices, stock, uses, display order and text; numeric web addresses, renaming used coupons and overlapping zones refused; dialogs, uploads, paging and slow actions. **Security:** sign-in and payment notice limits, private catalogue data, technical text kept from customers, bad input refused. **Storefront:** checkout validation, kept details, sign-out and session handling, own reservations, Lagos-time deadlines, WhatsApp only with a number, page titles, receipts and the price filter. **Backups:** write failures are caught. Backend checks now 1,655 in 22 suites; storefront tests 77. Real Kora, Monnify and email delivery are still not run (section 11) |
 | 6 Nov 2026 | Final live checks of the review. Buttons a shopper taps at once show as not ready until the page can respond. Tabs keep up with sign-in and sign-out in other tabs. Phones are saved in one format (+234...) and found in admin search however they are typed. Receipts show the payment that stands, not a refunded duplicate. Delivery details stay until an order is paid. Refund forms start at the overpaid extra. Visitors no longer log an error on every page by asking whether they are signed in. |
 | 6 Nov 2026 | The owner chooses the homepage coupon with a "Show on homepage" tick; a new code stays private until ticked. Migration 023 ticks the code that was showing, so the homepage looks the same after the update |
+| 8 Nov 2026 | Email replies: new `MAIL_REPLY_TO` setting sends customers' replies to an inbox the owner reads (such as Gmail), because the sender address needs no mailbox and has none. Works with Resend and SMTP. The host checker no longer shows a false NO for R2: Cloudflare's certificate on its bare test address expired, while the shop's own R2 address is fine |
