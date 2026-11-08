@@ -248,6 +248,7 @@ shop takes a normal backup (`docs/BACKUPS.md`).
 | "Resource temporarily unavailable", `EAGAIN` or "Unable to fork" in the log | The host's process limit. Check `UV_THREADPOOL_SIZE=2` and `VIPS_CONCURRENCY=1`; if it continues, ask the host for its limit or rebuild with `-NoImageResizing` |
 | Error 508, or "Resource limit reached" | Too many visitors at once for the plan's entry processes: a bigger plan, or ask the host |
 | Pages load but the catalogue is empty | Wait a minute, then `BACKEND_ORIGIN`, then open `/api/v1/health` on the API address; a browser check would also cause this |
+| API answers 403 Forbidden to every address | The server applies `shopco-api/.htaccess` ("refuse everything") to `public` as well (seen on LiteSpeed). Packages built since 8 Nov 2026 allow `public` in its own `.htaccess`; for an older package, upload the current `backend/public/.htaccess` over `shopco-api/public/.htaccess` |
 | API shows a 500 error | `shopco-api/storage/logs/` and the panel's **Errors**; check the database name and user in `.env`, and that `storage` is writable |
 | The database import stops with an error | Tell me the message and the database version (phpMyAdmin's first page shows it) |
 | Admin sign-in doesn't stay | Both addresses must be https, and `FRONTEND_URL` must match the shop's address |

@@ -3,6 +3,11 @@
 # Directs all requests to index.php while preserving static files
 # -----------------------------------------------------------------------------
 
+# This folder is the only one meant to be public. backend/.htaccess one level up refuses
+# everything, and some servers (LiteSpeed on shared hosting) apply it here too unless this
+# folder allows access itself. Hidden files stay refused by the rule at the end.
+Require all granted
+
 # Prevent directory browsing (also when mod_rewrite is not loaded)
 Options -Indexes
 
