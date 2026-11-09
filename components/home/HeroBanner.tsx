@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { ApiBanner, ApiPromotion, HomepageData } from '@/lib/api-client';
-import { PromoCode } from '@/components/home/PromoCode';
+import { PromoTag } from '@/components/home/PromoCode';
 import { canOptimizeImage } from '@/lib/image';
 
 interface HeroBannerProps {
@@ -140,13 +140,6 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
           left, the picture full height on the right standing on the brand strip. */}
       <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-4 sm:px-6 lg:grid lg:grid-cols-12 lg:grid-rows-[1fr_auto] lg:gap-x-10 lg:px-8">
         <div className="pt-[clamp(0.75rem,3svh,1.5rem)] sm:pt-[clamp(1.25rem,4svh,2.5rem)] lg:col-span-7 lg:row-start-1 lg:self-center lg:py-[clamp(1rem,4svh,2.5rem)]">
-          {/* Computers only: here, beside the picture, the code doesn't change the picture's size.
-              Phones and tablets show it in a strip under the menu (PromoStrip, HomeClient). */}
-          {activePromo && (
-            <div className="mb-[clamp(0.5rem,1.8svh,1.25rem)] hidden lg:block">
-              <PromoCode promo={activePromo} className="text-sm text-neutral-600" />
-            </div>
-          )}
           <div className="grid">
             {slides.map((s, idx) => {
               const shown = idx === active;
@@ -167,13 +160,17 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
                     s.title
                   )}
                   <p className="max-w-xl text-sm leading-relaxed text-neutral-600 line-clamp-3 sm:text-base">{s.subtitle}</p>
-                  <Link
-                    href={s.ctaUrl}
-                    tabIndex={shown ? undefined : -1}
-                    className="w-full rounded-full bg-black px-12 py-3.5 text-center text-sm font-semibold text-white shadow-lg transition-all hover:bg-neutral-800 active:scale-95 sm:w-auto sm:py-4 sm:text-base"
-                  >
-                    {s.ctaText}
-                  </Link>
+                  {/* The advertised code shares the button's row (PromoTag): no extra height. */}
+                  <div className="flex w-full items-center gap-3 sm:w-auto sm:gap-5">
+                    <Link
+                      href={s.ctaUrl}
+                      tabIndex={shown ? undefined : -1}
+                      className={`${activePromo ? 'shrink-0 px-6 sm:px-12' : 'w-full px-12'} rounded-full bg-black py-3.5 text-center text-sm font-semibold text-white shadow-lg transition-all hover:bg-neutral-800 active:scale-95 sm:w-auto sm:py-4 sm:text-base`}
+                    >
+                      {s.ctaText}
+                    </Link>
+                    {activePromo && <PromoTag promo={activePromo} />}
+                  </div>
                 </div>
               );
             })}

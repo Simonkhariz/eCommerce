@@ -17,31 +17,23 @@ export function offerText(p: ApiPromotion): string {
     .join(' ');
 }
 
-/** The code in bold, a soft dot, then the offer in short, on one line: "SHOPPER · ₦5,000 off …". */
-export function PromoCode({ promo, className = '' }: { promo: ApiPromotion; className?: string }) {
-  return (
-    <p data-promo-code className={`flex max-w-full items-center gap-2 whitespace-nowrap ${className}`} title={promo.label || undefined}>
-      <span className="sr-only">Offer: use code</span>
-      <span className="shrink-0 font-bold tracking-wider text-black">{promo.code}</span>
-      <span className="shrink-0 text-neutral-400" aria-hidden="true">
-        ·
-      </span>
-      <span className="min-w-0 truncate">{offerText(promo)}</span>
-    </p>
-  );
-}
-
 /**
- * Phones and tablets: a slim strip just under the menu, outside the first screen. There the hero
- * fills the screen and its picture takes whatever height is left, so a code inside the hero shrank
- * the picture, and one on the picture covered it. Hidden on computers, where the code sits above
- * the heading beside the picture instead (HeroBanner).
+ * The advertised code beside the hero's button: "Use code" and the code as a black tag with white
+ * letters, the offer underneath. It sits in the button's row and is never taller than the button,
+ * so it adds no height: on phones the hero fills the screen and its picture takes the height that
+ * is left, so a code above the heading shrank the picture, one on the picture covered it, and a
+ * strip under the menu pushed the first screen past the bottom of the screen.
  */
-export function PromoStrip({ promo }: { promo: ApiPromotion | null | undefined }) {
-  if (!promo) return null;
+export function PromoTag({ promo }: { promo: ApiPromotion }) {
   return (
-    <div className="border-b border-black/5 bg-white px-4 py-2 sm:px-6 lg:hidden">
-      <PromoCode promo={promo} className="mx-auto max-w-7xl justify-center text-xs text-neutral-600 sm:text-sm" />
+    <div data-promo-code className="min-w-0 leading-tight" title={promo.label || undefined}>
+      <p className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-neutral-500 sm:text-xs">
+        <span>Use code</span>
+        <span className="rounded-md bg-black px-2 py-0.5 font-bold tracking-widest text-white">{promo.code}</span>
+      </p>
+      {/* One line, so the tag is never taller than the button beside it (a second line made the
+          row taller and the picture shorter on small phones). */}
+      <p className="mt-1 truncate text-[11px] text-neutral-700 sm:text-sm">{offerText(promo)}</p>
     </div>
   );
 }

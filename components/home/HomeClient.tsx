@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { HeroBanner } from '@/components/home/HeroBanner';
 import { BrandMarquee } from '@/components/home/BrandMarquee';
-import { PromoStrip } from '@/components/home/PromoCode';
 import { FlashDeals } from '@/components/home/FlashDeals';
 import { ProductSection } from '@/components/home/ProductSection';
 import { CategoryGrid } from '@/components/home/CategoryGrid';
@@ -73,14 +72,9 @@ export function HomeClient({ initial = null }: { initial?: HomepageData | null }
     <div className="space-y-4">
       {/* 1. The first screen: hero (CMS banners, active promotion, real store numbers) with the
           brands the store carries (admin Settings) moving along its bottom edge. */}
-      <div>
-        {/* Phones and tablets: the advertised code in a strip above the first screen, so the
-            hero picture keeps its full height (computers show it beside the picture). */}
-        <PromoStrip promo={homepageData?.promotions?.[0]} />
-        <div className="first-screen flex flex-col">
-          <HeroBanner banners={homepageData?.banners} promotions={homepageData?.promotions} stats={homepageData?.stats} />
-          <BrandMarquee brands={homepageData?.brands} />
-        </div>
+      <div className="first-screen flex flex-col">
+        <HeroBanner banners={homepageData?.banners} promotions={homepageData?.promotions} stats={homepageData?.stats} />
+        <BrandMarquee brands={homepageData?.brands} />
       </div>
 
       {/* Couldn't load the shop: say so plainly (never fall back to made-up products or prices) */}
