@@ -1071,6 +1071,22 @@ class AdminOperationsController
         Response::success(PaymentMethods::status($this->db) + ['primary_gateway' => $primary, 'pay_now_gateway' => PaymentMethods::payNowGateway($this->db)], 'Payment methods saved.');
     }
 
+    /**
+     * Whether OPcache is on for the API. opcache_get_status() answers best, but many shared hosts
+     * forbid it (opcache.restrict_api), and then it says false even though OPcache works; PHP's
+     * own settings tell the truth in that case.
+     */
+    public static function opcacheOn(): bool
+    {
+        if (function_exists('opcache_get_status')) {
+            $status = @opcache_get_status(false);
+            if (is_array($status)) {
+                return (bool) ($status['opcache_enabled'] ?? false);
+            }
+        }
+        return extension_loaded('Zend OPcache') && filter_var(ini_get('opcache.enable'), FILTER_VALIDATE_BOOLEAN);
+    }
+
     public static function koraMode(): string
     {
         $key = trim((string) Env::get('KORA_SECRET_KEY', ''));
@@ -1176,7 +1192,7 @@ class AdminOperationsController
                 'missing_extensions' => $missing(['mysqli', 'curl', 'mbstring', 'openssl', 'json', 'simplexml', 'ctype']),
                 // Only scripts/backup.php needs these.
                 'missing_backup_extensions' => $missing(['zlib', 'phar']),
-                'opcache' => function_exists('opcache_get_status') && is_array(@opcache_get_status(false)),
+                'opcache' => self::opcacheOn(),
                 // Pictures up to 5 MB need at least that from upload_max_filesize and post_max_size.
                 'upload_limit_bytes' => UploadFiles::serverLimitBytes(),
             ],

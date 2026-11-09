@@ -35,7 +35,7 @@ export default async function CategoryPage({ searchParams }: { searchParams: Pro
   const filters = parseCatalogParams(urlParamsFrom(await searchParams));
   const category = filters.category?.toLowerCase() ?? '';
   const [list, facets] = await Promise.all([
-    serverApiGetFull<ApiProductSummary[], Partial<PaginationMeta>>(productListPath(catalogApiParams(filters)), 30),
+    serverApiGetFull<ApiProductSummary[], Partial<PaginationMeta>>(productListPath(catalogApiParams(filters))),
     serverApiGet<CatalogFacets>(category ? `/catalog/facets?category=${encodeURIComponent(category)}` : '/catalog/facets'),
   ]);
 

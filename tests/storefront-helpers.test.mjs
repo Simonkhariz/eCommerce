@@ -41,8 +41,19 @@ test('without a store number there are no WhatsApp links', () => {
 
 test('with a store number the links use it', () => {
   assert.equal(buildWhatsAppMessageUrl('Hello you', '0803 123 4567'), 'https://wa.me/2348031234567?text=Hello%20you');
-  assert.equal(buildWhatsAppInvoiceUrl({ order_number: 'ORD-1', grand_total: 1 }, '+2348031234567'), 'https://wa.me/2348031234567?text=ORD-1');
+  assert.ok(buildWhatsAppInvoiceUrl({ order_number: 'ORD-1', grand_total: 1 }, '+2348031234567').startsWith('https://wa.me/2348031234567?text='));
   assert.equal(formatSupportPhone('08031234567'), '+234 803 123 4567');
+});
+
+test('the WhatsApp payment message names the order and amount and asks for the account', () => {
+  const url = buildWhatsAppInvoiceUrl({ order_number: 'ORD-20261109-7Q2K', grand_total: 58750 }, '08031234567');
+  const text = decodeURIComponent(url.split('?text=')[1]);
+  assert.match(text, /\*Order number:\* ORD-20261109-7Q2K/);
+  assert.match(text, /\*Amount to pay:\* ₦58,750/);
+  assert.match(text, /account number to pay into/);
+  // Without a usable amount the line is left out rather than showing ₦0.
+  const noAmount = decodeURIComponent(buildWhatsAppInvoiceUrl({ order_number: 'ORD-1', grand_total: 0 }, '08031234567').split('?text=')[1]);
+  assert.doesNotMatch(noAmount, /Amount to pay/);
 });
 
 test('the store address does not repeat a city or state it already names', () => {

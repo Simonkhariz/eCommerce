@@ -170,6 +170,47 @@ function TrackOrderContent() {
     };
   }, [queryOrder, queryToken, lookupAttempt]);
 
+  // Follow the order while the page is open, like the payment page: payment confirmed, packed,
+  // shipped and delivered appear without a refresh. Every 15 seconds while the tab is visible,
+  // and at once when the shopper comes back to it; it stops once the order has finished.
+  const followedNumber = order?.order_number ?? '';
+  const followedStatus = order?.status || order?.order_status || '';
+  const followToken = queryToken || undefined;
+  const followEmail = lookupEmail || undefined;
+  useEffect(() => {
+    if (!followedNumber || ['delivered', 'completed', 'cancelled', 'refunded', 'returned'].includes(followedStatus)) return;
+    let active = true;
+    let busy = false;
+    const refresh = () => {
+      if (busy || document.visibilityState !== 'visible') return;
+      busy = true;
+      requestOrder(followedNumber, { token: followToken, email: followEmail })
+        .then(
+          (res) => {
+            if (active && res.order_number === followedNumber) setOrder(res);
+          },
+          () => {
+            // A failed check leaves the order on screen; the next one tries again.
+          }
+        )
+        .finally(() => {
+          busy = false;
+        });
+    };
+    const onReturn = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    const timer = window.setInterval(refresh, 15_000);
+    document.addEventListener('visibilitychange', onReturn);
+    window.addEventListener('focus', onReturn);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onReturn);
+      window.removeEventListener('focus', onReturn);
+    };
+  }, [followedNumber, followedStatus, followToken, followEmail]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanVerification = verificationInput.trim();

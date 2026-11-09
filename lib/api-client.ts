@@ -1331,6 +1331,12 @@ export async function apiGetPaymentMethods(): Promise<PaymentMethodsResponse> {
   return fetchFromApi<PaymentMethodsResponse>('/checkout/payment-methods');
 }
 
+/** Changes after every admin change: open pages compare it to reload their content (StoreLiveUpdates). */
+export async function apiGetStorefrontVersion(signal?: AbortSignal): Promise<string> {
+  const res = await fetchFromApi<{ version: string }>('/storefront/version', { timeoutMs: 10000, signal });
+  return String(res?.version ?? '');
+}
+
 export interface PaymentInitializationResponse {
   order_number: string;
   provider: 'monnify' | 'kora' | string;

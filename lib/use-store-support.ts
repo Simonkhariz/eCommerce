@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiGetPaymentMethods, PaymentMethodItem, PaymentMethodsResponse } from '@/lib/api-client';
 import { useStoreSeed } from '@/components/layout/StoreDataProvider';
 import { DEFAULT_PAYMENT_WINDOWS, PaymentWindows, paymentWindowsFrom } from '@/lib/site-content';
@@ -50,21 +50,27 @@ function load(): Promise<StoreSupport> {
   return cache;
 }
 
+/** Forget what was loaded in the browser (after an admin change), so the next use asks again. */
+export function resetStoreSupportCache(): void {
+  cache = null;
+}
+
 /**
  * Store support WhatsApp number and enabled payment methods, as configured on the backend.
- * Comes with the page when the server fetched it; otherwise loaded once per page session and
- * shared by every component that needs it.
+ * Comes with the page when the server fetched it (always the newest copy the page has: a
+ * refreshed page brings a new one); otherwise loaded once per page session and shared by every
+ * component that needs it.
  */
 export function useStoreSupport(): StoreSupport & { retry: () => void } {
   const seeded = useStoreSeed()?.payments;
-  const [state, setState] = useState<StoreSupport>(() =>
-    seeded ? fromResponse(seeded) : { supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, livePaymentStatus: false, payNowGateway: null, whatsappEnabled: false, loaded: false }
-  );
+  const fromSeed = useMemo(() => (seeded ? fromResponse(seeded) : null), [seeded]);
+  const [state, setState] = useState<StoreSupport>({ supportPhone: null, paymentMethods: [], paymentWindows: DEFAULT_PAYMENT_WINDOWS, livePaymentStatus: false, payNowGateway: null, whatsappEnabled: false, loaded: false });
   const [attempt, setAttempt] = useState(0);
+  const useSeed = fromSeed !== null && attempt === 0;
 
   useEffect(() => {
-    if (seeded && attempt === 0) {
-      cache ??= Promise.resolve(fromResponse(seeded));
+    if (useSeed) {
+      cache = Promise.resolve(fromSeed);
       return;
     }
     let active = true;
@@ -74,7 +80,7 @@ export function useStoreSupport(): StoreSupport & { retry: () => void } {
     return () => {
       active = false;
     };
-  }, [seeded, attempt]);
+  }, [useSeed, fromSeed, attempt]);
 
   /** Ask the server again (after a failed load, or to pick up methods switched back on). */
   const retry = useCallback(() => {
@@ -83,5 +89,5 @@ export function useStoreSupport(): StoreSupport & { retry: () => void } {
     setAttempt((a) => a + 1);
   }, []);
 
-  return { ...state, retry };
+  return { ...(useSeed ? fromSeed : state), retry };
 }

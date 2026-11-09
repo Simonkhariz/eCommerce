@@ -28,7 +28,12 @@ $bytes = static function (string $v): int {
 };
 $upload = min($bytes((string) ini_get('upload_max_filesize')), $bytes((string) ini_get('post_max_size')));
 $add('Picture uploads of 5 MB', $upload >= 5 * 1048576, ini_get('upload_max_filesize') . ' upload, ' . ini_get('post_max_size') . ' form (raise them in cPanel: MultiPHP INI Editor)');
-$add('OPcache (speed)', function_exists('opcache_get_status') ? (is_array(@opcache_get_status(false)) ?: null) : null, 'optional; about twice as fast when on');
+// Many shared hosts forbid opcache_get_status() (opcache.restrict_api); PHP's settings tell then.
+$opcacheStatus = function_exists('opcache_get_status') ? @opcache_get_status(false) : false;
+$opcacheOn = is_array($opcacheStatus)
+    ? (bool) ($opcacheStatus['opcache_enabled'] ?? false)
+    : extension_loaded('Zend OPcache') && filter_var(ini_get('opcache.enable'), FILTER_VALIDATE_BOOLEAN);
+$add('OPcache (speed)', $opcacheOn ?: null, $opcacheOn ? 'on' : 'off (optional; about twice as fast when on: MultiPHP INI Editor, opcache.enable)');
 
 $outbound = static function (string $url): array {
     if (!function_exists('curl_init')) {

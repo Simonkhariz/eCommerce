@@ -34,6 +34,12 @@ const spaceGrotesk = localFont({
   display: 'swap',
 });
 
+// Every page is built for its visit, with browsers told not to keep it ("no-store"), so an
+// owner's change shows on the next page anyone opens. Cached pages showed old shop details for
+// hours on phones: Next.js lets browsers serve a stale copy while fetching a new one. Pages
+// already open follow changes through StoreLiveUpdates (components/layout/StoreShell.tsx).
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'SHOP.CO | Find Clothes That Match Your Style',
   description:
@@ -46,18 +52,21 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   // Header categories, footer contact details and checkout options come with every page
-  // (fetched here at most once a minute) instead of three requests from each visitor's browser.
-  const [facets, shipping, payments] = await Promise.all([
+  // instead of three requests from each visitor's browser. The version lets the page notice
+  // later admin changes.
+  const [facets, shipping, payments, versionData] = await Promise.all([
     serverApiGet<StoreSeed['facets']>('/catalog/facets'),
     serverApiGet<StoreSeed['shipping']>('/checkout/shipping-zones'),
     serverApiGet<StoreSeed['payments']>('/checkout/payment-methods'),
+    serverApiGet<{ version: string }>('/storefront/version'),
   ]);
+  const version = versionData?.version ?? null;
 
   return (
     <html lang="en" className={`${satoshi.variable} ${spaceGrotesk.variable}`}>
       <body className="min-h-screen flex flex-col bg-white text-black antialiased selection:bg-black selection:text-white">
         <QueryProvider>
-          <StoreDataProvider seed={{ facets, shipping, payments }}>
+          <StoreDataProvider seed={{ facets, shipping, payments, version }}>
             <AuthProvider>
               <CartProvider>
                 <WishlistProvider>

@@ -172,6 +172,21 @@ Add `>/dev/null 2>&1` at the end of each command.
 
 *Status: to be added.*
 
+## OPcache (faster API)
+
+OPcache keeps PHP's compiled code in memory, so the API answers about twice as fast. On this host
+it is part of PHP but may be switched off server-wide; a panel setting can't switch on what the host
+switched off.
+
+1. **Check first:** admin → Store settings → dev mode → **System status**: the PHP line says
+   "OPcache on" or "off". (Since 9 Nov 2026 this check also works on hosts that hide OPcache's own
+   status; before, it could say "off" when it was on.)
+2. **If off, try the panel:** cPanel → **MultiPHP INI Editor** → **Editor Mode** → location
+   `shopco-api.kharizdigital.com.ng` → add the line `opcache.enable=1` → **Save**. Check System status again.
+3. **Still off: ask Truehost:** *"Please enable OPcache (the Zend OPcache extension) for PHP 8.3 on my
+   account oqlfyktj, for the domain shopco-api.kharizdigital.com.ng."* Nothing else needs changing:
+   after an update, OPcache notices changed files by itself.
+
 ## Card payments in test mode (sandbox)
 
 The demo shows Monnify and Kora with their **sandbox** keys (the same test keys as the PC): the
@@ -226,9 +241,9 @@ uptime monitors) but shoppers never see it.
 ### The main flows
 
 **1. Opening a page.** The storefront builds the page on the server, asking the API for the
-catalogue, banners and settings (`lib/server-api.ts`). Those answers are kept for 60 seconds, so
-most visits never reach the API. The API keeps its own catalogue cache in files on the host
-(Redis isn't used).
+catalogue, banners and settings (`lib/server-api.ts`), for every visit, and tells the browser not to
+keep the page. The API answers quickly from its own catalogue cache in files on the host (Redis isn't
+used), which every admin change clears.
 
 **2. Pictures.** A product picture's address is `/uploads/<name>.webp`. The storefront passes it to
 the API, which reads it from R2 and sends it back with long cache times. Pictures on pages go
@@ -253,8 +268,12 @@ admins get an email → an admin checks the bank and confirms the payment in adm
 with its own email. Card payments (Kora, Monnify) are off until their keys are added.
 
 **6. Admin changes.** Saving a product, banner, coupon or setting in admin → the API clears its
-catalogue cache and calls the storefront's `/api/revalidate` with the shared `REVALIDATE_SECRET` →
-every page is rebuilt on its next visit, so changes show at once instead of within a minute.
+catalogue cache and moves the storefront version → any page opened afterwards shows the change, and
+pages already open notice it within about 20 seconds (each asks `/api/v1/storefront/version` while
+visible, and at once when the shopper returns to the tab) and reload their content in place, without
+the shopper refreshing. Order tracking also checks its order every 15 seconds. (The API still calls
+the storefront's `/api/revalidate`; since pages are built per visit it no longer matters.) A live
+stream (SSE) isn't used for this: each open stream holds one of the plan's 20 PHP processes.
 
 **7. Every night and day.** `backup.php` saves the database on the host and `backup_to_bucket.php`
 copies it to R2 under `backups/`. `check_database.php` emails the admins only if the database needs

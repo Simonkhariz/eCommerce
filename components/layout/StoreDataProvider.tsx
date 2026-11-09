@@ -14,6 +14,8 @@ export interface StoreSeed {
   facets: CatalogFacets | null;
   shipping: { zones: ShippingZone[]; origin: StoreOrigin | null } | null;
   payments: PaymentMethodsResponse | null;
+  /** The storefront version when the page was built (GET /storefront/version). */
+  version: string | null;
 }
 
 const StoreSeedContext = createContext<StoreSeed | null>(null);

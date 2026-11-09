@@ -93,9 +93,20 @@ function formatCurrency(amount: number): string {
  * Includes complete itemized product list, pricing, subtotal, delivery, and total.
  */
 export function buildWhatsAppInvoiceUrl(order: WhatsAppOrderDetails, supportPhone?: string | null): string {
-  // Only the order number: the store looks the order up by it, and the customer can add any
-  // message they like before sending.
-  return whatsAppUrl(supportPhone, order.order_number);
+  // A short, polite request the store can act on at once: which order, how much, and what the
+  // customer needs back (the account to pay into). The customer can still edit it before sending.
+  const amount = Number(order.grand_total);
+  return whatsAppUrl(
+    supportPhone,
+    [
+      `Hello! I'd like to pay for my order.`,
+      ``,
+      `*Order number:* ${order.order_number}`,
+      ...(Number.isFinite(amount) && amount > 0 ? [`*Amount to pay:* ${formatCurrency(amount)}`] : []),
+      ``,
+      `Please send me the account number to pay into. Thank you.`,
+    ].join('\n')
+  );
 }
 
 /**

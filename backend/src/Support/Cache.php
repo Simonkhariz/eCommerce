@@ -170,6 +170,49 @@ final class Cache
 
     /** The catalogue version in Redis (shared by all servers). */
     private const VERSION_KEY = 'catalog:version';
+    private const STOREFRONT_KEY = 'storefront:version';
+
+    /**
+     * Changes after every successful admin change, whatever the cache settings. Open storefront
+     * pages ask for it every few seconds (GET /api/v1/storefront/version) and reload their
+     * content when it moves, so the owner's edits show without shoppers refreshing. Kept in
+     * Redis when it is set up (shared by all servers), else in a file.
+     */
+    public static function storefrontVersion(): string
+    {
+        $redis = Redis::shared();
+        if ($redis !== null) {
+            try {
+                $v = $redis->command('GET', $redis->prefix . self::STOREFRONT_KEY);
+                if (is_string($v) && $v !== '') {
+                    return 'r' . $v;
+                }
+            } catch (\Throwable $e) {
+                Redis::markDown($e->getMessage());
+            }
+        }
+        $v = @file_get_contents(self::dir() . '/storefront.version');
+        return is_string($v) && $v !== '' ? trim($v) : '0';
+    }
+
+    /** Shutdown hook for admin writes: only a change that succeeded moves the version. */
+    public static function bumpStorefront(): void
+    {
+        $status = http_response_code();
+        if (!is_int($status) || $status >= 400) {
+            return;
+        }
+        $new = bin2hex(random_bytes(8));
+        self::write(self::dir() . '/storefront.version', $new);
+        $redis = Redis::shared();
+        if ($redis !== null) {
+            try {
+                $redis->command('SET', $redis->prefix . self::STOREFRONT_KEY, $new);
+            } catch (\Throwable $e) {
+                Redis::markDown($e->getMessage());
+            }
+        }
+    }
 
     /**
      * The current catalogue version: from Redis when it answers (prefixed "r", so entries made

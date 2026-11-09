@@ -21,7 +21,7 @@ const lookupProduct = cache(async (idOrSlug: string): Promise<ProductMeta | 'mis
   try {
     const res = await fetch(`${BACKEND_ORIGIN}/api/v1/products/${encodeURIComponent(idOrSlug)}`, {
       headers: { Accept: 'application/json' },
-      next: { revalidate: 60 },
+      cache: 'no-store',
       signal: AbortSignal.timeout(4000),
     });
     if (res.status === 404) return 'missing';

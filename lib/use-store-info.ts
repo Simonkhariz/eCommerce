@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ApiCategory, apiGetShippingZones, CatalogFacets, getCatalogFacets, ShippingZone, StoreOrigin } from '@/lib/api-client';
 import { useStoreSeed } from '@/components/layout/StoreDataProvider';
 import { normalizePhoneDigits } from '@/lib/whatsapp';
@@ -59,20 +59,27 @@ function loadNav(): Promise<StoreNav> {
   return navCache;
 }
 
+/** Forget what was loaded in the browser (after an admin change), so the next use asks again. */
+export function resetStoreInfoCaches(): void {
+  infoCache = null;
+  navCache = null;
+}
+
 /**
- * Live delivery zones and store contact details: with the page when the server fetched them,
- * otherwise loaded once per page session and shared.
+ * Live delivery zones and store contact details: with the page when the server fetched them
+ * (always the newest copy the page has: a refreshed page brings a new one), otherwise loaded
+ * once per page session and shared.
  */
 export function useStoreInfo(): StoreInfo & { reload: () => void } {
   const seeded = useStoreSeed()?.shipping;
-  const [state, setState] = useState<StoreInfo>(() =>
-    seeded ? infoFrom(seeded) : { zones: [], origin: null, loaded: false, error: null }
-  );
+  const fromSeed = useMemo(() => (seeded ? infoFrom(seeded) : null), [seeded]);
+  const [state, setState] = useState<StoreInfo>({ zones: [], origin: null, loaded: false, error: null });
   const [attempt, setAttempt] = useState(0);
+  const useSeed = fromSeed !== null && attempt === 0;
 
   useEffect(() => {
-    if (seeded && attempt === 0) {
-      infoCache ??= Promise.resolve(infoFrom(seeded));
+    if (useSeed) {
+      infoCache = Promise.resolve(fromSeed);
       return;
     }
     let active = true;
@@ -80,11 +87,12 @@ export function useStoreInfo(): StoreInfo & { reload: () => void } {
     return () => {
       active = false;
     };
-  }, [attempt, seeded]);
+  }, [useSeed, fromSeed, attempt]);
 
   return {
-    ...state,
+    ...(useSeed ? fromSeed : state),
     reload: () => {
+      infoCache = null;
       setState((s) => ({ ...s, loaded: false, error: null }));
       setAttempt((n) => n + 1);
     },
@@ -94,13 +102,12 @@ export function useStoreInfo(): StoreInfo & { reload: () => void } {
 /** Categories that have published products, and dress styles that exist in the catalogue. */
 export function useStoreNav(): StoreNav {
   const seeded = useStoreSeed()?.facets;
-  const [state, setState] = useState<StoreNav>(() =>
-    seeded ? navFrom(seeded) : { categories: [], dressStyles: [], loaded: false }
-  );
+  const fromSeed = useMemo(() => (seeded ? navFrom(seeded) : null), [seeded]);
+  const [state, setState] = useState<StoreNav>({ categories: [], dressStyles: [], loaded: false });
 
   useEffect(() => {
-    if (seeded) {
-      navCache ??= Promise.resolve(navFrom(seeded));
+    if (fromSeed) {
+      navCache = Promise.resolve(fromSeed);
       return;
     }
     let active = true;
@@ -108,9 +115,9 @@ export function useStoreNav(): StoreNav {
     return () => {
       active = false;
     };
-  }, [seeded]);
+  }, [fromSeed]);
 
-  return state;
+  return fromSeed ?? state;
 }
 
 /** wa.me link for a configured phone number, or null when none is set. */

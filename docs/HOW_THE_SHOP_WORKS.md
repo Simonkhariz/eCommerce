@@ -59,7 +59,7 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **Daily database backups,** copied off the server to cloud storage, with a careful restore that
     works even on hosts without SSH.
 
-The backend has 1,674 automated checks in 22 test suites, the storefront 79 unit tests, and the
+The backend has 1,680 automated checks in 22 test suites, the storefront 80 unit tests, and the
 system has passed a full load test.
 
 ---
@@ -117,8 +117,9 @@ How the pieces fit:
 
 ### 4.1 Arriving: the home page
 
-The home page is built on the server (fast first view, good for search engines) and refreshed at
-most once a minute, or immediately after the owner changes something. Top to bottom:
+The home page is built on the server for each visit (fast first view, good for search engines),
+so the owner's changes show on the next visit; a page already open updates itself within about 20
+seconds (section 7). Top to bottom:
 
 1. **Hero banner:** up to 5 banners set by the owner, rotating every 6 seconds (paused while the
    shopper hovers or uses the keyboard), with arrows and a progress bar. More can be saved in admin;
@@ -366,7 +367,7 @@ The shopper sees **two buttons, not a list of gateways**:
 | Button | What the shopper does | How it is confirmed |
 |---|---|---|
 | **Pay now** (card or bank transfer) | Taken to the secure payment page of the store's gateway: **Monnify by default, or Kora if the owner chose it** in Settings. If the chosen one is switched off or has no keys set up, the other is used; with neither ready, only WhatsApp is offered | Automatically: the gateway's signed notice, and the shop asks the gateway directly when the shopper returns |
-| **Pay via WhatsApp** (bank transfer) | A WhatsApp chat opens with **only the order number** filled in (the shopper writes the rest). They pay by transfer and tap **"I've sent the transfer"** | By the owner, after seeing the money arrive, by entering the bank reference |
+| **Pay via WhatsApp** (bank transfer) | A WhatsApp chat opens with a short message filled in: the order number, the amount to pay, and "Please send me the account number to pay into" (the shopper can edit it before sending). They pay by transfer and tap **"I've sent the transfer"** | By the owner, after seeing the money arrive, by entering the bank reference |
 
 The window also offers **"Pay later"**, and **"Send the order number on WhatsApp again"** once
 WhatsApp has been opened. If no payment method is available at all, it says so.
@@ -605,8 +606,8 @@ Protection:
     uploads wait up to 120 seconds, the same as the proxy. If a change gets no answer in time, the
     message says it may or may not have gone through, so check before trying again.
   - Typing in a search box while the list updates no longer drops characters.
-  - Every change shows in the shop at once (within a minute if the instant page refresh isn't set
-    up on the server; Tech switches and System status show which).
+  - Every change shows in the shop at once: any page opened afterwards has it, and pages shoppers
+    already have open update themselves within about 20 seconds, or the moment they return to the tab.
 
 ### 5.3 Overview (dashboard)
 
@@ -1021,7 +1022,7 @@ Technical pages stay out of the owner's way until they are needed.
 | Catalogue cache | On | Every visit reads the database |
 | Redis shared cache | On, if set up | The file cache does the job |
 | Live payment status | **Off** until measured on the server | The payment page checks every 15 seconds |
-| Instant page refresh | On, if set up | Changes appear within about a minute |
+| Instant page refresh | On, if set up | Nothing visible since 9 Nov 2026: pages are built for each visit |
 | Email right after each request | On | Emails wait for the scheduled job or the retries |
 | Automatic email retries | On | Only the scheduled job sends due emails |
 | Compressed API answers | On | More data on mobile |
@@ -1141,10 +1142,19 @@ Shoppers never wait for an order email:
 
 ### 6.4 Speed: caching without stale data
 
-- **Pages** are built on the server and kept for up to a minute. If the API is slow, a product page
-  stops waiting after 4 seconds and the browser loads the product instead.
+- **Pages** are built on the server for each visit, and browsers are told not to keep them ("no-store").
+  Until 9 Nov 2026 they were kept for a minute, and phones showed old shop details for hours,
+  because the page cache let browsers show a stale copy while fetching a new one. If the API is slow,
+  a product page stops waiting after 4 seconds and the browser loads the product instead.
+- **Open pages follow admin changes:** every 20 seconds while visible, and at once when the shopper
+  returns to the tab, a page asks /api/v1/storefront/version (a tiny, uncached answer that changes
+  after every successful admin change). When it has moved, the page fetches its data again in place:
+  what the shopper typed, the scroll position and the cart stay. A live stream (SSE) would push changes
+  instantly, but on shared hosting each open stream holds one of the plan's 20 PHP processes, so a few
+  shoppers would use them all; the 20-second check costs one small request. Order tracking checks its
+  order every 15 seconds the same way until it is delivered.
 - **The API** keeps a file cache of catalogue answers. It is **cleared the moment the owner
-  changes anything**, and the storefront is told to rebuild its pages at once.
+  changes anything**.
 - **Browsers** keep product listings for 30 seconds (and may show them up to 2 minutes longer
   while fetching a fresh copy), and filters, categories and the homepage for 60 seconds (5 minutes
   longer). Search results, account pages and everything private are never kept.
@@ -1454,7 +1464,7 @@ proposal.
 
 **Proof in numbers:**
 
-- **1,674 automated backend checks** in 22 test suites. They run against a throw-away database
+- **1,680 automated backend checks** in 22 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data, buckets and Redis are never touched.
 - Plus 79 storefront unit tests, type checks, lint and a production build. They are run by hand
   before changes are finished; there is no automatic build server yet.
@@ -1577,7 +1587,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive once." |
 | 5 | A clean-up button behind a password field and an emailed code | "No clean-up without your password and an emailed code." |
 | 6 | A calendar with a backup box every night, flying to a cloud | "Daily backups, copied off the server, with a careful restore." |
-| 7 | A counter climbing: 1,674 ✓ | "Over 1,600 automated backend checks." |
+| 7 | A counter climbing: 1,680 ✓ | "Over 1,600 automated backend checks." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
@@ -1788,5 +1798,6 @@ When something changes, update the matching section in the same commit:
 | 6 Nov 2026 | Full review of the shop, admin and customer API, and fixes for what it found. **Money:** refunds go one payment at a time, newest first; underpaid and overpaid money can be refunded; an order becomes Refunded only when no money remains. **Flags:** "Mark as resolved" with a note; reported transfers that expire are flagged, can be recorded as late payments and stay out of the clean-up (migration 022 flagged older ones); a failed gateway check gets a grace period. **Reports:** one net sales definition on Overview and Analytics, sales count money received, item sales and units leave out cancelled and refunded orders, All time is all time. **Admin:** limits on prices, stock, uses, display order and text; numeric web addresses, renaming used coupons and overlapping zones refused; dialogs, uploads, paging and slow actions. **Security:** sign-in and payment notice limits, private catalogue data, technical text kept from customers, bad input refused. **Storefront:** checkout validation, kept details, sign-out and session handling, own reservations, Lagos-time deadlines, WhatsApp only with a number, page titles, receipts and the price filter. **Backups:** write failures are caught. Backend checks now 1,655 in 22 suites; storefront tests 77. Real Kora, Monnify and email delivery are still not run (section 11) |
 | 6 Nov 2026 | Final live checks of the review. Buttons a shopper taps at once show as not ready until the page can respond. Tabs keep up with sign-in and sign-out in other tabs. Phones are saved in one format (+234...) and found in admin search however they are typed. Receipts show the payment that stands, not a refunded duplicate. Delivery details stay until an order is paid. Refund forms start at the overpaid extra. Visitors no longer log an error on every page by asking whether they are signed in. |
 | 6 Nov 2026 | The owner chooses the homepage coupon with a "Show on homepage" tick; a new code stays private until ticked. Migration 023 ticks the code that was showing, so the homepage looks the same after the update |
+| 9 Nov 2026 | **Admin changes show at once.** Pages were cached for a minute and browsers were allowed to show a stale copy while fetching a new one, so on phones new contact details and the homepage coupon took hours to appear. Pages are now built for each visit and never kept by browsers; pages already open check a tiny "storefront version" every 20 seconds (and when the shopper returns to the tab) and reload their content in place when the owner has changed something; the store details shared by the header, footer and checkout now follow the newest page data. Order tracking follows its order every 15 seconds. The WhatsApp payment message now gives the order number and amount and asks for the account number. System status reports OPcache correctly on hosts that hide its status. Checked end to end on a production build: an open page showed a changed contact email in 15-16 seconds without reloading |
 | 9 Nov 2026 | Payment waiting page: WhatsApp transfers now show the amount to transfer (or the amount sent) in a grey panel, the "Ask the store on WhatsApp" button matches the shop's black-and-white style and no longer wraps on phones, the duplicate "Awaiting confirmation" line became "Checking every few seconds", and the card sits near the top on phones. Footer credit: "Developed with ♥ by KharizDigital". Order tracker fixed: a new order showed "Order placed: in progress" and "Payment confirmed" before any payment; now placing is ticked, the current step says what it waits for, paid and packing differ, the line lines up with the circles, and phones get a connecting line |
 | 8 Nov 2026 | Email replies: new `MAIL_REPLY_TO` setting sends customers' replies to an inbox the owner reads (such as Gmail), because the sender address needs no mailbox and has none. Works with Resend and SMTP. All 14 emails redesigned to match the storefront: the SHOP.CO wordmark, bold uppercase headings, rounded item and order-summary panels, discounts in red, black pill buttons, a grey footer with the store's contact details, and an inbox preview line; checked at phone width and sent as samples through Resend. Deployment to Truehost started, recorded step by step in `docs/DEPLOY_RUNBOOK.md`; fixed there: the API answered 403 on LiteSpeed until `public/.htaccess` allowed access itself. The host checker no longer shows a false NO for R2: Cloudflare's certificate on its bare test address expired, while the shop's own R2 address is fine |

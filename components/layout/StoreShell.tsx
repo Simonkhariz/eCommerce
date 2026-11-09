@@ -6,6 +6,7 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Toast } from '@/components/ui/Toast';
 import { WishlistDrawer } from '@/components/layout/WishlistDrawer';
+import { StoreLiveUpdates } from '@/components/layout/StoreLiveUpdates';
 
 interface StoreShellProps {
   children: React.ReactNode;
@@ -26,6 +27,7 @@ export const StoreShell: React.FC<StoreShellProps> = ({ children }) => {
       <Footer />
       <Toast />
       <WishlistDrawer />
+      <StoreLiveUpdates />
     </>
   );
 };

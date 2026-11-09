@@ -14,14 +14,25 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import { Alert02Icon, RefreshIcon } from '@hugeicons/core-free-icons';
 
 /**
- * Home page body. app/page.tsx fetches the data on the server (cached for a minute), so the
- * page arrives with its products; without it (API down at that moment) the browser loads it.
+ * Home page body. app/page.tsx fetches the data on the server for each visit, so the page
+ * arrives with its products; without it (API down at that moment) the browser loads it.
  */
 export function HomeClient({ initial = null }: { initial?: HomepageData | null }) {
   const [loading, setLoading] = useState(!initial);
   const [error, setError] = useState(false);
   const [homepageData, setHomepageData] = useState<HomepageData | null>(initial);
   const [flashExpired, setFlashExpired] = useState(false);
+  // New server data (StoreLiveUpdates refreshed the page after an admin change) replaces what is shown.
+  const [shownInitial, setShownInitial] = useState(initial);
+  if (initial !== shownInitial) {
+    setShownInitial(initial);
+    if (initial) {
+      setHomepageData(initial);
+      setFlashExpired(false);
+      setError(false);
+      setLoading(false);
+    }
+  }
 
   const loadHomepage = useCallback(async () => {
     setLoading(true);

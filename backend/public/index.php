@@ -139,6 +139,7 @@ $router->post('/api/v1/products/{idOrSlug}/reviews', [ReviewController::class, '
 $router->get('/api/v1/categories', [CatalogController::class, 'categories']);
 $router->get('/api/v1/catalog/facets', [CatalogController::class, 'facets']);
 $router->get('/api/v1/storefront/homepage', [CatalogController::class, 'homepage']);
+$router->get('/api/v1/storefront/version', [CatalogController::class, 'storefrontVersion']);
 
 // --- Checkout, Shipping & Order Placement Routes ---
 $router->get('/api/v1/checkout/payment-methods', [CheckoutController::class, 'paymentMethods']);
@@ -281,6 +282,8 @@ $requestMethod = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if (!in_array($requestMethod, ['GET', 'HEAD', 'OPTIONS'], true) && str_starts_with($requestPath, '/api/v1/admin/')) {
     register_shutdown_function([Cache::class, 'bumpCatalog']);
+    // Open storefront pages watch this and reload their content (GET /api/v1/storefront/version).
+    register_shutdown_function([Cache::class, 'bumpStorefront']);
     register_shutdown_function([StorefrontRefresh::class, 'afterAdminChange']);
 }
 

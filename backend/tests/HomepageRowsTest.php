@@ -173,4 +173,22 @@ $t->check('unticking takes it off the page', [], $shownCodes());
 $check = $t->http('POST', '/checkout/validate-promo', ['json' => ['code' => $newer, 'subtotal' => 10000]]);
 $t->check('a private code still works at checkout', 200, $check['status']);
 
+// -----------------------------------------------------------------------------
+$t->section('Open storefront pages learn about admin changes');
+$version = static function () use ($t): array {
+    $res = $t->http('GET', '/storefront/version');
+    return [$res['status'], (string) TestKit::get($res, 'data.version'), strtolower((string) ($res['headers']['cache-control'] ?? ''))];
+};
+[$status, $before, $cacheControl] = $version();
+$t->check('anyone can ask for the storefront version', 200, $status);
+$t->ok('and it is never cached', str_contains($cacheControl, 'no-store'), $cacheControl);
+$t->check('reading it changes nothing', $before, $version()[1]);
+$adminSend('PUT', "/admin/promotions/{$olderId}", ['show_on_homepage' => true]);
+$after = $version()[1];
+$t->ok('an admin change moves it', $after !== $before && $after !== '', "{$before} -> {$after}");
+$refused = $adminSend('PUT', "/admin/promotions/{$olderId}", ['discount_percent' => 500]);
+$t->ok('a refused admin change is refused', $refused['status'] >= 400, (string) $refused['status']);
+$t->check('and leaves it alone', $after, $version()[1]);
+$adminSend('PUT', "/admin/promotions/{$olderId}", ['show_on_homepage' => false]);
+
 exit($t->finish());
