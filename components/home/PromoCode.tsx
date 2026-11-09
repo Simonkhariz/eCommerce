@@ -17,12 +17,15 @@ export function offerText(p: ApiPromotion): string {
     .join(' ');
 }
 
-/** The code in a dashed coupon outline, then the offer in short, on one line. */
+/** The code in bold, a soft dot, then the offer in short, on one line: "SHOPPER · ₦5,000 off …". */
 export function PromoCode({ promo, className = '' }: { promo: ApiPromotion; className?: string }) {
   return (
-    <p className={`flex max-w-full items-center gap-2 whitespace-nowrap ${className}`} title={promo.label || undefined}>
+    <p data-promo-code className={`flex max-w-full items-center gap-2 whitespace-nowrap ${className}`} title={promo.label || undefined}>
       <span className="sr-only">Offer: use code</span>
-      <span className="shrink-0 rounded-md border border-dashed border-black/40 px-1.5 py-px font-semibold tracking-wider text-black">{promo.code}</span>
+      <span className="shrink-0 font-bold tracking-wider text-black">{promo.code}</span>
+      <span className="shrink-0 text-neutral-400" aria-hidden="true">
+        ·
+      </span>
       <span className="min-w-0 truncate">{offerText(promo)}</span>
     </p>
   );
