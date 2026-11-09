@@ -111,6 +111,14 @@ if (($mediaMethod === 'GET' || $mediaMethod === 'HEAD') && str_starts_with($medi
 // 3. Handle CORS Allowlist & Browser Preflight
 CorsMiddleware::handle();
 
+// GET /api/v1/storefront/version: a short value that changes after every successful admin change.
+// Open storefront pages ask for it every 5 seconds, so it is answered here, before anything that
+// touches the database (routing, the email retries after each request): one small file read,
+// never cached (Response sends no-store).
+if ($mediaMethod === 'GET' && $mediaPath === '/api/v1/storefront/version') {
+    Response::success(['version' => Cache::storefrontVersion()], 'Storefront version.');
+}
+
 // 4. Validate Content-Type and Parse JSON Body on Mutating Requests
 JsonBodyMiddleware::handle();
 
@@ -139,8 +147,6 @@ $router->post('/api/v1/products/{idOrSlug}/reviews', [ReviewController::class, '
 $router->get('/api/v1/categories', [CatalogController::class, 'categories']);
 $router->get('/api/v1/catalog/facets', [CatalogController::class, 'facets']);
 $router->get('/api/v1/storefront/homepage', [CatalogController::class, 'homepage']);
-$router->get('/api/v1/storefront/version', [CatalogController::class, 'storefrontVersion']);
-
 // --- Checkout, Shipping & Order Placement Routes ---
 $router->get('/api/v1/checkout/payment-methods', [CheckoutController::class, 'paymentMethods']);
 $router->post('/api/v1/checkout/quote', [CheckoutController::class, 'quote']);

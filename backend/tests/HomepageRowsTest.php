@@ -191,4 +191,32 @@ $t->ok('a refused admin change is refused', $refused['status'] >= 400, (string) 
 $t->check('and leaves it alone', $after, $version()[1]);
 $adminSend('PUT', "/admin/promotions/{$olderId}", ['show_on_homepage' => false]);
 
+// -----------------------------------------------------------------------------
+$t->section('Shop contact settings show on the very next request');
+$keys = ['store_contact_phone', 'store_contact_email', 'store_whatsapp_phone'];
+$saved = array_column($t->db->fetchAll("SELECT `key_name`, `value` FROM `store_settings` WHERE `key_name` IN ('store_contact_phone', 'store_contact_email', 'store_whatsapp_phone')"), 'value', 'key_name');
+$t->cleanup(function () use ($t, $keys, $saved): void {
+    foreach ($keys as $key) {
+        if (array_key_exists($key, $saved)) {
+            $t->sql('UPDATE `store_settings` SET `value` = ? WHERE `key_name` = ?', 'ss', [(string) $saved[$key], $key]);
+        } else {
+            $t->sql('DELETE FROM `store_settings` WHERE `key_name` = ?', 's', [$key]);
+        }
+    }
+});
+$tag = random_int(1000000, 9999999);
+$beforeVersion = $version()[1];
+$settingsSaved = $adminSend('PUT', '/admin/settings', [
+    'store_contact_phone' => "0803{$tag}",
+    'store_contact_email' => "help{$tag}@example.test",
+    'store_whatsapp_phone' => "0805{$tag}",
+]);
+$t->check('the admin saves new phone, email and WhatsApp', 200, $settingsSaved['status']);
+$origin = (array) TestKit::get($t->http('GET', '/checkout/shipping-zones'), 'data.origin');
+$t->check('the next shop request has the new phone and email', ["0803{$tag}", "help{$tag}@example.test"], [$origin['contact_phone'] ?? null, $origin['contact_email'] ?? null]);
+$t->ok('and the new WhatsApp number', str_ends_with((string) ($origin['whatsapp_phone'] ?? ''), (string) $tag), (string) ($origin['whatsapp_phone'] ?? ''));
+$support = (string) TestKit::get($t->http('GET', '/checkout/payment-methods'), 'data.support_phone');
+$t->ok('checkout and WhatsApp payment use the new number at once', str_ends_with(preg_replace('/\D/', '', $support) ?? '', (string) $tag), $support);
+$t->ok('and open pages are told something changed', $version()[1] !== $beforeVersion);
+
 exit($t->finish());

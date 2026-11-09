@@ -269,9 +269,9 @@ with its own email. Card payments (Kora, Monnify) are off until their keys are a
 
 **6. Admin changes.** Saving a product, banner, coupon or setting in admin → the API clears its
 catalogue cache and moves the storefront version → any page opened afterwards shows the change, and
-pages already open notice it within about 20 seconds (each asks `/api/v1/storefront/version` while
+pages already open notice it within about 5 seconds (each asks `/api/v1/storefront/version` while
 visible, and at once when the shopper returns to the tab) and reload their content in place, without
-the shopper refreshing. Order tracking also checks its order every 15 seconds. (The API still calls
+the shopper refreshing. Order tracking also checks its order every 5 seconds. (The API still calls
 the storefront's `/api/revalidate`; since pages are built per visit it no longer matters.) A live
 stream (SSE) isn't used for this: each open stream holds one of the plan's 20 PHP processes.
 

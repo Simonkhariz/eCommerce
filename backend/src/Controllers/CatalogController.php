@@ -184,17 +184,6 @@ class CatalogController
     }
 
     /**
-     * GET /api/v1/storefront/version
-     * A short value that changes after every successful admin change. Open storefront pages ask
-     * for it every few seconds and reload their content when it moves. Never cached (no-store),
-     * and cheap: one small file read, no database.
-     */
-    public function storefrontVersion(): void
-    {
-        Response::success(['version' => \App\Support\Cache::storefrontVersion()], 'Storefront version.');
-    }
-
-    /**
      * GET /api/v1/storefront/homepage
      * Single aggregated payload for fast homepage hydration.
      */

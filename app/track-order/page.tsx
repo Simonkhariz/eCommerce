@@ -171,7 +171,7 @@ function TrackOrderContent() {
   }, [queryOrder, queryToken, lookupAttempt]);
 
   // Follow the order while the page is open, like the payment page: payment confirmed, packed,
-  // shipped and delivered appear without a refresh. Every 15 seconds while the tab is visible,
+  // shipped and delivered appear without a refresh. Every 5 seconds while the tab is visible,
   // and at once when the shopper comes back to it; it stops once the order has finished.
   const followedNumber = order?.order_number ?? '';
   const followedStatus = order?.status || order?.order_status || '';
@@ -200,7 +200,7 @@ function TrackOrderContent() {
     const onReturn = () => {
       if (document.visibilityState === 'visible') refresh();
     };
-    const timer = window.setInterval(refresh, 15_000);
+    const timer = window.setInterval(refresh, 5_000);
     document.addEventListener('visibilitychange', onReturn);
     window.addEventListener('focus', onReturn);
     return () => {

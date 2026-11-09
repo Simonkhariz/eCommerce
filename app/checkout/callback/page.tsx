@@ -90,7 +90,8 @@ function CheckoutCallbackContent() {
       if (query.state.status === 'error') return shouldRetryQuery(0, query.state.error) ? 15000 : false;
       // The customer said they sent a WhatsApp transfer: watch until the store confirms it, however
       // long that takes (reading our own database only; the live stream, when on, is quicker).
-      if (data.provider === 'whatsapp' && data.customer_marked_paid) return liveMode ? 30000 : 15000;
+      // Every 5 s: 120 of the 240 checks per 10 minutes the API allows a visitor.
+      if (data.provider === 'whatsapp' && data.customer_marked_paid) return liveMode ? 30000 : 5000;
       const next = query.state.dataUpdateCount - 1 - pollBase;
       return next >= 0 && next < delays.length ? delays[next] : false;
     },

@@ -273,10 +273,10 @@ Lists all active categories with product counts.
 
 ### `GET /api/v1/storefront/version`
 A short value that changes after every successful admin change (any `POST`/`PUT`/`PATCH`/`DELETE`
-under `/api/v1/admin/` answered below 400). Open storefront pages ask for it every 20 seconds while
+under `/api/v1/admin/` answered below 400). Open storefront pages ask for it every 5 seconds while
 visible and reload their content when it moves (`components/layout/StoreLiveUpdates.tsx`).
 
-- **Auth**: none. **Cache**: `no-store`. No database access (one small file read, or Redis).
+- **Auth**: none. **Cache**: `no-store`. Answered at the top of `public/index.php`, before routing and the after-request email retries: no database access (one small file read, or Redis).
 - **Response 200**: `{"success": true, "message": "Storefront version.", "data": {"version": "3f9a1c0e7b2d4a61"}}`
 
 ---
