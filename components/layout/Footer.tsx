@@ -2,7 +2,7 @@
 
 import React, { useId, useState } from 'react';
 import Link from 'next/link';
-import { Mail, CheckCircle2 } from 'lucide-react';
+import { Mail, CheckCircle2, Heart } from 'lucide-react';
 import { apiSubscribeNewsletter } from '@/lib/api-client';
 import { useStoreInfo, useStoreNav, whatsAppLink } from '@/lib/use-store-info';
 import { useStoreSupport } from '@/lib/use-store-support';
@@ -234,7 +234,8 @@ export const Footer: React.FC = () => {
               © {new Date().getFullYear()} {origin?.store_name || 'SHOP.CO'}. All rights reserved.
             </p>
             <p>
-              Developed by{' '}
+              Developed with <Heart className="inline h-3.5 w-3.5 -mt-0.5 fill-[#FF3333] text-[#FF3333]" aria-hidden="true" />
+              <span className="sr-only">love</span> by{' '}
               <a href={DEVELOPER.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-black underline-offset-2 hover:underline">
                 {DEVELOPER.name}
                 <span className="sr-only"> (opens in a new tab)</span>

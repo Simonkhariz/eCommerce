@@ -376,7 +376,7 @@ function CheckoutCallbackContent() {
   const awaitingWhatsApp = result?.provider === 'whatsapp';
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center px-4 py-16 bg-[#F9F9F9]">
+    <div className="min-h-[70vh] flex items-start sm:items-center justify-center px-4 py-8 sm:py-16 bg-[#F9F9F9]">
       <div className="bg-white rounded-3xl p-6 sm:p-10 max-w-lg w-full border border-neutral-200 shadow-xl text-center space-y-6" aria-live="polite">
         {view === 'checking' && (
           <div className="py-12 space-y-4" role="status">
@@ -577,10 +577,17 @@ function CheckoutCallbackContent() {
                     ? 'Card payments usually confirm within seconds; bank transfers can take a few minutes. This page updates automatically.'
                     : 'Still processing. Bank transfers can take a few minutes to arrive. You can check again, or come back later: we will email you once it is confirmed.')}
             </p>
+            {awaitingWhatsApp && result?.status !== 'not_started' && (
+              // The amount to transfer, so the customer never has to scroll back through WhatsApp for it.
+              <div className="flex items-center justify-between gap-3 rounded-[20px] bg-[#F0F0F0] px-5 py-4 text-left">
+                <span className="text-sm text-black/60">{awaitingConfirmation ? 'Amount sent' : 'Amount to transfer'}</span>
+                <span className="text-xl font-bold text-black whitespace-nowrap">{formatPrice(result?.amount ?? order?.grand_total ?? 0)}</span>
+              </div>
+            )}
             {awaitingConfirmation ? (
-              <div className="flex flex-col items-center gap-2" role="status">
-                <div className="w-10 h-10 border-4 border-amber-200 border-t-amber-600 rounded-full animate-spin" aria-hidden="true" />
-                <p className="text-sm font-semibold text-amber-900">Awaiting confirmation…</p>
+              <div className="flex items-center justify-center gap-2.5" role="status">
+                <div className="w-5 h-5 border-[3px] border-amber-200 border-t-amber-600 rounded-full animate-spin" aria-hidden="true" />
+                <p className="text-sm font-medium text-amber-900">Checking every few seconds…</p>
               </div>
             ) : checkingAutomatically && (
               <p className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-900 rounded-full text-xs font-medium border border-amber-200">
@@ -614,10 +621,11 @@ function CheckoutCallbackContent() {
                   href={buildWhatsAppMessageUrl(`Hello! I paid for order ${orderNumber} (reference ${result?.provider_reference || reference || 'n/a'}) and it is still pending. Can you check?`, supportPhone)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100 font-semibold py-3 rounded-full text-sm flex items-center justify-center gap-2"
+                  className="w-full bg-white text-black border border-black/15 hover:bg-neutral-50 font-semibold py-3 px-5 rounded-full text-sm flex items-center justify-center gap-2.5"
+                  aria-label={`Ask the store on WhatsApp, ${supportLabel}`}
                 >
-                  <WhatsAppIcon className="w-4 h-4 text-[#128C7E]" />
-                  <span>Ask the store on WhatsApp ({supportLabel})</span>
+                  <WhatsAppIcon className="w-5 h-5 shrink-0 text-[#25D366]" />
+                  <span className="whitespace-nowrap">Ask the store on WhatsApp</span>
                 </a>
               ) : contactStoreLink}
             </div>
@@ -667,9 +675,9 @@ function CheckoutCallbackContent() {
                 href={buildWhatsAppMessageUrl(`Hello! Order ${orderNumber} was cancelled, but I sent the transfer. Here is my bank receipt.`, supportPhone)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100 font-semibold py-3 rounded-full text-sm flex items-center justify-center gap-2"
+                className="w-full bg-white text-black border border-black/15 hover:bg-neutral-50 font-semibold py-3 px-5 rounded-full text-sm flex items-center justify-center gap-2.5"
               >
-                <WhatsAppIcon className="w-4 h-4 text-[#128C7E]" />
+                <WhatsAppIcon className="w-5 h-5 shrink-0 text-[#25D366]" />
                 <span>I sent the transfer: message the store</span>
               </a>
             ) : contactStoreLink)}
@@ -698,10 +706,10 @@ function CheckoutCallbackContent() {
                 href={buildWhatsAppMessageUrl(`Hello! My payment for order ${orderNumber} (reference ${result?.provider_reference || reference}) arrived after the order expired. Please help.`, supportPhone)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100 font-semibold py-3 rounded-full text-sm flex items-center justify-center gap-2"
+                className="w-full bg-white text-black border border-black/15 hover:bg-neutral-50 font-semibold py-3 px-5 rounded-full text-sm flex items-center justify-center gap-2.5"
               >
-                <WhatsAppIcon className="w-4 h-4 text-[#128C7E]" />
-                <span>Contact the store ({supportLabel})</span>
+                <WhatsAppIcon className="w-5 h-5 shrink-0 text-[#25D366]" />
+                <span className="whitespace-nowrap">Message the store on WhatsApp</span>
               </a>
             ) : contactStoreLink}
           </div>
