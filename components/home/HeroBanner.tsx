@@ -155,21 +155,6 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
           left, the picture full height on the right standing on the brand strip. */}
       <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-4 sm:px-6 lg:grid lg:grid-cols-12 lg:grid-rows-[1fr_auto] lg:gap-x-10 lg:px-8">
         <div className="pt-[clamp(0.75rem,3svh,1.5rem)] sm:pt-[clamp(1.25rem,4svh,2.5rem)] lg:col-span-7 lg:row-start-1 lg:self-center lg:py-[clamp(1rem,4svh,2.5rem)]">
-          {activePromo && (
-            // One quiet line on every screen, so it never pushes the picture down: the code in a
-            // dashed coupon outline, then the offer in short ("₦5,000 off orders of ₦30,000+").
-            <p
-              className="mb-[clamp(0.5rem,1.8svh,1.25rem)] flex max-w-full items-center gap-2 whitespace-nowrap text-xs text-neutral-600 sm:text-sm"
-              title={activePromo.label || undefined}
-            >
-              <span className="sr-only">Offer: use code</span>
-              <span className="shrink-0 rounded-md border border-dashed border-black/40 px-1.5 py-px font-semibold tracking-wider text-black">
-                {activePromo.code}
-              </span>
-              <span className="min-w-0 truncate">{offerText(activePromo)}</span>
-            </p>
-          )}
-
           <div className="grid">
             {slides.map((s, idx) => {
               const shown = idx === active;
@@ -232,6 +217,22 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
               </div>
             );
           })}
+
+          {/* The advertised code, as a small badge on the picture's corner: it takes no space of
+              its own, so the picture is the same size with or without a code (above the heading it
+              came out of the picture's height on phones). */}
+          {activePromo && (
+            <p
+              className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-2 whitespace-nowrap rounded-full bg-white/95 py-1 pl-1 pr-3 text-xs text-neutral-700 shadow-md backdrop-blur-sm sm:left-4 sm:top-4 sm:text-sm lg:top-8"
+              title={activePromo.label || undefined}
+            >
+              <span className="sr-only">Offer: use code</span>
+              <span className="shrink-0 rounded-full border border-dashed border-black/40 px-2 py-px font-semibold tracking-wider text-black">
+                {activePromo.code}
+              </span>
+              <span className="min-w-0 truncate">{offerText(activePromo)}</span>
+            </p>
+          )}
         </div>
 
         {/* Store numbers and slide controls. Phones: just the controls, centred under the
