@@ -294,3 +294,5 @@ keep the Node.js app from being put to sleep by the host.
 | 8 Nov 2026 | API online after the 403 fix: `/api/v1/health` answers healthy, database up |
 | 8 Nov 2026 | Storefront online in Setup Node.js App (Node 20) on the first try; pages, API calls, R2 pictures and page refresh checked from outside |
 | 9 Nov 2026 | Admin sign-in works after the `TRUSTED_PROXIES` fix; Monnify and Kora show as Sandbox in Payment methods |
+| 9 Nov 2026 | Admin email moved to the Gmail, cron jobs added, Monnify webhook set; new products and edits show on the shop at once |
+| 9 Nov 2026 | First storefront update by the "Updating later" steps (stop, delete `.next`, upload and extract, start): order tracker fix, WhatsApp waiting page, footer credit. Live and checked; the SHOPPER pill is off the homepage |
