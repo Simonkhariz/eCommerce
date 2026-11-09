@@ -7,7 +7,6 @@ import {
   Search,
   Package,
   Truck,
-  CheckCircle2,
   Clock,
   MapPin,
   AlertCircle,
@@ -273,26 +272,36 @@ function TrackOrderContent() {
   // "Pay now" from My orders opens the payment options straight away.
   const showPaymentModal = paymentModalChoice ?? (wantsToPay && canPay);
 
-  // Determine stage index
+  // The step happening now (or next). Every step before it is done; placing the order is always
+  // done, so a new order is on "Payment". A delivered order has every step done.
   const getStageIndex = (statusStr: string, paymentStatus: string) => {
     if (statusStr === 'delivered' || statusStr === 'completed') return 4;
     if (statusStr === 'shipped') return 3;
-    if (statusStr === 'processing') return 2;
-    if (paymentStatus === 'successful' || statusStr === 'paid') return 1;
-    return 0;
+    if (statusStr === 'processing' || statusStr === 'paid' || paymentStatus === 'successful') return 2;
+    return 1;
   };
 
-  const currentStage = order ? getStageIndex(rawStatus, order.payment_status || '') : 0;
-  // A delivered order has finished every step, including the last one.
+  const currentStage = order ? getStageIndex(rawStatus, order.payment_status || '') : 1;
   const isFinished = rawStatus === 'delivered' || rawStatus === 'completed';
 
   const steps = [
     { title: 'Order placed', tooltip: 'Your order was received and the items reserved.' },
-    { title: 'Payment confirmed', tooltip: 'Payment was confirmed with the payment provider.' },
-    { title: 'Processing', tooltip: 'Your order is being packed.' },
-    { title: 'In transit', tooltip: 'Your parcel is with the courier.' },
+    { title: 'Payment', tooltip: 'The store confirms your payment.' },
+    { title: 'Packing', tooltip: 'The store packs your order.' },
+    { title: 'On the way', tooltip: 'Your parcel is with the courier.' },
     { title: 'Delivered', tooltip: 'Your parcel was delivered.' },
   ];
+  // What the step happening now is waiting for, in the customer's words.
+  const currentNote =
+    currentStage === 1
+      ? awaitingConfirmation ? 'Awaiting confirmation' : 'Awaiting payment'
+      : currentStage === 2
+        ? rawStatus === 'processing' ? 'Being packed' : 'Up next'
+        : currentStage === 3
+          ? 'With the courier'
+          : '';
+  const stepNote = (idx: number) =>
+    idx === currentStage && !isFinished ? currentNote : idx < currentStage || isFinished ? (idx === 1 ? 'Paid' : 'Done') : 'Not yet';
 
   const whatsAppInvoiceUrl = order ? buildWhatsAppInvoiceUrl(whatsAppOrderFrom(order), supportPhone) : '';
   const helpWhatsAppUrl = buildWhatsAppMessageUrl('Hello! I have a question about my order.', supportPhone);
@@ -550,65 +559,64 @@ function TrackOrderContent() {
                     Delivery progress
                   </h3>
                   <p className="text-xs text-neutral-600">
-                    {isFinished ? 'All steps complete' : `Step ${currentStage + 1} of ${steps.length}`} &bull; {steps[currentStage]?.title}
+                    {isFinished
+                      ? 'Delivered • all steps complete'
+                      : `Step ${currentStage + 1} of ${steps.length} • ${steps[currentStage]?.title}: ${currentNote.toLowerCase()}`}
                   </p>
                 </div>
 
               </div>
 
-              {/* Connected Visual Progression Bar */}
               <div className="relative pt-2 pb-1">
-                {/* Background Line */}
-                <div aria-hidden="true" className="hidden sm:block absolute top-6 left-6 right-6 h-1 bg-neutral-100 -translate-y-1/2 z-0" />
-                {/* Active Filled Line */}
+                {/* Wide screens: one line through the centres of the five circles (10% to 90% of the
+                    width), filled up to the step happening now. */}
+                <div aria-hidden="true" className="hidden sm:block absolute top-6 left-[10%] right-[10%] h-1 rounded-full bg-neutral-200 -translate-y-1/2 z-0" />
                 <div
                   aria-hidden="true"
-                  className="hidden sm:block absolute top-6 left-6 h-1 bg-black -translate-y-1/2 z-0 transition-all duration-500"
-                  style={{ width: `calc(${(currentStage / (steps.length - 1)) * 100}% * 0.88)` }}
+                  className="hidden sm:block absolute top-6 left-[10%] h-1 rounded-full bg-black -translate-y-1/2 z-0 transition-all duration-500"
+                  style={{ width: `${(currentStage / (steps.length - 1)) * 80}%` }}
                 />
 
-                {/* Steps */}
                 <ol className="grid grid-cols-1 sm:grid-cols-5 gap-3 sm:gap-2 relative z-10" aria-label="Order progress">
                   {steps.map((step, idx) => {
-                    const isDone = idx < currentStage || (isFinished && idx === currentStage);
+                    const isDone = idx < currentStage || isFinished;
                     const isCurrent = idx === currentStage && !isFinished;
                     return (
                       <li
                         key={step.title}
                         aria-current={isCurrent ? 'step' : undefined}
-                        className="group relative flex sm:flex-col items-center sm:items-center gap-3 sm:gap-2"
+                        className="group relative flex sm:flex-col items-center gap-3 sm:gap-2"
                       >
-                        {/* Tooltip on Hover */}
-                        <div aria-hidden="true" className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-30 w-44 bg-neutral-900 text-white text-xs rounded-xl px-2.5 py-1.5 shadow-lg text-center">
+                        {/* Phones: a short line down to the next step, black once this step is done. */}
+                        {idx < steps.length - 1 && (
+                          <div aria-hidden="true" className={`sm:hidden absolute left-[15px] top-8 h-3 w-0.5 ${isDone ? 'bg-black' : 'bg-neutral-200'}`} />
+                        )}
+
+                        <div aria-hidden="true" className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden sm:group-hover:block z-30 w-44 bg-neutral-900 text-white text-xs rounded-xl px-2.5 py-1.5 shadow-lg text-center">
                           {step.tooltip}
                           <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-neutral-900" />
                         </div>
 
-                        {/* Node Circle */}
+                        {/* Done: black with a white tick. Now: white with a black ring. Later: grey number. */}
                         <div
                           aria-hidden="true"
                           className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all shrink-0 ${
-                            isCurrent
-                              ? 'bg-black text-white ring-4 ring-neutral-200 shadow-sm'
-                              : isDone
+                            isDone
                               ? 'bg-black text-white'
-                              : 'bg-neutral-100 text-neutral-600'
+                              : isCurrent
+                                ? 'bg-white text-black border-2 border-black ring-4 ring-black/10'
+                                : 'bg-neutral-100 text-neutral-500'
                           }`}
                         >
-                          {isDone ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-400" aria-hidden="true" />
-                          ) : (
-                            <span>{idx + 1}</span>
-                          )}
+                          {isDone ? <Check className="w-4 h-4" strokeWidth={3} aria-hidden="true" /> : <span>{idx + 1}</span>}
                         </div>
 
-                        {/* Label & Description */}
                         <div className="text-left sm:text-center min-w-0">
-                          <p className={`text-xs font-bold leading-tight truncate ${isCurrent ? 'text-black' : isDone ? 'text-neutral-800' : 'text-neutral-600'}`}>
+                          <p className={`text-xs font-bold leading-tight ${isDone || isCurrent ? 'text-black' : 'text-neutral-500'}`}>
                             {step.title}
                           </p>
-                          <p className="text-xs text-neutral-600 truncate sm:block">
-                            {isCurrent ? 'In progress' : isDone ? 'Done' : 'Not yet'}
+                          <p className={`text-xs leading-tight mt-0.5 ${isCurrent ? 'font-semibold text-amber-700' : 'text-neutral-500'}`}>
+                            {stepNote(idx)}
                           </p>
                           <p className="sr-only">{step.tooltip}</p>
                         </div>
