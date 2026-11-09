@@ -126,19 +126,43 @@ final class DatabaseCleanup
         return is_array($data) && isset($data['at']) ? $data : null;
     }
 
+    /** Removed together or not at all: a customer is never half-removed. */
+    private const CUSTOMER_GROUP = ['inactive_customers', 'inactive_customer_accounts', 'inactive_customer_orders'];
+
     /**
-     * Everything a clean-up as of $asOf would remove.
+     * The rules a clean-up covers when the admin unticked $skip (unknown names are ignored).
+     * Unticking any of the inactive-customer lines leaves out all three.
+     *
+     * @param list<mixed> $skip
+     * @return list<string>
+     */
+    public static function selection(array $skip): array
+    {
+        $skip = array_values(array_filter($skip, 'is_string'));
+        if (array_intersect($skip, self::CUSTOMER_GROUP) !== []) {
+            $skip = array_merge($skip, self::CUSTOMER_GROUP);
+        }
+        return array_values(array_diff(array_keys(self::LABELS), $skip));
+    }
+
+    /**
+     * Everything a clean-up as of $asOf would remove; with $only, just those rules (the lines the
+     * admin left ticked), and the fingerprint then covers only them, so a change to an unticked
+     * line never stops the clean-up.
      *
      * Pictures are left out when their storage can't be reached (pictures_checked is false). A
      * list reviewed that way never matches one with pictures, so a clean-up refuses until reviewed
      * again.
      *
+     * @param list<string>|null $only
      * @return array{ids: array<string, list<string>>, counts: array<string, int>, fingerprint: string, pictures_checked: bool}
      */
-    public function snapshot(string $asOf): array
+    public function snapshot(string $asOf, ?array $only = null): array
     {
         $s = $this->settings();
-        $customers = $s['retention_customer_days'] > 0 ? $this->inactiveCustomers($asOf, $s['retention_customer_days']) : [];
+        // Inactive customers unticked: their emails don't join the old-email list either.
+        $withCustomers = $s['retention_customer_days'] > 0 && ($only === null || in_array('inactive_customers', $only, true));
+        $customers = $withCustomers ? $this->inactiveCustomers($asOf, $s['retention_customer_days']) : [];
         $emails = array_keys($customers);
 
         $ids = [];
@@ -146,13 +170,15 @@ final class DatabaseCleanup
             $ids[$name] = isset($rule['ids']) ? $this->column($rule['ids'], $rule['types'], $rule['params']) : [];
         }
         $picturesChecked = true;
-        try {
-            $ids['unused_images'] = UploadFiles::unused($this->db, $asOf);
-        } catch (StorageError $e) {
-            error_log('[Database check] ' . $e->getMessage());
-            $picturesChecked = false;
+        if ($only === null || in_array('unused_images', $only, true)) {
+            try {
+                $ids['unused_images'] = UploadFiles::unused($this->db, $asOf);
+            } catch (StorageError $e) {
+                error_log('[Database check] ' . $e->getMessage());
+                $picturesChecked = false;
+            }
         }
-        if ($s['retention_customer_days'] > 0) {
+        if ($withCustomers) {
             $ids['inactive_customers'] = $emails;
             $ids['inactive_customer_accounts'] = $this->columnForEmails(
                 "SELECT u.`id` AS k FROM `users` u WHERE u.`role` = 'customer' AND u.`email` IN ({in}) ORDER BY u.`id`",
@@ -173,7 +199,7 @@ final class DatabaseCleanup
 
         $ordered = [];
         foreach (array_keys(self::LABELS) as $name) {
-            if (array_key_exists($name, $ids)) {
+            if (array_key_exists($name, $ids) && ($only === null || in_array($name, $only, true))) {
                 $ordered[$name] = array_map('strval', $ids[$name]);
             }
         }
@@ -186,7 +212,8 @@ final class DatabaseCleanup
         return [
             'ids' => $ordered,
             'counts' => array_map('count', $ordered),
-            'fingerprint' => hash('sha256', json_encode([$s, $sorted])),
+            // The whole list keeps its original fingerprint; a ticked selection also covers which lines.
+            'fingerprint' => hash('sha256', json_encode($only === null ? [$s, $sorted] : [$s, $sorted, $only])),
             'pictures_checked' => $picturesChecked,
         ];
     }
@@ -263,14 +290,16 @@ final class DatabaseCleanup
     }
 
     /**
-     * Remove exactly what the admin reviewed as of $asOf. Throws DomainException when the
-     * records have changed since (fingerprint differs), so nothing unexpected is removed.
+     * Remove exactly what the admin reviewed as of $asOf (only the rules in $only when given).
+     * Throws DomainException when the records have changed since (fingerprint differs), so
+     * nothing unexpected is removed.
      *
+     * @param list<string>|null $only
      * @return array<string, int> rows removed per rule
      */
-    public function execute(string $asOf, string $fingerprint, ?string $adminName = null): array
+    public function execute(string $asOf, string $fingerprint, ?string $adminName = null, ?array $only = null): array
     {
-        $snapshot = $this->snapshot($asOf);
+        $snapshot = $this->snapshot($asOf, $only);
         if (!hash_equals($snapshot['fingerprint'], $fingerprint)) {
             throw new DomainException('Some of these records changed after you reviewed them. Review the list again before cleaning up.');
         }

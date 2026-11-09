@@ -384,6 +384,29 @@ $counterLeft = static fn (string $id): bool => (int) $t->scalar("SELECT COUNT(*)
 $t->ok('the touched counters are kept, the idle old one is removed', $counterLeft($visitorCounter) && $counterLeft($adminCounter) && !$counterLeft($idleCounter));
 $t->ok('and the reviewed records went', !$evtExists($evt2));
 
+// Unticked lines: the admin leaves a kind of record out of the clean-up.
+$keptEvt = $oldNotification();
+$goneCounter = $counterId('checkout', '203.0.113.79');
+$t->sql("INSERT INTO `rate_limits` (`id`, `hits`, `window_start`) VALUES (?, 1, UNIX_TIMESTAMP() - 172800)
+         ON DUPLICATE KEY UPDATE `window_start` = VALUES(`window_start`)", 's', [$goneCounter]);
+$everything = array_keys((array) TestKit::get($A('GET', '/admin/data'), 'data.labels'));
+$t->check('unticking every line: nothing to clean, no code sent', 422, $verify(['password' => $admin['password'], 'as_of' => $now(), 'skip' => $everything])['status']);
+$picked = $verify(['password' => $admin['password'], 'as_of' => $now(), 'skip' => ['old_gateway_notifications', 'no_such_rule']]);
+$t->check('unticking a line: the code is sent for the rest', 200, $picked['status']);
+$pickedCounts = (array) TestKit::get($picked, 'data.counts');
+$t->ok('the code covers only the ticked lines', !array_key_exists('old_gateway_notifications', $pickedCounts) && ($pickedCounts['old_rate_limit_counters'] ?? 0) >= 1, json_encode($pickedCounts));
+$oldNotification(); // the unticked kind changes after review: that must not stop the clean-up
+$pickedRun = $run(['confirmation_id' => (string) TestKit::get($picked, 'data.confirmation_id'), 'code' => (string) $t->confirmationCode(strtolower($admin['email']))]);
+$t->check('the clean-up runs', 200, $pickedRun['status']);
+$t->ok('the ticked line was cleaned', !$counterLeft($goneCounter));
+$t->ok('the unticked line was kept', $evtExists($keptEvt));
+$t->check('and reported as untouched', null, TestKit::get($pickedRun, 'data.removed.old_gateway_notifications'));
+$t->check('unticking one customer line leaves the whole customer group out', [], array_values(array_intersect(
+    \App\Services\DatabaseCleanup::selection(['inactive_customer_orders']),
+    ['inactive_customers', 'inactive_customer_accounts', 'inactive_customer_orders']
+)));
+// The notifications made here are removed by $oldNotification's own cleanup.
+
 // Password lock-out.
 for ($i = 0; $i < 5; $i++) {
     $verify(['password' => 'still-wrong', 'as_of' => $now()]);

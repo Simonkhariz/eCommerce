@@ -916,8 +916,9 @@ export function adminGetDataRecords(rule: string, asOf: string, page: number) {
 }
 
 /** Step 1 of a clean-up: the admin's password; a one-time code is emailed to them. */
-export function adminVerifyCleanup(password: string, asOf: string) {
-  return send<CleanupChallenge>('/admin/data/cleanup/verify', 'POST', { password, as_of: asOf });
+/** `skip`: the review lines the admin unticked; the code and the clean-up cover the rest. */
+export function adminVerifyCleanup(password: string, asOf: string, skip: string[] = []) {
+  return send<CleanupChallenge>('/admin/data/cleanup/verify', 'POST', { password, as_of: asOf, ...(skip.length > 0 ? { skip } : {}) });
 }
 
 /** Step 2: the emailed code; removes exactly the records reviewed as of the challenge's time. */

@@ -262,7 +262,14 @@ function ReviewPanel({ data, onChanged }: { data: DataOverview; onChanged: () =>
     .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b));
   const records = rows.filter(([key]) => !data.housekeeping.includes(key));
   const technical = rows.filter(([key]) => data.housekeeping.includes(key));
-  const total = recordTotal(due);
+  // Lines the admin unticked: left out of the clean-up. The two lines under "Inactive customers"
+  // follow it, so a customer is never half-removed (the server does the same).
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const followsCustomers = (key: string) => key === 'inactive_customer_accounts' || key === 'inactive_customer_orders';
+  const isTicked = (key: string) => !skipped.includes(followsCustomers(key) ? 'inactive_customers' : key);
+  const toggle = (key: string) => setSkipped((list) => (list.includes(key) ? list.filter((k) => k !== key) : [...list, key]));
+  const included = Object.fromEntries(Object.entries(due).filter(([key]) => isTicked(key)));
+  const total = recordTotal(included);
 
   const group = (title: string, items: Array<[string, number]>, hint?: string) =>
     items.length > 0 && (
@@ -277,9 +284,21 @@ function ReviewPanel({ data, onChanged }: { data: DataOverview; onChanged: () =>
               key={key}
               className={`flex items-center justify-between gap-3 px-4 py-2 text-[13px] ${key === 'inactive_customers' ? 'bg-amber-50/60' : ''}`}
             >
-              <span className={key.startsWith('inactive_customer_') ? 'pl-3 text-[#374151]' : 'font-medium text-[#111827]'}>{data.labels[key] ?? key}</span>
+              {followsCustomers(key) ? (
+                <span className={`pl-9 ${isTicked(key) ? 'text-[#374151]' : 'text-[#9ca3af]'}`}>{data.labels[key] ?? key}</span>
+              ) : (
+                <label className={`flex min-w-0 cursor-pointer items-center gap-2.5 ${isTicked(key) ? 'font-medium text-[#111827]' : 'text-[#9ca3af]'}`}>
+                  <input
+                    type="checkbox"
+                    checked={isTicked(key)}
+                    onChange={() => toggle(key)}
+                    className="size-4 shrink-0 cursor-pointer accent-black"
+                  />
+                  <span>{data.labels[key] ?? key}</span>
+                </label>
+              )}
               <span className="flex items-center gap-3">
-                <span className="font-semibold tabular-nums text-[#111827]">{count.toLocaleString()}</span>
+                <span className={`font-semibold tabular-nums ${isTicked(key) ? 'text-[#111827]' : 'text-[#9ca3af] line-through'}`}>{count.toLocaleString()}</span>
                 <Button size="sm" variant="ghost" onClick={() => setViewing(key)} aria-label={`View ${data.labels[key] ?? key}`}>
                   <Eye className="size-3.5" aria-hidden="true" />
                   View
@@ -321,13 +340,20 @@ function ReviewPanel({ data, onChanged }: { data: DataOverview; onChanged: () =>
           <ShieldCheck className="size-3.5" aria-hidden="true" />
           Clean up {total > 0 ? recordCount(total) : ''}…
         </Button>
-        <p className="text-xs text-[#6b7280]">You&apos;ll be asked for your password and a one-time code from your email.</p>
+        <p className="text-xs text-[#6b7280]">
+          {skipped.some((key) => (due[key] ?? 0) > 0)
+            ? 'Only the ticked lines are removed. '
+            : 'Untick a line to keep it. '}
+          You&apos;ll be asked for your password and a one-time code from your email.
+        </p>
       </div>
 
       {viewing && <RecordsDialog rule={viewing} label={data.labels[viewing] ?? viewing} asOf={asOf} onClose={() => setViewing(null)} />}
       {confirming && (
         <CleanupDialog
           data={data}
+          skip={skipped}
+          included={included}
           onClose={() => setConfirming(false)}
           onDone={() => {
             setConfirming(false);
@@ -400,14 +426,28 @@ function RecordsDialog({ rule, label, asOf, onClose }: { rule: string; label: st
  * Two-step confirmation: the admin's password, then the 6-digit code emailed to them.
  * The server removes exactly the records reviewed as of the page's time, or refuses.
  */
-function CleanupDialog({ data, onClose, onDone }: { data: DataOverview; onClose: () => void; onDone: () => void }) {
+function CleanupDialog({
+  data,
+  skip,
+  included,
+  onClose,
+  onDone,
+}: {
+  data: DataOverview;
+  /** Lines the admin unticked. */
+  skip: string[];
+  /** The ticked lines and their counts: what this clean-up removes. */
+  included: Record<string, number>;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const toast = useToast();
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [challenge, setChallenge] = useState<CleanupChallenge | null>(null);
   const [errors, setErrors] = useState<{ password?: string; code?: string; form?: string }>({});
   const [busy, setBusy] = useState(false);
-  const due = data.health.cleanup.due;
+  const due = included;
   const customers = due.inactive_customers ?? 0;
   const total = recordTotal(due);
 
@@ -440,7 +480,7 @@ function CleanupDialog({ data, onClose, onDone }: { data: DataOverview; onClose:
     setBusy(true);
     setErrors({});
     try {
-      setChallenge(await adminVerifyCleanup(password, data.health.as_of));
+      setChallenge(await adminVerifyCleanup(password, data.health.as_of, skip));
       setPassword('');
     } catch (err) {
       fail(err, 'password');

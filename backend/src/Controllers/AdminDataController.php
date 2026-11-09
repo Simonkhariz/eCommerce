@@ -153,9 +153,10 @@ final class AdminDataController
     }
 
     /**
-     * POST /api/v1/admin/data/cleanup/verify  {password, as_of}
+     * POST /api/v1/admin/data/cleanup/verify  {password, as_of, skip?}
      * Step 1: checks the admin's password and emails them a one-time code for exactly the
-     * records reviewed as of as_of.
+     * records reviewed as of as_of. `skip` lists the lines the admin unticked (rule names); the
+     * code, its email and the clean-up then cover only the lines left ticked.
      */
     public function verify(): void
     {
@@ -177,10 +178,12 @@ final class AdminDataController
         RateLimiter::clear('cleanup_password', (string) $adminId);
 
         $asOf = $this->reviewTime((string) ($body['as_of'] ?? ''));
-        $snapshot = (new DatabaseCleanup($this->db))->snapshot($asOf);
+        $skip = is_array($body['skip'] ?? null) ? array_values($body['skip']) : [];
+        $only = $skip === [] ? null : DatabaseCleanup::selection($skip);
+        $snapshot = (new DatabaseCleanup($this->db))->snapshot($asOf, $only);
         $total = array_sum($snapshot['counts']) - ($snapshot['counts']['inactive_customers'] ?? 0);
         if ($total === 0) {
-            Response::error('There is nothing to clean up.', 422, 'NOTHING_TO_CLEAN');
+            Response::error($only === null ? 'There is nothing to clean up.' : 'Tick at least one line to clean up.', 422, 'NOTHING_TO_CLEAN');
         }
 
         RateLimiter::attempt('cleanup_code_sent', (string) $adminId, 5, 3600, 'Too many codes requested. Try again in an hour.');
@@ -199,7 +202,7 @@ final class AdminDataController
             "INSERT INTO `admin_confirmations` (`id`, `admin_id`, `session_id`, `action`, `code_hash`, `reviewed_at`, `fingerprint`, `summary`, `expires_at`)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             'sisssssss',
-            [$id, $adminId, (string) ($session['id'] ?? ''), self::ACTION, self::codeHash($id, $code), $asOf, $snapshot['fingerprint'], json_encode($snapshot['counts']), $expiresAt]
+            [$id, $adminId, (string) ($session['id'] ?? ''), self::ACTION, self::codeHash($id, $code), $asOf, $snapshot['fingerprint'], json_encode(['counts' => $snapshot['counts'], 'only' => $only]), $expiresAt]
         );
 
         if (!(new MailService($this->db))->sendAdminConfirmCode((string) $user['email'], (string) $user['full_name'], $code, $id, $this->labelled($snapshot['counts']), $expiresAt)) {
@@ -264,8 +267,12 @@ final class AdminDataController
         }
 
         $row = $outcome['row'];
+        // The lines the admin left ticked when the code was sent (codes sent before this choice
+        // existed stored just the counts, and covered everything).
+        $stored = json_decode((string) ($row['summary'] ?? ''), true);
+        $only = is_array($stored) && array_key_exists('only', $stored) && is_array($stored['only']) ? array_values(array_filter($stored['only'], 'is_string')) : null;
         try {
-            $removed = (new DatabaseCleanup($this->db))->execute((string) $row['reviewed_at'], (string) $row['fingerprint'], (string) ($admin['full_name'] ?? ''));
+            $removed = (new DatabaseCleanup($this->db))->execute((string) $row['reviewed_at'], (string) $row['fingerprint'], (string) ($admin['full_name'] ?? ''), $only);
         } catch (DomainException $e) {
             Response::error($e->getMessage(), 409, 'CLEANUP_CHANGED');
         }
