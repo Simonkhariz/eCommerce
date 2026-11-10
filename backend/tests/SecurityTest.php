@@ -201,11 +201,11 @@ foreach ([
     $res = $register($over);
     $t->check("{$what} -> 422 on {$field}", [422, true], [$res['status'], TestKit::get($res, "error.details.{$field}") !== null]);
 }
-$t->check('/auth/me?scope[]=x -> 401, not a server error', 401, $t->http('GET', '/auth/me?scope[]=x')['status']);
+$t->check('/auth/me?scope[]=x -> 400, not a server error', 400, $t->http('GET', '/auth/me?scope[]=x')['status']);
 $peek = $t->http('GET', '/auth/me?optional=1');
 $t->check('a visitor asking whether anyone is signed in gets a plain "no", not an error', [200, null, null], [$peek['status'], TestKit::get($peek, 'data.user'), TestKit::get($peek, 'data.csrf_token')]);
 $t->check('and the signed-in session answers the same way as always', $custEmail, TestKit::get($t->http('GET', '/auth/me?optional=1', ['jar' => 'cust']), 'data.user.email'));
-$t->check('/auth/logout?scope[]=x -> 200, not a server error', 200, $t->http('POST', '/auth/logout?scope[]=x', ['json' => []])['status']);
+$t->check('/auth/logout?scope[]=x -> 400, not a server error', 400, $t->http('POST', '/auth/logout?scope[]=x', ['json' => []])['status']);
 $raw = (string) ($jar[$customerCookie]['value'] ?? '');
 $t->check('session stored hashed (raw cookie is not a DB id)', 0, (int) $t->scalar("SELECT COUNT(*) FROM `sessions` WHERE `id` = ?", 's', [$raw]));
 $t->check('session stored as sha256 of the cookie', 1, (int) $t->scalar("SELECT COUNT(*) FROM `sessions` WHERE `id` = ?", 's', [hash('sha256', $raw)]));
@@ -446,5 +446,32 @@ $t->check('admin session gone after logout', 401, $t->http('GET', '/auth/me?scop
 $t->check('customer logout 200', 200, $t->http('POST', '/auth/logout', ['jar' => 'cust', 'csrf' => $csrf])['status']);
 $t->check('customer session gone after logout', 401, $t->http('GET', '/auth/me', ['jar' => 'cust'])['status']);
 $t->check('logged-out session row deleted', 0, (int) $t->scalar("SELECT COUNT(*) FROM `sessions` WHERE `id` = ?", 's', [hash('sha256', $raw)]));
+
+// -----------------------------------------------------------------------------
+// Query values sent as lists ("?search[]=x") were 500s (TypeError in error.log, 2026-11-06).
+$t->section('Query parameters sent as lists');
+$errorLog = BASE_PATH . '/storage/logs/error.log';
+$logSize = is_file($errorLog) ? (int) filesize($errorLog) : 0;
+foreach ([
+    '/auth/me?scope[]=admin',
+    '/auth/me?optional[]=1',
+    '/products?search[]=shirt',
+    '/products?category[]=1',
+    '/products?sort[]=newest',
+    '/products?min_price[]=1',
+    '/products?page[]=2',
+    '/products?colors[0][]=red',
+    '/catalog/facets?category[x]=1',
+    '/checkout/orders/ORD-NOPE?email[]=a@b.c',
+] as $path) {
+    $res = $t->http('GET', $path);
+    $t->check("GET {$path} -> 400, not 500", [400, 'BAD_REQUEST'], [$res['status'], TestKit::get($res, 'error.code')]);
+}
+$t->check('POST /auth/logout?scope[]=admin -> 400', 400, $t->http('POST', '/auth/logout?scope[]=admin')['status']);
+$colours = $t->http('GET', '/products?colors[]=black&colors[]=white&per_page=2');
+$t->check('a flat colour list still filters (read as "black,white")', 200, $colours['status']);
+$t->check('same result as the comma-separated form', TestKit::get($t->http('GET', '/products?colors=black,white&per_page=2'), 'meta.total'), TestKit::get($colours, 'meta.total'));
+clearstatcache();
+$t->check('nothing new in error.log from these requests', $logSize, is_file($errorLog) ? (int) filesize($errorLog) : 0);
 
 exit($t->finish());

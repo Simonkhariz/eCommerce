@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Repositories;
 
 use App\Support\Input;
+use App\Support\ProductRatings;
 use App\Database\Database;
 
 class ProductRepository
@@ -409,7 +410,11 @@ class ProductRepository
         }
 
         if (!$allowDraft) {
-            unset($product['units_sold']); // sales figures: admin only
+            // Sales figures and how the rating is made up: admin only.
+            unset($product['units_sold'], $product['rating_start'], $product['review_avg']);
+        } else {
+            $product['rating_start'] = $product['rating_start'] !== null ? (float) $product['rating_start'] : null;
+            $product['review_avg'] = (float) $product['review_avg'];
         }
         $product['id'] = $productId;
         $product['base_price'] = (float) $product['base_price'];
@@ -451,6 +456,19 @@ class ProductRepository
         $value = trim((string) $data['flash_deal_ends_at']);
         $ts = $value === '' ? false : strtotime(str_replace('T', ' ', $value));
         return $ts === false ? null : date('Y-m-d H:i:s', $ts);
+    }
+
+    /**
+     * The product's own starting rating from admin input: a missing key keeps the stored one,
+     * empty or null clears it (the store default applies). Validated by ProductValidator.
+     */
+    private static function ratingStart(array $data, ?array $existing): ?float
+    {
+        if (!array_key_exists('rating_start', $data)) {
+            return isset($existing['rating_start']) ? (float) $existing['rating_start'] : null;
+        }
+        $parsed = ProductRatings::parse($data['rating_start']);
+        return $parsed === false ? null : $parsed;
     }
 
     /**
@@ -581,18 +599,11 @@ class ProductRepository
     }
 
     /**
-     * Recompute a product's rating from its approved reviews.
+     * Recompute a product's shown rating from its starting rating and approved reviews.
      */
     public function refreshRating(int $productId): void
     {
-        $this->db->execute(
-            "UPDATE products
-             SET rating_avg = (SELECT COALESCE(ROUND(AVG(rating), 2), 0) FROM reviews WHERE product_id = ? AND status = 'approved'),
-                 rating_count = (SELECT COUNT(*) FROM reviews WHERE product_id = ? AND status = 'approved')
-             WHERE id = ?",
-            'iii',
-            [$productId, $productId, $productId]
-        );
+        ProductRatings::refresh($this->db, $productId);
     }
 
     /**
@@ -683,7 +694,7 @@ class ProductRepository
         // 2. Paginated rows
         $itemsSql = "SELECT p.id, p.uuid, p.name, p.slug, p.description, p.product_type,
                             p.status, p.base_price, p.original_price, p.currency, p.sku,
-                            p.rating_avg, p.rating_count, p.is_featured, p.is_flash_deal, p.flash_deal_ends_at, p.dress_style,
+                            p.rating_avg, p.rating_count, p.rating_start, p.review_avg, p.is_featured, p.is_flash_deal, p.flash_deal_ends_at, p.dress_style,
                             p.created_at, p.updated_at,
                             c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
                             (SELECT pi.image_url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.is_primary DESC, pi.display_order ASC LIMIT 1) AS primary_image,
@@ -709,6 +720,10 @@ class ProductRepository
             $row['total_stock'] = (int) $row['total_stock'];
             $row['is_featured'] = (bool) $row['is_featured'];
             $row['is_flash_deal'] = (bool) $row['is_flash_deal'];
+            $row['rating_avg'] = (float) $row['rating_avg'];
+            $row['rating_count'] = (int) $row['rating_count'];
+            $row['rating_start'] = $row['rating_start'] !== null ? (float) $row['rating_start'] : null;
+            $row['review_avg'] = (float) $row['review_avg'];
 
             // Variants
             $variants = $this->db->fetchAll(
@@ -940,12 +955,12 @@ class ProductRepository
             // Auto-generate SKU if omitted or empty
             $masterSku = !empty($data['sku']) ? trim((string) $data['sku']) : self::generateSku($data);
 
-            $sql = "INSERT INTO products (uuid, category_id, name, slug, description, product_type, status, base_price, original_price, currency, sku, dress_style, is_featured, is_flash_deal, flash_deal_ends_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO products (uuid, category_id, name, slug, description, product_type, status, base_price, original_price, currency, sku, dress_style, is_featured, is_flash_deal, flash_deal_ends_at, rating_start)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
             $productId = (int) $db->insert(
                 $sql,
-                "sisssssddsssiis",
+                "sisssssddsssiisd",
                 [
                     $uuid,
                     empty($data['category_id']) ? null : (int) $data['category_id'],
@@ -964,6 +979,7 @@ class ProductRepository
                     $data['is_featured'] ?? 0,
                     $data['is_flash_deal'] ?? 0,
                     self::flashEnd($data, null),
+                    self::ratingStart($data, null),
                 ]
             );
 
@@ -1026,6 +1042,7 @@ class ProductRepository
                 }
             }
 
+            ProductRatings::refresh($db, $productId);
 
             return $productId;
         });
@@ -1045,7 +1062,7 @@ class ProductRepository
             $sql = "UPDATE products
                     SET category_id = ?, name = ?, slug = ?, sku = ?, description = ?, status = ?,
                         product_type = ?, base_price = ?, original_price = ?, dress_style = ?,
-                        is_featured = ?, is_flash_deal = ?, flash_deal_ends_at = ?
+                        is_featured = ?, is_flash_deal = ?, flash_deal_ends_at = ?, rating_start = ?
                     WHERE id = ?";
 
             // Fields the editor can clear (no "was" price, no category, no style) arrive as null:
@@ -1058,7 +1075,7 @@ class ProductRepository
 
             $db->execute(
                 $sql,
-                "issssssddsiisi",
+                "issssssddsiisdi",
                 [
                     $categoryId === null || $categoryId === '' || (int) $categoryId <= 0 ? null : (int) $categoryId,
                     $data['name'] ?? $existing['name'],
@@ -1074,9 +1091,11 @@ class ProductRepository
                     isset($data['is_featured']) ? (int) $data['is_featured'] : (int) $existing['is_featured'],
                     isset($data['is_flash_deal']) ? (int) $data['is_flash_deal'] : (int) $existing['is_flash_deal'],
                     self::flashEnd($data, $existing),
+                    self::ratingStart($data, $existing),
                     $id,
                 ]
             );
+            ProductRatings::refresh($db, $id);
 
             // Sync variants if provided: upsert by id so variant IDs (referenced by orders, carts
             // and inventory logs) stay stable.

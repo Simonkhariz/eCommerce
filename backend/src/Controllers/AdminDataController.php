@@ -166,16 +166,13 @@ final class AdminDataController
         $session = RequestContext::getSession();
         $adminId = (int) ($admin['id'] ?? 0);
 
-        RateLimiter::guard('cleanup_password', (string) $adminId, 5, 900, 'Too many wrong passwords. Wait 15 minutes and try again.');
-
         $user = $this->db->fetchOne("SELECT `email`, `full_name`, `password_hash` FROM `users` WHERE `id` = ?", 'i', [$adminId]);
-        $password = (string) ($body['password'] ?? '');
-        if ($user === null || empty($user['password_hash']) || !password_verify($password, (string) $user['password_hash'])) {
-            RateLimiter::hit('cleanup_password', (string) $adminId, 900);
+        $password = is_string($body['password'] ?? null) ? $body['password'] : '';
+        // The same five-tries limit as every other "type your password again" check.
+        if ($user === null || !AdminOperationsController::passwordConfirmed($adminId, $password)) {
             AuditService::record($adminId, 'data.cleanup_password_failed', 'database', null);
             Response::error('That password is not right.', 422, 'WRONG_PASSWORD', ['password' => 'That password is not right.']);
         }
-        RateLimiter::clear('cleanup_password', (string) $adminId);
 
         $asOf = $this->reviewTime((string) ($body['as_of'] ?? ''));
         $skip = is_array($body['skip'] ?? null) ? array_values($body['skip']) : [];

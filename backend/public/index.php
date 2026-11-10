@@ -11,6 +11,10 @@ declare(strict_types=1);
 
 $requestStartedAt = microtime(true);
 
+// Stack traces written to storage/logs/error.log must never carry argument values: a failure
+// under sign-in or a password check would otherwise log part of the password.
+ini_set('zend.exception_ignore_args', '1');
+
 // Define directory constants
 define('BASE_PATH', dirname(__DIR__));
 define('PUBLIC_PATH', __DIR__);
@@ -25,6 +29,7 @@ use App\Controllers\AdminDevController;
 use App\Controllers\AdminDashboardController;
 use App\Controllers\AdminOperationsController;
 use App\Controllers\AdminOrderController;
+use App\Controllers\AdminTeamController;
 use App\Controllers\AdminZoneController;
 use App\Controllers\AuthController;
 use App\Controllers\CatalogController;
@@ -38,6 +43,7 @@ use App\Middleware\AdminAuthMiddleware;
 use App\Middleware\CorsMiddleware;
 use App\Middleware\CustomerAuthMiddleware;
 use App\Middleware\JsonBodyMiddleware;
+use App\Middleware\QueryStringMiddleware;
 use App\Services\MailService;
 use App\Storage\MediaServer;
 use App\Storage\Storage;
@@ -121,6 +127,8 @@ if ($mediaMethod === 'GET' && $mediaPath === '/api/v1/storefront/version') {
 
 // 4. Validate Content-Type and Parse JSON Body on Mutating Requests
 JsonBodyMiddleware::handle();
+// Query values must be single values ("?search[]=x" is a 400, not a 500 further on).
+QueryStringMiddleware::handle();
 
 // 5. Initialize Router and Define Base Routes
 $router = new Router();
@@ -280,6 +288,16 @@ $router->post('/api/v1/admin/marketing/broadcast', [AdminOperationsController::c
 
 $router->get('/api/v1/admin/account', [AdminOperationsController::class, 'getAdminAccount'], $adminGuard);
 $router->put('/api/v1/admin/account', [AdminOperationsController::class, 'updateAdminAccount'], $adminGuard);
+
+// --- Admin team: list, add, switch off / back on (own password re-entered for changes) ---
+$router->get('/api/v1/admin/admins', [AdminTeamController::class, 'index'], $adminGuard);
+$router->post('/api/v1/admin/admins', [AdminTeamController::class, 'create'], $adminGuard);
+$router->patch('/api/v1/admin/admins/{id}/status', [AdminTeamController::class, 'updateStatus'], $adminGuard);
+$router->post('/api/v1/admin/admins/{id}/delete', [AdminTeamController::class, 'delete'], $adminGuard);
+
+// First at shutdown: a request that answered from inside a transaction leaves it open; close it
+// before any of the after-response work below runs.
+register_shutdown_function([\App\Database\Database::class, 'rollBackIfLeftOpen']);
 
 // Admin changes (products, categories, banners, reviews, settings...) clear the public
 // catalogue cache once the request has finished, then ask the storefront to rebuild its

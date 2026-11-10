@@ -20,9 +20,11 @@ use App\Support\RateLimiter;
 use App\Support\RequestContext;
 use App\Support\Response;
 use App\Support\SessionCookie;
+use App\Support\SessionGuard;
 use App\Support\StoreBrands;
 use App\Storage\Storage;
 use App\Support\Redis;
+use App\Support\ProductRatings;
 use App\Support\StorefrontRefresh;
 use App\Support\UploadFiles;
 
@@ -39,12 +41,14 @@ class AdminOperationsController
     private const EDITABLE_SETTINGS = [
         'store_name' => 'Store name shown in emails and receipts',
         'store_contact_email' => 'Customer support email (shown at checkout and in emails)',
-        'store_contact_phone' => 'Customer support phone',
+        'admin_alert_email' => 'Where new-order, payment and storage alerts go. One or more addresses separated by commas. Leave empty to send them to every active admin account.',
+        'store_contact_phone' => 'Shown to customers at checkout, in emails and in the footer',
         'store_whatsapp_phone' => 'WhatsApp number for payments and support. 080…, 070… and 090… numbers are saved as +234…',
         'store_origin_address' => 'Dispatch address (where parcels ship from)',
-        'store_origin_city' => 'Dispatch city',
-        'store_origin_state' => 'Dispatch state',
+        'store_origin_city' => 'City parcels ship from (shown on receipts)',
+        'store_origin_state' => 'State parcels ship from',
         'storefront_brands' => 'Brands in the scrolling strip under the homepage banner, separated by commas (only brands you sell). Leave empty to hide the strip.',
+        'default_product_rating' => 'Star rating a product starts with when you leave its own starting rating empty, from 1 to 5 (e.g. 4.5). It counts like 5 reviews, so customer reviews take over as they come in. Leave empty to show stars only from customer reviews.',
     ];
 
     public function __construct()
@@ -896,7 +900,7 @@ class AdminOperationsController
         $from = " FROM `admin_audit_logs` a LEFT JOIN `users` u ON u.id = a.admin_id";
         $total = (int) $this->db->fetchOne("SELECT COUNT(*) AS total" . $from . $where, $types, $params)['total'];
         $items = $this->db->fetchAll(
-            "SELECT a.*, u.full_name AS admin_name, u.email AS admin_email" . $from . $where . " ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
+            "SELECT a.*, COALESCE(u.full_name, a.admin_label) AS admin_name, u.email AS admin_email" . $from . $where . " ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
             $types . 'ii',
             array_merge($params, [$perPage, $offset])
         );
@@ -926,7 +930,8 @@ class AdminOperationsController
 
         $editable = [];
         foreach (self::EDITABLE_SETTINGS as $key => $help) {
-            $editable[] = ['key' => $key, 'value' => $stored[$key] ?? '', 'help' => $help];
+            $value = $stored[$key] ?? ($key === ProductRatings::SETTING ? (string) ProductRatings::DEFAULT : '');
+            $editable[] = ['key' => $key, 'value' => $value, 'help' => $help];
         }
 
         Response::success([
@@ -942,6 +947,8 @@ class AdminOperationsController
                 'pay_now_gateway' => PaymentMethods::payNowGateway($this->db),
                 'order_payment_window_minutes' => \App\Services\PaymentAttempts::gatewayWindowMinutes(),
                 'manual_payment_window_hours' => (int) (\App\Services\PaymentAttempts::manualWindowMinutes() / 60),
+                // Who gets new-order, payment and storage alerts right now.
+                'admin_alert_recipients' => MailService::getInstance()->adminRecipients(),
             ],
         ], 'Store settings retrieved.');
     }
@@ -969,11 +976,25 @@ class AdminOperationsController
                 $errors[$key] = 'Too long (255 characters maximum).';
             } elseif ($key === 'store_contact_email' && $value !== '' && !filter_var($value, FILTER_VALIDATE_EMAIL)) {
                 $errors[$key] = 'Enter a valid email address.';
+            } elseif ($key === MailService::ALERT_EMAIL_SETTING) {
+                $alertEmails = MailService::parseAlertEmails($value);
+                if ($alertEmails === null) {
+                    $errors[$key] = 'Enter valid email addresses separated by commas (at most ' . MailService::MAX_ALERT_EMAILS . ').';
+                } else {
+                    $changes[$key] = implode(', ', $alertEmails);
+                }
             } elseif (in_array($key, ['store_contact_phone', 'store_whatsapp_phone'], true) && $value !== '' && PhoneNumber::toInternational($value) === null) {
                 $errors[$key] = 'Enter a valid phone number, e.g. 0803 123 4567 or +234 803 123 4567.';
             } elseif ($key === 'store_whatsapp_phone' && $value !== '') {
                 // Saved as +234... so wa.me links work whether the admin typed 080..., 070... or 090...
                 $changes[$key] = PhoneNumber::toInternational($value);
+            } elseif ($key === ProductRatings::SETTING) {
+                $rating = ProductRatings::parse($value);
+                if ($rating === false) {
+                    $errors[$key] = 'Enter a rating from 1 to 5 (for example 4.5), or leave it empty.';
+                } else {
+                    $changes[$key] = $rating === null ? '' : (string) $rating;
+                }
             } elseif ($key === 'store_name' && $value === '') {
                 $errors[$key] = 'Store name cannot be empty.';
             } elseif ($key === 'storefront_brands') {
@@ -1004,6 +1025,10 @@ class AdminOperationsController
                 'ss',
                 [$key, $value]
             );
+        }
+        // A new default starting rating changes the shown rating of every product without its own.
+        if (array_key_exists(ProductRatings::SETTING, $changes) && ($before[ProductRatings::SETTING] ?? null) !== $changes[ProductRatings::SETTING]) {
+            ProductRatings::refresh($this->db);
         }
 
         AuditService::record(
@@ -1215,50 +1240,119 @@ class AdminOperationsController
     }
 
     // =========================================================================
-    // 11. EMAIL MARKETING (opt-in subscribers only)
+    // 11. EMAIL MARKETING (newsletter subscribers + registered customers)
     // =========================================================================
 
+    /** newsletter_subscribers.source for a customer put on the list because they have an account. */
+    private const CUSTOMER_SOURCE = 'registered_customer';
+
+    /**
+     * The newsletter audience, one row per email:
+     *  - everyone who subscribed (footer form), active or unsubscribed;
+     *  - every confirmed customer account (confirmedCustomer()). A customer gets a
+     *    newsletter_subscribers row (with their own unsubscribe token) the first time a newsletter
+     *    goes to them; before that they are listed straight from `users`.
+     * An unsubscribed row always wins: someone who unsubscribed is never put back by having an
+     * account. Customer rows whose account was suspended or removed drop out of the audience.
+     * Columns: email, status, origin (subscriber|customer), has_account, subscribed_at,
+     * unsubscribed_at, unsubscribe_token.
+     */
+    private function audienceSql(): string
+    {
+        $c = self::CUSTOMER_SOURCE;
+        return "SELECT n.`email`, n.`status`,
+                       CASE WHEN n.`source` = '{$c}' THEN 'customer' ELSE 'subscriber' END AS origin,
+                       (acc.`id` IS NOT NULL) AS has_account,
+                       n.`subscribed_at`, n.`unsubscribed_at`, n.`unsubscribe_token`
+                FROM `newsletter_subscribers` n
+                LEFT JOIN `users` acc ON acc.`email` = n.`email` AND " . self::confirmedCustomer('acc') . "
+                WHERE n.`source` <> '{$c}' OR acc.`id` IS NOT NULL OR n.`status` = 'unsubscribed'
+                UNION ALL
+                SELECT u.`email`, 'active', 'customer', 1, u.`created_at`, NULL, NULL
+                FROM `users` u
+                WHERE " . self::confirmedCustomer('u') . "
+                  AND NOT EXISTS (SELECT 1 FROM `newsletter_subscribers` n2 WHERE n2.`email` = u.`email`)";
+    }
+
+    /**
+     * SQL condition for a customer account the shop may send newsletters to: active, and the
+     * address is known to be theirs (they confirmed it, or signed in by an emailed link) or they
+     * have paid for an order. Signing up alone proves nothing: anyone can type someone else's
+     * address into the sign-up form, and those people must never get the shop's newsletters.
+     */
+    private static function confirmedCustomer(string $alias): string
+    {
+        return "{$alias}.`role` = 'customer' AND {$alias}.`status` = 'active'
+                AND ({$alias}.`email_verified_at` IS NOT NULL
+                     OR EXISTS (SELECT 1 FROM `orders` po WHERE po.`user_id` = {$alias}.`id`
+                                AND po.`order_status` IN ('paid', 'processing', 'shipped', 'delivered', 'completed')))";
+    }
+
+    /**
+     * GET /api/v1/admin/marketing/subscribers?status=active|unsubscribed|any&origin=subscriber|customer
+     */
     public function listMarketingSubscribers(): void
     {
-        $status = $_GET['status'] ?? 'active';
+        $status = Input::text($_GET['status'] ?? 'active');
+        $origin = Input::text($_GET['origin'] ?? '');
         $where = " WHERE 1=1";
         $types = '';
         $params = [];
         if (in_array($status, ['active', 'unsubscribed'], true)) {
-            $where .= " AND `status` = ?";
+            $where .= " AND a.`status` = ?";
             $types .= 's';
             $params[] = $status;
         }
+        if (in_array($origin, ['subscriber', 'customer'], true)) {
+            $where .= " AND a.`origin` = ?";
+            $types .= 's';
+            $params[] = $origin;
+        }
 
+        $from = " FROM (" . $this->audienceSql() . ") a";
         [$page, $perPage, $offset] = $this->paging(25);
-        $total = (int) $this->db->fetchOne("SELECT COUNT(*) AS total FROM `newsletter_subscribers`" . $where, $types, $params)['total'];
+        $total = (int) $this->db->fetchOne("SELECT COUNT(*) AS total" . $from . $where, $types, $params)['total'];
         $items = $this->db->fetchAll(
-            "SELECT `id`, `email`, `status`, `source`, `subscribed_at`, `unsubscribed_at` FROM `newsletter_subscribers`" . $where . " ORDER BY `subscribed_at` DESC LIMIT ? OFFSET ?",
+            "SELECT a.`email`, a.`status`, a.`origin`, a.`has_account`, a.`subscribed_at`, a.`unsubscribed_at`"
+            . $from . $where . " ORDER BY a.`subscribed_at` DESC, a.`email` ASC LIMIT ? OFFSET ?",
             $types . 'ii',
             array_merge($params, [$perPage, $offset])
         );
+        foreach ($items as &$item) {
+            $item['has_account'] = (bool) $item['has_account'];
+        }
+        unset($item);
         $counts = $this->db->fetchOne(
-            "SELECT COALESCE(SUM(status = 'active'), 0) AS active, COALESCE(SUM(status = 'unsubscribed'), 0) AS unsubscribed FROM `newsletter_subscribers`"
+            "SELECT COALESCE(SUM(a.`status` = 'active'), 0) AS active,
+                    COALESCE(SUM(a.`status` = 'unsubscribed'), 0) AS unsubscribed,
+                    COALESCE(SUM(a.`status` = 'active' AND a.`origin` = 'subscriber'), 0) AS active_subscribers,
+                    COALESCE(SUM(a.`status` = 'active' AND a.`origin` = 'customer'), 0) AS active_customers" . $from
         );
 
         $pagination = ['total' => $total, 'page' => $page, 'per_page' => $perPage, 'total_pages' => (int) ceil($total / $perPage)];
         Response::success([
             'items' => $items,
             'pagination' => $pagination,
-            'counts' => ['active' => (int) $counts['active'], 'unsubscribed' => (int) $counts['unsubscribed']],
-        ], 'Newsletter subscribers retrieved.', 200, $pagination);
+            'counts' => [
+                'active' => (int) $counts['active'],
+                'unsubscribed' => (int) $counts['unsubscribed'],
+                'active_subscribers' => (int) $counts['active_subscribers'],
+                'active_customers' => (int) $counts['active_customers'],
+            ],
+        ], 'Newsletter audience retrieved.', 200, $pagination);
     }
 
     /**
      * POST /api/v1/admin/marketing/broadcast  {subject, content, confirm_recipients}
-     * Queues one email per active subscriber, each with its own unsubscribe link.
-     * confirm_recipients must equal the current active-subscriber count (the admin confirmed it).
+     * Queues one email per active address in the audience (subscribers and customers), each with
+     * its own unsubscribe link. confirm_recipients must equal the current active count (the admin
+     * confirmed it).
      */
     public function sendMarketingBroadcast(): void
     {
         $body = JsonBodyMiddleware::getBody();
-        $subject = trim((string) ($body['subject'] ?? ''));
-        $content = trim((string) ($body['content'] ?? ''));
+        $subject = Input::text($body['subject'] ?? null);
+        $content = Input::text($body['content'] ?? null);
 
         if ($subject === '' || $content === '') {
             Response::error('Subject and message are required.', 422, 'VALIDATION_ERROR');
@@ -1267,16 +1361,38 @@ class AdminOperationsController
             Response::error('Subject is too long (150 characters maximum).', 422, 'VALIDATION_ERROR');
         }
 
-        $recipients = $this->db->fetchAll("SELECT `email`, `unsubscribe_token` FROM `newsletter_subscribers` WHERE `status` = 'active'");
-        if ((int) ($body['confirm_recipients'] ?? -1) !== count($recipients)) {
-            Response::error('The subscriber count changed. Review the recipients and confirm again.', 409, 'RECIPIENTS_CHANGED', [
+        // Customers who have never had a newsletter get their own row and unsubscribe token now.
+        // INSERT IGNORE: an existing row (above all an unsubscribed one) is never changed.
+        $newCustomers = $this->db->fetchAll(
+            "SELECT u.`email`, u.`created_at` FROM `users` u
+             WHERE " . self::confirmedCustomer('u') . "
+               AND NOT EXISTS (SELECT 1 FROM `newsletter_subscribers` n WHERE n.`email` = u.`email`)"
+        );
+        // One transaction: thousands of single commits would be slow enough to time out on shared hosting.
+        $this->db->transaction(function (Database $db) use ($newCustomers): void {
+            foreach ($newCustomers as $customer) {
+                $db->execute(
+                    "INSERT IGNORE INTO `newsletter_subscribers` (`email`, `status`, `source`, `unsubscribe_token`, `subscribed_at`)
+                     VALUES (?, 'active', ?, ?, ?)",
+                    'ssss',
+                    [strtolower((string) $customer['email']), self::CUSTOMER_SOURCE, bin2hex(random_bytes(16)), (string) $customer['created_at']]
+                );
+            }
+        });
+
+        $recipients = array_values(array_filter(
+            $this->db->fetchAll("SELECT a.`email`, a.`origin`, a.`unsubscribe_token` FROM (" . $this->audienceSql() . ") a WHERE a.`status` = 'active'"),
+            static fn (array $r): bool => (string) $r['unsubscribe_token'] !== ''
+        ));
+        if (Input::wholeNumber($body['confirm_recipients'] ?? null, 0, PHP_INT_MAX) !== count($recipients)) {
+            Response::error('The number of recipients changed. Review the recipients and confirm again.', 409, 'RECIPIENTS_CHANGED', [
                 'active_subscribers' => count($recipients),
             ]);
         }
 
         $frontend = Env::frontendUrl();
         $mail = MailService::getInstance();
-        // The same newsletter (subject and message) goes to each subscriber at most once a day: if
+        // The same newsletter (subject and message) goes to each address at most once a day: if
         // the admin sends again after a timeout or a double click, nobody gets it twice.
         $campaign = date('Y-m-d') . "\n" . $subject . "\n" . $content;
         $broadcasts = fn (): int => (int) ($this->db->fetchOne("SELECT COUNT(*) AS c FROM `email_outbox` WHERE `template` = 'marketing_broadcast'")['c'] ?? 0);
@@ -1284,21 +1400,23 @@ class AdminOperationsController
         $this->db->transaction(function () use ($mail, $recipients, $subject, $content, $frontend, $campaign): void {
             foreach ($recipients as $r) {
                 $key = 'broadcast:' . sha1($campaign . "\n" . strtolower((string) $r['email']));
-                $mail->queueBroadcast($r['email'], $subject, $content, $frontend . '/unsubscribe?token=' . $r['unsubscribe_token'], $key);
+                $mail->queueBroadcast($r['email'], $subject, $content, $frontend . '/unsubscribe?token=' . $r['unsubscribe_token'], $key, $r['origin'] === 'customer');
             }
         });
         $queued = max(0, $broadcasts() - $before);
         $skipped = count($recipients) - $queued;
+        $customers = count(array_filter($recipients, static fn (array $r): bool => $r['origin'] === 'customer'));
 
         AuditService::record($this->adminId(), 'marketing.broadcast', 'email_campaign', null, null, [
             'subject' => $subject,
             'recipient_count' => count($recipients),
+            'customer_count' => $customers,
             'queued_count' => $queued,
         ]);
 
         Response::success(
             ['queued_count' => $queued, 'already_queued_today' => $skipped, 'mail_mode' => self::mailMode()],
-            ($queued > 0 ? 'Queued for ' . $queued . ' subscribers. The outbox worker sends them in batches.' : 'Nothing new to send.')
+            ($queued > 0 ? 'Queued for ' . $queued . ' people. The outbox worker sends them in batches.' : 'Nothing new to send.')
             . ($skipped > 0 ? " {$skipped} already had this newsletter queued today, so they will not get it twice." : '')
         );
     }
@@ -1313,6 +1431,24 @@ class AdminOperationsController
 
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             Response::error('Please enter a valid email address.', 422, 'INVALID_EMAIL');
+        }
+
+        // A customer's unsubscribe always wins: the form needs no proof of who is typing, so it
+        // must not put a customer who asked to be left alone back on the list (having an account
+        // is what keeps them in the audience). Only that customer, signed in, can subscribe the
+        // address again. An address with no account simply subscribes again, as it first did.
+        $existing = $this->db->fetchOne("SELECT `status` FROM `newsletter_subscribers` WHERE `email` = ?", 's', [$email]);
+        $hasAccount = $existing !== null && $existing['status'] === 'unsubscribed'
+            && $this->db->fetchOne("SELECT `id` FROM `users` WHERE `email` = ? AND `role` = 'customer' LIMIT 1", 's', [$email]) !== null;
+        if ($hasAccount) {
+            $session = SessionGuard::resolve(SessionCookie::SCOPE_CUSTOMER);
+            if (strtolower((string) ($session['user']['email'] ?? '')) !== $email) {
+                Response::error(
+                    'This address unsubscribed from our emails before. To get them again, sign in to the account with this email and subscribe from there.',
+                    409,
+                    'UNSUBSCRIBED_BEFORE'
+                );
+            }
         }
 
         $this->db->execute(
@@ -1368,8 +1504,10 @@ class AdminOperationsController
     }
 
     /**
-     * PUT /api/v1/admin/account  {full_name, phone, current_password?, new_password?}
-     * Changing the password signs out every other admin session.
+     * PUT /api/v1/admin/account  {full_name, phone, email?, current_password?, new_password?}
+     * Changing the sign-in email or the password needs the current password. Changing the
+     * password signs out every other admin session. Admin alerts follow the new email unless
+     * "Send admin alerts to" (Settings) names other addresses.
      */
     public function updateAdminAccount(): void
     {
@@ -1377,10 +1515,12 @@ class AdminOperationsController
         $body = JsonBodyMiddleware::getBody();
         $user = $this->db->fetchOne("SELECT * FROM `users` WHERE `id` = ?", 'i', [$adminId]);
 
-        $fullName = array_key_exists('full_name', $body) ? trim((string) $body['full_name']) : $user['full_name'];
-        $phone = array_key_exists('phone', $body) ? trim((string) $body['phone']) : (string) $user['phone'];
-        $currentPassword = (string) ($body['current_password'] ?? '');
-        $newPassword = (string) ($body['new_password'] ?? '');
+        $fullName = array_key_exists('full_name', $body) ? Input::text($body['full_name']) : (string) $user['full_name'];
+        $phone = array_key_exists('phone', $body) ? Input::text($body['phone']) : (string) $user['phone'];
+        $email = array_key_exists('email', $body) ? strtolower(Input::text($body['email'])) : strtolower((string) $user['email']);
+        $currentPassword = is_string($body['current_password'] ?? null) ? $body['current_password'] : '';
+        $newPassword = is_string($body['new_password'] ?? null) ? $body['new_password'] : '';
+        $emailChanged = $email !== strtolower((string) $user['email']);
 
         if ($fullName === '') {
             Response::error('Name cannot be empty.', 422, 'VALIDATION_ERROR', ['full_name' => 'Name cannot be empty.']);
@@ -1391,21 +1531,31 @@ class AdminOperationsController
         if (Input::tooLong($phone, 50)) {
             Response::error('Phone can be at most 50 characters.', 422, 'VALIDATION_ERROR', ['phone' => 'At most 50 characters.']);
         }
-
-        // Validate the password change before writing anything.
-        if ($newPassword !== '') {
-            if (str_contains($newPassword, "\0")) {
-                Response::error('New password contains a character that cannot be used.', 422, 'VALIDATION_ERROR', ['new_password' => 'Contains a character that cannot be used.']);
+        if ($emailChanged) {
+            if ($email === '' || mb_strlen($email) > 255 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                Response::error('Enter a valid email address.', 422, 'VALIDATION_ERROR', ['email' => 'Enter a valid email address.']);
             }
-            if ($currentPassword === '' || !password_verify($currentPassword, $user['password_hash'] ?? '')) {
-                Response::error('Your current password is incorrect.', 422, 'INVALID_CURRENT_PASSWORD', ['current_password' => 'Incorrect password.']);
-            }
-            if (strlen($newPassword) < 10) {
-                Response::error('New password must be at least 10 characters long.', 422, 'PASSWORD_TOO_SHORT', ['new_password' => 'At least 10 characters.']);
+            $taken = $this->db->fetchOne("SELECT `id` FROM `users` WHERE `email` = ? AND `id` <> ? LIMIT 1", 'si', [$email, $adminId]);
+            if ($taken !== null) {
+                Response::error('Another account already uses this email.', 409, 'EMAIL_ALREADY_EXISTS', ['email' => 'Another account already uses this email.']);
             }
         }
 
+        // Validate the password change before writing anything.
+        if ($newPassword !== '') {
+            $policy = self::adminPasswordProblem($newPassword);
+            if ($policy !== null) {
+                Response::error('New password: ' . lcfirst($policy), 422, 'VALIDATION_ERROR', ['new_password' => $policy]);
+            }
+        }
+        if ($newPassword !== '' || $emailChanged) {
+            self::requireCurrentPassword($adminId, $currentPassword, 'current_password', 'Your current password is incorrect.', 'INVALID_CURRENT_PASSWORD');
+        }
+
         $this->db->executeUpdate("UPDATE `users` SET `full_name` = ?, `phone` = ? WHERE `id` = ?", 'ssi', [$fullName, $phone ?: null, $adminId]);
+        if ($emailChanged) {
+            $this->db->executeUpdate("UPDATE `users` SET `email` = ? WHERE `id` = ?", 'si', [$email, $adminId]);
+        }
 
         $passwordChanged = false;
         if ($newPassword !== '') {
@@ -1427,16 +1577,63 @@ class AdminOperationsController
 
         AuditService::record(
             $adminId,
-            $passwordChanged ? 'admin.password_change' : 'admin.profile_update',
+            $passwordChanged ? 'admin.password_change' : ($emailChanged ? 'admin.email_change' : 'admin.profile_update'),
             'admin',
             (string) $adminId,
-            ['full_name' => $user['full_name'], 'phone' => $user['phone']],
-            ['full_name' => $fullName, 'phone' => $phone]
+            ['full_name' => $user['full_name'], 'phone' => $user['phone'], 'email' => $user['email']],
+            ['full_name' => $fullName, 'phone' => $phone, 'email' => $email]
         );
 
-        Response::success(
-            ['id' => $adminId, 'full_name' => $fullName, 'phone' => $phone],
-            $passwordChanged ? 'Profile and password updated. Other sessions were signed out.' : 'Profile updated.'
-        );
+        $message = $passwordChanged ? 'Profile and password updated. Other sessions were signed out.' : 'Profile updated.';
+        if ($emailChanged) {
+            $message .= ' Sign in with ' . $email . ' from now on.';
+        }
+        Response::success(['id' => $adminId, 'full_name' => $fullName, 'phone' => $phone, 'email' => $email], $message);
+    }
+
+    /** The admin password rule (first-run setup uses the same): at least 10 characters. */
+    public const ADMIN_MIN_PASSWORD = 10;
+
+    /** What is wrong with a new admin password, or null when it is fine. */
+    public static function adminPasswordProblem(string $password): ?string
+    {
+        if (str_contains($password, "\0")) {
+            return 'Contains a character that cannot be used.';
+        }
+        if (strlen($password) < self::ADMIN_MIN_PASSWORD) {
+            return 'At least ' . self::ADMIN_MIN_PASSWORD . ' characters.';
+        }
+        return null;
+    }
+
+    /** One limit for every "type your password again" check (team, account, dev mode, clean-up). */
+    public const REAUTH_BUCKET = 'admin_reauth';
+    public const REAUTH_TRIES = 5;
+    public const REAUTH_WINDOW = 900;
+
+    /**
+     * True when $password is the admin's own. Five wrong tries in 15 minutes lock every such
+     * check for the rest of the window (answers 429 itself). Each try is counted before the
+     * password is compared, so many requests sent at once cannot slip extra guesses past the
+     * limit; a right password clears the count.
+     */
+    public static function passwordConfirmed(int $adminId, #[\SensitiveParameter] string $password): bool
+    {
+        RateLimiter::attempt(self::REAUTH_BUCKET, (string) $adminId, self::REAUTH_TRIES, self::REAUTH_WINDOW, 'Too many wrong passwords. Wait 15 minutes and try again.');
+        $row = Database::getInstance()->fetchOne('SELECT `password_hash` FROM `users` WHERE `id` = ?', 'i', [$adminId]);
+        $hash = (string) ($row['password_hash'] ?? '');
+        if ($password === '' || $hash === '' || !password_verify($password, $hash)) {
+            return false;
+        }
+        RateLimiter::clear(self::REAUTH_BUCKET, (string) $adminId);
+        return true;
+    }
+
+    /** Stop the request unless $password is the signed-in admin's own password (see passwordConfirmed). */
+    public static function requireCurrentPassword(int $adminId, #[\SensitiveParameter] string $password, string $field, string $message, string $code = 'WRONG_PASSWORD'): void
+    {
+        if (!self::passwordConfirmed($adminId, $password)) {
+            Response::error($message, 422, $code, [$field => 'Incorrect password.']);
+        }
     }
 }

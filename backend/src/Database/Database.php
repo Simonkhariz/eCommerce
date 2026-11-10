@@ -209,6 +209,28 @@ class Database
     }
 
     /**
+     * Roll back a transaction left open when the request ended inside one (an answer sent from
+     * inside transaction() ends the script without unwinding it). Called first at shutdown, so
+     * the work done after the response (emails, cache refresh) never runs inside a transaction
+     * that is about to be thrown away, and no row stays locked while it runs.
+     */
+    public static function rollBackIfLeftOpen(): void
+    {
+        $db = self::$instance;
+        if ($db === null || $db->connection === null || $db->transactionDepth === 0) {
+            return;
+        }
+        $db->transactionDepth = 0;
+        $db->afterCommitCallbacks = [];
+        $db->beforeCommitCallbacks = [];
+        try {
+            $db->connection->rollback();
+        } catch (Throwable $e) {
+            error_log('[Transaction left open] ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Whether a transaction is currently open on this connection.
      */
     public function inTransaction(): bool

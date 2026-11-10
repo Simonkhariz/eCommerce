@@ -135,7 +135,7 @@ class MailService
     /**
      * Alert the store's admins that a customer marked a WhatsApp transfer as paid.
      * One email per order and admin, however often the customer taps the button.
-     * Goes to the active admin accounts, or the store contact email when there are none.
+     * Goes to adminRecipients(): "Send admin alerts to", else every active admin account.
      *
      * @return int Number of emails queued
      */
@@ -247,12 +247,32 @@ class MailService
         return $queued;
     }
 
+    /** Store setting (Admin → Settings → "Send admin alerts to"): comma-separated addresses. */
+    public const ALERT_EMAIL_SETTING = 'admin_alert_email';
+    public const MAX_ALERT_EMAILS = 10;
+
     /**
-     * Active admin accounts, or the store contact email when there are none.
+     * Where admin alerts go: the addresses in "Send admin alerts to" when that setting is filled
+     * in; otherwise every active admin account; otherwise (no admins) the store contact email.
      *
      * @return list<string>
      */
-    private function adminRecipients(): array
+    public function adminRecipients(): array
+    {
+        $setting = $this->db->fetchOne("SELECT `value` FROM `store_settings` WHERE `key_name` = ?", 's', [self::ALERT_EMAIL_SETTING]);
+        $chosen = self::parseAlertEmails((string) ($setting['value'] ?? ''));
+        if ($chosen !== null && $chosen !== []) {
+            return $chosen;
+        }
+        return $this->adminAccountEmails();
+    }
+
+    /**
+     * Every active admin account (the store contact email when there are none).
+     *
+     * @return list<string>
+     */
+    private function adminAccountEmails(): array
     {
         $recipients = array_column($this->db->fetchAll(
             "SELECT `email` FROM `users` WHERE `role` IN ('admin', 'super_admin') AND `status` = 'active'"
@@ -262,6 +282,28 @@ class MailService
             $recipients = [trim((string) ($contact['value'] ?? ''))];
         }
         return array_values(array_unique(array_map('strtolower', $recipients)));
+    }
+
+    /**
+     * "a@x.com, b@y.com" (commas, semicolons or spaces between) as a tidy list: lower case,
+     * no repeats. [] when empty, null when an address is not valid or there are too many.
+     *
+     * @return list<string>|null
+     */
+    public static function parseAlertEmails(string $value): ?array
+    {
+        $parts = preg_split('/[\s,;]+/', strtolower(trim($value)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $emails = [];
+        foreach ($parts as $email) {
+            if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                return null;
+            }
+            $emails[$email] = true;
+        }
+        if (count($emails) > self::MAX_ALERT_EMAILS) {
+            return null;
+        }
+        return array_keys($emails);
     }
 
     public function sendShipmentTracking(array $order, array $shipment): bool
@@ -406,7 +448,10 @@ class MailService
     {
         $data = ['admin_name' => $adminName, 'ip' => $ip, 'at' => date('Y-m-d H:i:s'), 'removed' => $removed];
         $queued = 0;
-        foreach ($this->adminRecipients() as $email) {
+        // A security notice: every admin account hears about it even when alerts are sent
+        // elsewhere, so nobody can hide a clean-up by changing "Send admin alerts to".
+        $recipients = array_values(array_unique(array_merge($this->adminAccountEmails(), $this->adminRecipients())));
+        foreach ($recipients as $email) {
             if ($this->queue($email, 'data_cleanup_done', $data, null)) {
                 $queued++;
             }
@@ -425,12 +470,17 @@ class MailService
      * $dedupKey (optional): the same key is never queued twice, so sending the same newsletter
      * again (a retry after a timeout, a double click) does not email anyone a second time.
      */
-    public function queueBroadcast(string $email, string $subject, string $content, string $unsubscribeUrl, ?string $dedupKey = null): void
+    /**
+     * @param bool $asCustomer The address is on the list because it has a customer account
+     *                         (not a newsletter sign-up), which the footer says.
+     */
+    public function queueBroadcast(string $email, string $subject, string $content, string $unsubscribeUrl, ?string $dedupKey = null, bool $asCustomer = false): void
     {
         $this->queue($email, 'marketing_broadcast', [
             'subject' => $subject,
             'content' => $content,
             'unsubscribe_url' => $unsubscribeUrl,
+            'reason' => $asCustomer ? 'customer' : 'subscriber',
         ], $dedupKey, false);
     }
 

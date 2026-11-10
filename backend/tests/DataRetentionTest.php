@@ -425,4 +425,20 @@ $t->ok('the problem is in the email', str_contains((string) ($alertRow['payload'
 $mail->sendStorageAlertToAdmins($report);
 $t->check('not sent twice in the same week', 1, (int) $t->scalar("SELECT COUNT(*) FROM `email_outbox` WHERE `template` = 'storage_alert' AND `recipient_email` = ?", 's', [strtolower($admin['email'])]));
 
+// -----------------------------------------------------------------------------
+$t->section('A removed customer\'s never-paid order when that line is unticked');
+// An inactive guest with one finished order and one cancelled order that was never paid.
+$mixed = $t->uniq('ret-mixed') . '@example.test';
+$mixedDone = $order($mixed, 'delivered', 130);
+$mixedUnpaid = $order($mixed, 'cancelled', 125);
+$t->sql("DELETE FROM `payments` WHERE `order_id` = ?", 'i', [$mixedUnpaid]);
+$t->sql("UPDATE `orders` SET `payment_status` = 'pending', `updated_at` = `updated_at` WHERE `id` = ?", 'i', [$mixedUnpaid]);
+$setting('retention_customer_days', '90');
+$asOf = $now();
+$all = $cleanup->snapshot($asOf);
+$t->ok('listed as never paid', in_array((string) $mixedUnpaid, $all['ids']['unpaid_cancelled_orders'] ?? [], true));
+$t->ok('all lines ticked: deleted as never paid, so not anonymised as well', !in_array((string) $mixedUnpaid, $all['ids']['inactive_customer_orders'] ?? [], true) && in_array((string) $mixedDone, $all['ids']['inactive_customer_orders'] ?? [], true));
+$kept = $cleanup->snapshot($asOf, DatabaseCleanup::selection(['unpaid_cancelled_orders']));
+$t->ok('never-paid line unticked: the order stays, so it is anonymised with the customer', in_array((string) $mixedUnpaid, $kept['ids']['inactive_customer_orders'] ?? [], true));
+
 exit($t->finish());

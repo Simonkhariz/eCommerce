@@ -79,7 +79,7 @@ $db->transaction(function (Database $db) use ($uuid, $email, $passwordHash, $nam
     // Insert administrator user and capture generated ID
     $adminId = (int) $db->insert(
         "INSERT INTO `users` (`uuid`, `email`, `password_hash`, `full_name`, `role`, `status`, `email_verified_at`)
-         VALUES (?, ?, ?, ?, 'admin', 'active', NOW())",
+         VALUES (?, ?, ?, ?, 'super_admin', 'active', NOW())",
         'ssss',
         [$uuid, $email, $passwordHash, $name]
     );

@@ -75,16 +75,13 @@ final class AdminDevController
         Response::success(['on' => true] + $this->details(), 'Saved.');
     }
 
-    private function checkPassword(int $adminId, string $password): void
+    private function checkPassword(int $adminId, #[\SensitiveParameter] string $password): void
     {
-        RateLimiter::guard('dev_mode_password', (string) $adminId, self::PASSWORD_ATTEMPTS, self::PASSWORD_WINDOW, 'Too many wrong passwords. Wait 15 minutes and try again.');
-        $user = Database::getInstance()->fetchOne('SELECT `password_hash` FROM `users` WHERE `id` = ?', 'i', [$adminId]);
-        if ($user === null || empty($user['password_hash']) || !password_verify($password, (string) $user['password_hash'])) {
-            RateLimiter::hit('dev_mode_password', (string) $adminId, self::PASSWORD_WINDOW);
+        // The same five-tries limit as every other "type your password again" check.
+        if (!AdminOperationsController::passwordConfirmed($adminId, $password)) {
             AuditService::record($adminId, 'dev_mode.password_failed', 'settings', 'dev_mode');
             Response::error('That password is not right.', 422, 'WRONG_PASSWORD', ['password' => 'That password is not right.']);
         }
-        RateLimiter::clear('dev_mode_password', (string) $adminId);
     }
 
     /** @return array{switches: list<array<string, mixed>>, fixed: list<array{name: string, state: string, why: string}>, warnings: list<string>} */

@@ -77,7 +77,7 @@ class AuditLogRepository
      */
     public function listForEntity(string $entityType, string $entityId, int $limit = 20): array
     {
-        $sql = "SELECT a.id, a.admin_id, u.full_name AS admin_name, u.email AS admin_email,
+        $sql = "SELECT a.id, a.admin_id, COALESCE(u.full_name, a.admin_label) AS admin_name, u.email AS admin_email,
                        a.action, a.entity_type, a.entity_id, a.before_state, a.after_state,
                        a.ip_address, a.created_at
                 FROM admin_audit_logs a

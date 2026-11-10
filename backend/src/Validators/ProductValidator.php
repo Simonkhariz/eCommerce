@@ -93,6 +93,10 @@ class ProductValidator
             $errors['status'] = "Status must be 'draft', 'published', or 'archived'.";
         }
 
+        if (array_key_exists('rating_start', $data) && \App\Support\ProductRatings::parse($data['rating_start']) === false) {
+            $errors['rating_start'] = 'Enter a starting rating from 1 to 5 (for example 4.5), or leave it empty.';
+        }
+
         if (!empty($data['flash_deal_ends_at']) && strtotime(str_replace('T', ' ', Input::text($data['flash_deal_ends_at']))) === false) {
             $errors['flash_deal_ends_at'] = 'Enter a valid end date and time for the flash deal.';
         }

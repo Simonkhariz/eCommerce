@@ -61,6 +61,9 @@ class AdminOrderController
         } elseif ($status === 'payment_claimed') {
             // The customer tapped "Mark as paid" for a WhatsApp transfer; the admin has not confirmed it yet.
             $where[] = "o.order_status = 'pending_payment' AND o.customer_marked_paid_at IS NOT NULL";
+        } elseif ($status === 'to_ship') {
+            // The shipping queue: everything paid for and not yet handed to a carrier.
+            $where[] = "o.order_status IN ('paid', 'processing')";
         } elseif ($status !== '' && $status !== 'all') {
             $where[] = "o.order_status = ?";
             $params[] = $status;
@@ -156,7 +159,7 @@ class AdminOrderController
     private function withAuditLogs(array $orderSnapshot): array
     {
         $auditLogs = $this->db->fetchAll(
-            "SELECT a.id, a.admin_id, a.action, a.before_state, a.after_state, a.ip_address, a.created_at, u.full_name as admin_name, u.email as admin_email
+            "SELECT a.id, a.admin_id, a.action, a.before_state, a.after_state, a.ip_address, a.created_at, COALESCE(u.full_name, a.admin_label) as admin_name, u.email as admin_email
              FROM `admin_audit_logs` a
              LEFT JOIN `users` u ON u.id = a.admin_id
              WHERE a.entity_type = 'order' AND a.entity_id = ?

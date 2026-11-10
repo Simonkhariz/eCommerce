@@ -26,9 +26,11 @@ class UserRepository
     {
         $sql = "SELECT id, uuid, email, password_hash, full_name, phone, role, status, email_verified_at, created_at, updated_at
                 FROM `users`
-                WHERE LOWER(`email`) = LOWER(?)
+                WHERE `email` = ?
                 LIMIT 1";
-        return $this->db->fetchOne($sql, 's', [trim($email)]);
+        // Plain `=` so the unique email index is used: the column's collation (utf8mb4_unicode_ci)
+        // already ignores case, which is what LOWER() on both sides did, without the table scan.
+        return $this->db->fetchOne($sql, 's', [strtolower(trim($email))]);
     }
 
     /**

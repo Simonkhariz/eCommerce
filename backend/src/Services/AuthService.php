@@ -117,7 +117,7 @@ class AuthService
 
             $createdAdminId = (int) $db->insert(
                 "INSERT INTO `users` (`uuid`, `email`, `password_hash`, `full_name`, `role`, `status`, `email_verified_at`)
-                 VALUES (UUID(), ?, ?, ?, 'admin', 'active', NOW())",
+                 VALUES (UUID(), ?, ?, ?, 'super_admin', 'active', NOW())",
                 'sss',
                 [$email, $passwordHash, $name]
             );
@@ -373,9 +373,11 @@ class AuthService
 
         // Orders placed as a guest with this (verified) email now belong to the account, so they
         // appear under "My orders". Unverified emails never claim orders.
+        // Plain `=`: the column's collation already ignores case, and LOWER() would stop MySQL
+        // using idx_orders_email (every guest order was scanned on each sign-in).
         if ($user['role'] === 'customer' && !empty($user['email_verified_at'])) {
             $this->db->execute(
-                "UPDATE `orders` SET `user_id` = ? WHERE `user_id` IS NULL AND LOWER(`guest_email`) = ?",
+                "UPDATE `orders` SET `user_id` = ? WHERE `user_id` IS NULL AND `guest_email` = ?",
                 'is',
                 [(int) $user['id'], strtolower((string) $user['email'])]
             );

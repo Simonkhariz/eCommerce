@@ -480,8 +480,11 @@ final class MailTemplates
             $htmlBody .= '<p style="margin:0 0 14px">' . nl2br($this->e($para)) . '</p>';
         }
 
+        $why = ($p['reason'] ?? '') === 'customer'
+            ? 'you have an account with ' . $this->e($this->store['name'])
+            : 'you subscribed to the ' . $this->e($this->store['name']) . ' newsletter';
         $footer = $unsubscribe !== ''
-            ? '<p style="margin:16px 0 0;font-size:12px;color:#666666">You are receiving this because you subscribed to the ' . $this->e($this->store['name']) . ' newsletter. <a href="' . $this->e($unsubscribe) . '" style="color:#666666">Unsubscribe</a></p>'
+            ? '<p style="margin:16px 0 0;font-size:12px;color:#666666">You are receiving this because ' . $why . '. <a href="' . $this->e($unsubscribe) . '" style="color:#666666">Unsubscribe</a></p>'
             : '';
 
         $html = $this->layout($subject, $htmlBody . $this->button($this->frontendUrl . '/category', 'Visit the store') . $footer);

@@ -184,12 +184,14 @@ final class DatabaseCleanup
                 "SELECT u.`id` AS k FROM `users` u WHERE u.`role` = 'customer' AND u.`email` IN ({in}) ORDER BY u.`id`",
                 $emails
             );
-            // Orders removed as never-paid are not anonymised as well.
+            // Orders removed as never-paid are not anonymised as well. With that line unticked they
+            // stay, so they are anonymised here: a removed customer's details are left on no order.
+            $removedAsUnpaid = $only === null || in_array('unpaid_cancelled_orders', $only, true) ? $ids['unpaid_cancelled_orders'] : [];
             $ids['inactive_customer_orders'] = array_values(array_diff($this->columnForEmails(
                 "SELECT o.`id` AS k FROM `orders` o LEFT JOIN `users` u ON u.`id` = o.`user_id`
                  WHERE o.`personal_data_removed_at` IS NULL AND (o.`guest_email` IN ({in}) OR u.`email` IN ({in})) ORDER BY o.`created_at`",
                 $emails
-            ), $ids['unpaid_cancelled_orders']));
+            ), $removedAsUnpaid));
             // Their copies of sent emails go too, whatever their age.
             $ids['old_emails'] = array_values(array_unique(array_merge($ids['old_emails'], $this->columnForEmails(
                 "SELECT e.`id` AS k FROM `email_outbox` e WHERE e.`status` IN ('sent', 'failed') AND e.`recipient_email` IN ({in})",
@@ -348,6 +350,13 @@ final class DatabaseCleanup
             foreach (array_chunk($ids, self::CHUNK) as $chunk) {
                 $in = implode(', ', array_fill(0, count($chunk), '?'));
                 $this->db->executeUpdate("UPDATE `reviews` SET `author_email` = NULL WHERE `author_email` IN ({$in})", str_repeat('s', count($chunk)), $chunk);
+                // On the newsletter list only because of the account that is being removed (an
+                // unsubscribe is kept until its own retention rule, as for everyone else).
+                $this->db->execute(
+                    "DELETE FROM `newsletter_subscribers` WHERE `source` = 'registered_customer' AND `status` = 'active' AND `email` IN ({$in})",
+                    str_repeat('s', count($chunk)),
+                    $chunk
+                );
             }
             return count($ids);
         }
@@ -383,7 +392,10 @@ final class DatabaseCleanup
             'abandoned_guest_carts' => ["DELETE FROM `carts` WHERE `user_id` IS NULL AND `id` IN ({in})"],
             'old_emails' => ["DELETE FROM `email_outbox` WHERE `status` IN ('sent', 'failed') AND `id` IN ({in})"],
             'old_gateway_notifications' => ["DELETE FROM `payment_webhook_events` WHERE `id` IN ({in})"],
-            'unsubscribed_newsletter_emails' => ["DELETE FROM `newsletter_subscribers` WHERE `status` = 'unsubscribed' AND `id` IN ({in})"],
+            // Kept while the email has an account: registered customers get the newsletter unless
+            // this row says they unsubscribed, so removing it would sign them back up.
+            'unsubscribed_newsletter_emails' => ["DELETE FROM `newsletter_subscribers` WHERE `status` = 'unsubscribed' AND `id` IN ({in})
+                                                  AND NOT EXISTS (SELECT 1 FROM `users` u WHERE u.`email` = `newsletter_subscribers`.`email`)"],
             'old_admin_activity' => ["DELETE FROM `admin_audit_logs` WHERE `id` IN ({in})"],
             'old_stock_history' => ["DELETE FROM `inventory_logs` WHERE `id` IN ({in})"],
             'expired_sessions' => ["DELETE FROM `sessions` WHERE `id` IN ({in})"],
@@ -456,6 +468,7 @@ final class DatabaseCleanup
             $rules['unsubscribed_newsletter_emails'] = [
                 'ids' => "SELECT n.`id` AS k FROM `newsletter_subscribers` n
                           WHERE n.`status` = 'unsubscribed' AND COALESCE(n.`unsubscribed_at`, n.`created_at`) < DATE_SUB(?, INTERVAL ? DAY)
+                            AND NOT EXISTS (SELECT 1 FROM `users` u WHERE u.`email` = n.`email`)
                           ORDER BY n.`id`",
                 'types' => 'si',
                 'params' => $before($s['retention_customer_days']),
@@ -558,7 +571,7 @@ final class DatabaseCleanup
                 'columns' => [$col('email', 'Email'), $col('subscribed_at', 'Subscribed', 'date'), $col('unsubscribed_at', 'Unsubscribed', 'date')],
             ],
             'old_admin_activity' => [
-                'select' => "SELECT a.`id` AS k, a.`created_at`, COALESCE(u.`full_name`, 'System') AS admin, a.`action`,
+                'select' => "SELECT a.`id` AS k, a.`created_at`, COALESCE(u.`full_name`, a.`admin_label`, 'System') AS admin, a.`action`,
                                     TRIM(CONCAT(a.`entity_type`, ' ', COALESCE(a.`entity_id`, ''))) AS entity
                              FROM `admin_audit_logs` a LEFT JOIN `users` u ON u.`id` = a.`admin_id`",
                 'key' => 'a.`id`',
