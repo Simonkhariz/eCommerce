@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Lock } from 'lucide-react';
 import { apiPeekSession, apiGetSetupStatus, apiLogin, apiLogout } from '@/lib/api-client';
+import { clearQueryCache } from '@/lib/query-client';
 import { isAdminRole, safeAdminNext } from '@/components/admin/AdminAuthGate';
 import { Button, Field, LoadingState, Notice, TextInput } from '@/components/admin/ui';
 
@@ -61,6 +62,8 @@ function AdminLoginForm() {
         return;
       }
       setPassword('');
+      // A new sign-in starts clean: no screens cached for whoever used this tab before.
+      clearQueryCache();
       router.replace(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed. Please check your details and try again.');

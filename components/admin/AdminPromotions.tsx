@@ -30,6 +30,7 @@ import {
   redirectIfSignedOut,
   useAdminData,
   useConfirm,
+  useDiscardGuard,
   useToast,
   useUrlFilters,
 } from '@/components/admin/ui';
@@ -92,7 +93,7 @@ export function AdminPromotions() {
   const confirm = useConfirm();
   const [filters, setFilters] = useUrlFilters({ page: '1' });
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
-  const { data, loading, error, reload } = useAdminData(() => adminGetPromotions({ page, per_page: 20 }), [page]);
+  const { data, loading, error, reload, mutate } = useAdminData('AdminPromotions', () => adminGetPromotions({ page, per_page: 20 }), [page]);
   const [editing, setEditing] = useState<Promotion | 'new' | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
@@ -117,9 +118,12 @@ export function AdminPromotions() {
   const toggleActive = async (p: Promotion) => {
     setBusyId(p.id);
     try {
-      await adminSavePromotion(p.id, toInput(p, { is_active: !p.is_active }));
+      // Shown at once; the list is re-read from the server afterwards.
+      await mutate(
+        (d) => ({ ...d, items: d.items.map((x) => (x.id === p.id ? { ...x, is_active: !p.is_active } : x)) }),
+        () => adminSavePromotion(p.id, toInput(p, { is_active: !p.is_active }))
+      );
       toast.success(p.is_active ? `${p.code} paused.` : `${p.code} switched on.`);
-      reload();
     } catch (err) {
       if (redirectIfSignedOut(err)) return;
       toast.error(errorMessage(err, 'Could not update this code.'));
@@ -141,9 +145,14 @@ export function AdminPromotions() {
     if (!ok) return;
     setBusyId(p.id);
     try {
-      const res = await adminDeletePromotion(p.id);
+      const res = await mutate(
+        (d) =>
+          used
+            ? { ...d, items: d.items.map((x) => (x.id === p.id ? { ...x, is_active: false } : x)) }
+            : { ...d, items: d.items.filter((x) => x.id !== p.id) },
+        () => adminDeletePromotion(p.id)
+      );
       toast.success(res.message || 'Promotion deleted.');
-      reload();
     } catch (err) {
       if (redirectIfSignedOut(err)) return;
       toast.error(errorMessage(err, 'Could not delete this code.'));
@@ -218,7 +227,7 @@ export function AdminPromotions() {
                         <Button size="sm" variant="ghost" disabled={busyId === p.id} onClick={() => setEditing(p)}>
                           Edit
                         </Button>
-                        <Button size="sm" loading={busyId === p.id} onClick={() => toggleActive(p)}>
+                        <Button size="sm" disabled={busyId === p.id} onClick={() => toggleActive(p)}>
                           {p.is_active ? 'Pause' : 'Switch on'}
                         </Button>
                         <Button size="sm" variant="ghost" className="text-red-700" disabled={busyId === p.id} onClick={() => remove(p)}>
@@ -250,6 +259,7 @@ export function AdminPromotions() {
 function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion | 'new' | null; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const guardedClose = useDiscardGuard(!!promotion, form, onClose);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const existing = promotion && promotion !== 'new' ? promotion : null;
@@ -339,13 +349,13 @@ function PromotionModal({ promotion, onClose, onSaved }: { promotion: Promotion 
   return (
     <Modal
       open={!!promotion}
-      onClose={onClose}
+      onClose={guardedClose}
       busy={saving}
       persistent
       title={existing ? `Edit ${existing.code}` : 'New promo code'}
       footer={
         <>
-          <Button onClick={onClose} disabled={saving}>
+          <Button onClick={guardedClose} disabled={saving}>
             Cancel
           </Button>
           <Button type="submit" form="promotion-form" variant="primary" loading={saving}>

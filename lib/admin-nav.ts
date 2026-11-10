@@ -101,7 +101,9 @@ export function findAdminNav(pathname: string): { section: string; label: string
     for (const item of section.items) {
       for (const link of [item, ...(item.children ?? [])]) {
         const matches = link.href === '/admin' ? pathname === '/admin' : pathname === link.href || pathname.startsWith(`${link.href}/`);
-        if (matches && (!best || link.href.length > best.href.length)) {
+        // ">=": a group shares its address with its first page ("Catalogue & stock" and
+        // "Products"); the page, listed after it, is the one to name.
+        if (matches && (!best || link.href.length >= best.href.length)) {
           best = { section: section.title, label: link.label, href: link.href };
         }
       }

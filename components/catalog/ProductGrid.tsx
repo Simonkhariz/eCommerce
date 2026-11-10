@@ -2,7 +2,7 @@ import React from 'react';
 import { Product, FilterState } from '@/types';
 import { ProductCard } from '@/components/ui/ProductCard';
 import { formatPrice } from '@/lib/currency';
-import { catalogShowingLabel, hasActiveFilters } from '@/lib/catalog-query';
+import { catalogShowingLabel, EMPTY_FILTERS, hasActiveFilters } from '@/lib/catalog-query';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   SlidersHorizontalIcon,
@@ -72,11 +72,14 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
 }) => {
   const currentPage = Math.min(filters.page, Math.max(1, totalPages));
   const active = hasActiveFilters(filters);
+  // For a search that found nothing: the same search with every filter cleared.
+  const searchOnlyFilters = { ...EMPTY_FILTERS, sortBy: filters.sortBy };
+  const otherFiltersActive = hasActiveFilters({ ...filters, searchQuery: '' });
   // An address past the last page (?page=99): the products exist, just not on this page.
   const pastLastPage = !loading && !error && products.length === 0 && totalCount > 0;
 
   return (
-    <div className="flex-1 min-w-0">
+    <div className="w-full flex-1 min-w-0">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="font-integral text-2xl sm:text-3xl text-black capitalize">{categoryTitle}</h1>
@@ -199,7 +202,40 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         </div>
       )}
 
-      {!loading && !error && products.length === 0 && !pastLastPage && (
+      {!loading && !error && products.length === 0 && !pastLastPage && filters.searchQuery.trim() !== '' && (
+        // A search that found nothing gets its own words: it is about the search, not the filters.
+        <div className="bg-neutral-50 rounded-3xl p-8 sm:p-12 text-center my-8">
+          <h2 className="font-bold text-lg text-black mb-2 break-words">No results for &ldquo;{filters.searchQuery.trim()}&rdquo;</h2>
+          <p className="text-sm text-neutral-700 max-w-sm mx-auto mb-6">
+            Check the spelling, or try a shorter or more general word (for example &ldquo;shirt&rdquo; instead of &ldquo;blue cotton shirt&rdquo;).
+            {otherFiltersActive && ' Your filters are also narrowing the search.'}
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            {otherFiltersActive && (
+              <button
+                type="button"
+                onClick={() => onFilterChange({ ...searchOnlyFilters, searchQuery: filters.searchQuery })}
+                className="bg-black text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-neutral-800"
+              >
+                Search without filters
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onReset}
+              className={
+                otherFiltersActive
+                  ? 'border border-neutral-300 text-black px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-neutral-100'
+                  : 'bg-black text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-neutral-800'
+              }
+            >
+              Browse all products
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!loading && !error && products.length === 0 && !pastLastPage && filters.searchQuery.trim() === '' && (
         <div className="bg-neutral-50 rounded-3xl p-12 text-center my-8">
           <h2 className="font-bold text-lg text-black mb-2">No matching products</h2>
           <p className="text-sm text-neutral-700 max-w-sm mx-auto mb-6">

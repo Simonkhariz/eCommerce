@@ -49,7 +49,9 @@ export function ManualPaymentModal({
     setSaving(true);
     try {
       const updated = await adminConfirmPayment(order.order_number, { reference: reference.trim(), note: note.trim() || undefined });
-      toast.success(late ? 'Late payment recorded. The order stays cancelled: refund the customer or mark it as resolved.' : 'Payment recorded. The order is now paid.');
+      // The order may have expired while this window was open: the answer says what happened.
+      const keptCancelled = late || updated?.order_status === 'cancelled';
+      toast.success(keptCancelled ? 'Late payment recorded. The order stays cancelled: refund the customer or mark it as resolved.' : 'Payment recorded. The order is now paid.');
       setReference('');
       setNote('');
       setError(undefined);

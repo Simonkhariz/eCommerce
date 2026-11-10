@@ -81,7 +81,7 @@ export function ShareProduct({ name, slug, price }: { name: string; slug: string
       </button>
 
       {open && (
-        <div role="menu" aria-label={`Share ${name}`} className="absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-neutral-200 bg-white p-1.5 shadow-xl">
+        <div role="menu" aria-label={`Share ${name}`} className="absolute right-0 top-full z-[35] mt-2 w-56 rounded-2xl border border-neutral-200 bg-white p-1.5 shadow-xl">
           <button
             type="button"
             role="menuitem"

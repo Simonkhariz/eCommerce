@@ -83,9 +83,11 @@ export function OrderManagement() {
   const [exporting, setExporting] = useState(false);
 
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
-  const { data, loading, error, reload } = useAdminData(
+  const { data, loading, error, reload } = useAdminData('OrderManagement',
     () => adminGetOrders({ status: filters.status, search: filters.search, page, per_page: 20 }),
-    [filters.status, filters.search, page]
+    [filters.status, filters.search, page],
+    // New orders appear by themselves, like the bell's counts.
+    { refreshEvery: 60_000 }
   );
 
   const exportCsv = async () => {
@@ -147,7 +149,7 @@ export function OrderManagement() {
             filters.search || filters.status !== 'all' ? 'Try a different search or status.' : 'Orders appear here as soon as customers check out.'
           }
         >
-          <Table minWidth={1060}>
+          <Table minWidth={980}>
             <thead>
               <tr>
                 <th scope="col">Order</th>
@@ -188,15 +190,18 @@ export function OrderManagement() {
                         {o.order_number}
                       </Link>
                       {o.requires_attention && (
-                        <span className="mt-1 flex max-w-[190px] items-start gap-1 text-xs font-medium text-red-700">
-                          <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-                          <span>Needs attention{o.attention_reason ? `: ${o.attention_reason}` : ''}</span>
+                        <span
+                          className="mt-1 flex max-w-[220px] items-center gap-1 text-xs font-medium text-red-700"
+                          title={o.attention_reason ? `Needs attention: ${o.attention_reason}` : undefined}
+                        >
+                          <AlertTriangle className="size-3 shrink-0" aria-hidden="true" />
+                          <span className="truncate">Needs attention{o.attention_reason ? `: ${o.attention_reason}` : ''}</span>
                         </span>
                       )}
                     </td>
                     <td>
                       <span className="block text-[#111827]">{name || '—'}</span>
-                      <span className="block max-w-[200px] truncate text-xs text-[#6b7280]" title={o.customer_email || o.guest_email || undefined}>
+                      <span className="block max-w-[180px] truncate text-xs text-[#6b7280]" title={o.customer_email || o.guest_email || undefined}>
                         {o.customer_email || o.guest_email || ''}
                       </span>
                     </td>

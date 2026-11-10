@@ -48,7 +48,7 @@ import { ManualPaymentModal } from '@/components/admin/ManualPaymentModal';
 /** Simple status changes (no extra details needed), with the explanation shown before confirming. */
 const STATUS_CHANGE_HELP: Partial<Record<OrderStatus, string>> = {
   processing: 'Use this once you start packing the order. From "Refund pending" it declines the refund request, and the order can then be shipped. The customer sees "Processing".',
-  completed: 'Close the order once delivery is settled. No further changes are expected.',
+  completed: 'Close the order once delivery is settled. No further changes are expected. From "Refund pending" it declines the refund request: no money moves.',
   returned: 'Use this when the parcel comes back to the store. You can then record a refund if one is due.',
   refund_pending: 'Marks the order as awaiting a refund. Record the refund on the Refunds page once the money is returned.',
   delivered: 'The refund request is declined: the order goes back to "Delivered". No money moves.',
@@ -57,7 +57,7 @@ const STATUS_CHANGE_HELP: Partial<Record<OrderStatus, string>> = {
 export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
   const toast = useToast();
   const confirm = useConfirm();
-  const { data: order, setData, loading, error, reload } = useAdminData(() => adminGetOrder(orderNumber), [orderNumber]);
+  const { data: order, setData, loading, error, reload } = useAdminData('AdminOrderDetail', () => adminGetOrder(orderNumber), [orderNumber]);
 
   const [shipOpen, setShipOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -67,7 +67,7 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
 
   const notFound = error && !order && /not found/i.test(error);
 
-  if (loading && !order) return <LoadingState label="Loading order…" />;
+  if (loading && !order) return <LoadingState label="Loading order…" variant="detail" />;
   if (notFound) {
     return (
       <EmptyState

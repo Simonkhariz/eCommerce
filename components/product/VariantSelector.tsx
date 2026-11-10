@@ -2,7 +2,7 @@
 
 import React, { useId } from 'react';
 import { ProductColor } from '@/types';
-import type { OptionState } from '@/lib/variants';
+import { visibleSizes, type OptionState } from '@/lib/variants';
 import { useHydrated } from '@/lib/use-hydrated';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
@@ -83,6 +83,7 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
   // Unique per selector: the product page and a quick-add panel can both be on screen.
   const uid = useId();
   const ready = useHydrated();
+  const shownSizes = visibleSizes(sizes, sizeStates);
   return (
     <div className="space-y-6">
       {/* 1. Colour (radio group: arrow keys move and select) */}
@@ -134,53 +135,46 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
         </div>
       )}
 
-      {/* 2. Size (radio group; sizes not made in this colour are skipped) */}
+      {/* 2. Size (radio group; only sizes in stock in this colour are shown) */}
       {sizes.length > 0 && (
         <div className="pb-6 border-b border-neutral-200">
           <p id={`${uid}-size`} className="text-xs font-bold text-neutral-600 uppercase tracking-wider block mb-3">
-            Choose Size: <span className="text-black font-bold normal-case">{selectedSize ?? '—'}</span>
+            Choose Size: <span className="text-black font-bold normal-case">{selectedSize && shownSizes.includes(selectedSize) ? selectedSize : '—'}</span>
           </p>
-          <div role="radiogroup" aria-labelledby={`${uid}-size`} className="flex flex-wrap gap-2.5 sm:gap-3">
-            {sizes.map((size, index) => {
-              const state = sizeStates[size] ?? 'unavailable';
-              const isSelected = selectedSize === size;
-              const unavailable = state === 'unavailable';
-              const firstSelectable = sizes.findIndex((x) => (sizeStates[x] ?? 'unavailable') !== 'unavailable');
-              const focusable = isSelected || (!sizes.some((x) => x === selectedSize) && index === firstSelectable);
-              return (
-                <button
-                  key={size}
-                  type="button"
-                  role="radio"
-                  aria-checked={isSelected}
-                  aria-disabled={unavailable || undefined}
-                  tabIndex={focusable && !unavailable ? 0 : -1}
-                  onClick={() => {
-                    if (!unavailable) onSelectSize(size);
-                  }}
-                  onKeyDown={(e) => {
-                    const next = nextIndex(e, index, sizes.length, (i) => (sizeStates[sizes[i]] ?? 'unavailable') !== 'unavailable');
-                    if (next === null) return;
-                    e.preventDefault();
-                    onSelectSize(sizes[next]);
-                    focusSibling(e.currentTarget, next);
-                  }}
-                  title={state === 'sold-out' ? 'Sold out' : unavailable ? 'Not available in this colour' : undefined}
-                  className={`px-6 py-3 rounded-full text-xs sm:text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 ${
-                    isSelected
-                      ? 'bg-black text-white shadow-sm'
-                      : unavailable
-                        ? 'bg-[#F0F0F0] text-neutral-500 cursor-not-allowed'
-                        : 'bg-[#F0F0F0] text-neutral-700 hover:bg-neutral-200'
-                  } ${state === 'sold-out' || unavailable ? 'line-through decoration-1' : ''}`}
-                >
-                  {size}
-                  {state === 'sold-out' && <span className="sr-only"> (sold out)</span>}
-                  {unavailable && <span className="sr-only"> (unavailable in this colour)</span>}
-                </button>
-              );
-            })}
-          </div>
+          {shownSizes.length === 0 ? (
+            <p role="status" className="text-sm font-semibold text-red-600">
+              Out of stock{colors.length > 1 ? ' in this colour' : ''}
+            </p>
+          ) : (
+            <div role="radiogroup" aria-labelledby={`${uid}-size`} className="flex flex-wrap gap-2.5 sm:gap-3">
+              {shownSizes.map((size, index) => {
+                const isSelected = selectedSize === size;
+                const focusable = isSelected || (!shownSizes.some((x) => x === selectedSize) && index === 0);
+                return (
+                  <button
+                    key={size}
+                    type="button"
+                    role="radio"
+                    aria-checked={isSelected}
+                    tabIndex={focusable ? 0 : -1}
+                    onClick={() => onSelectSize(size)}
+                    onKeyDown={(e) => {
+                      const next = nextIndex(e, index, shownSizes.length, () => true);
+                      if (next === null) return;
+                      e.preventDefault();
+                      onSelectSize(shownSizes[next]);
+                      focusSibling(e.currentTarget, next);
+                    }}
+                    className={`px-6 py-3 rounded-full text-xs sm:text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 ${
+                      isSelected ? 'bg-black text-white shadow-sm' : 'bg-[#F0F0F0] text-neutral-700 hover:bg-neutral-200'
+                    }`}
+                  >
+                    {size}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -193,8 +187,8 @@ export const VariantSelector: React.FC<VariantSelectorProps> = ({
         </p>
       )}
 
-      {/* 3. Quantity Stepper & Desktop Action CTAs */}
-      <div className="space-y-3 pt-2">
+      {/* 3. Quantity Stepper & Desktop Action CTAs (data-main-purchase: the phone bar hides while this shows) */}
+      <div data-main-purchase className="space-y-3 pt-2">
         <div className="flex items-center gap-3 sm:gap-4">
           <div className="flex items-center bg-[#F0F0F0] rounded-full p-1.5 gap-1 shrink-0">
             <button

@@ -24,8 +24,14 @@ export default function CartPage() {
 
   const handleCheckout = async () => {
     setIsCheckingOut(true);
-    await revalidateCart();
+    const changed = await revalidateCart();
     setIsCheckingOut(false);
+    // A price or quantity was just changed: the shopper sees the notice and the new total first,
+    // then presses checkout again (opening it now would hide the notice behind the window).
+    if (changed) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     setIsCheckoutOpen(true);
   };
 
@@ -45,7 +51,7 @@ export default function CartPage() {
 
       {isLoaded ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start">
-          <div className="lg:col-span-7">
+          <div className={items.length === 0 ? 'lg:col-span-12' : 'lg:col-span-7'}>
             <CartItemList />
             {isRevalidating && items.length > 0 && (
               <p className="mt-3 text-xs text-neutral-600" role="status">
@@ -54,9 +60,11 @@ export default function CartPage() {
             )}
           </div>
 
-          <div className="lg:col-span-5">
-            <OrderSummary onCheckout={handleCheckout} isChecking={isCheckingOut || isRevalidating} />
-          </div>
+          {items.length > 0 && (
+            <div className="lg:col-span-5">
+              <OrderSummary onCheckout={handleCheckout} isChecking={isCheckingOut || isRevalidating} />
+            </div>
+          )}
         </div>
       ) : (
         <div className="border border-neutral-200 rounded-3xl p-12 text-center bg-white space-y-3" role="status">

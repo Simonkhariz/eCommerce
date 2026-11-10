@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { Product } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { ApiError, apiGetSavedWishlist, apiSaveWishlist, getProductDetail, mapApiProductToStorefront } from '@/lib/api-client';
@@ -63,8 +64,18 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     wishlistRef.current = wishlist;
   }, [wishlist]);
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
+  // Going to another page puts the drawer away ("Buy now" or "View full details" from the quick
+  // add opened over it would otherwise leave it covering the new page).
+  const pathname = usePathname();
+  const [openedOn, setOpenedOn] = useState(pathname);
+  if (pathname !== openedOn) {
+    setOpenedOn(pathname);
+    setIsWishlistOpen(false);
+  }
   // Which identity's wishlist is loaded (guest or a customer key); stays null until the first load.
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  // Hearts tapped before the list has loaded: applied again on top of it, or the load would undo them.
+  const tappedWhileLoading = useRef<Product[]>([]);
   const serverReady = useRef(false);
   /** Counts wishlist changes, so a finished save knows whether a newer change is still unsaved. */
   const wishlistChange = useRef(0);
@@ -103,6 +114,10 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
 
       if (!cancelled) {
+        for (const product of tappedWhileLoading.current) {
+          next = next.some((p) => p.id === product.id) ? next.filter((p) => p.id !== product.id) : [...next, product];
+        }
+        tappedWhileLoading.current = [];
         setWishlist(next);
         setLoadedKey(wishlistStorageKey);
       }
@@ -162,6 +177,7 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [isWishlistOpen, isHydrated, isCustomer]);
 
   const toggleWishlist = (product: Product) => {
+    if (loadedKey === null) tappedWhileLoading.current.push(product);
     setWishlist((prev) =>
       prev.some((p) => p.id === product.id) ? prev.filter((p) => p.id !== product.id) : [...prev, product]
     );

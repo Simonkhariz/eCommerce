@@ -22,9 +22,11 @@ import {
   Panel,
   Select,
   StatusPill,
+  Switch,
   TextInput,
   redirectIfSignedOut,
   useAdminData,
+  usePendingValues,
   useToast,
 } from '@/components/admin/ui';
 import { DevModePanel } from '@/components/admin/AdminDevMode';
@@ -33,12 +35,14 @@ import { DEVELOPER } from '@/lib/developer';
 const LABELS: Record<string, string> = {
   store_name: 'Store name',
   store_contact_email: 'Support email',
+  admin_alert_email: 'Send admin alerts to',
   store_contact_phone: 'Support phone',
   store_whatsapp_phone: 'WhatsApp number',
   store_origin_address: 'Dispatch address',
   store_origin_city: 'Dispatch city',
   store_origin_state: 'Dispatch state',
   storefront_brands: 'Homepage brand strip',
+  default_product_rating: 'Starting star rating for products',
 };
 
 const INPUT_TYPES: Record<string, string> = {
@@ -47,7 +51,13 @@ const INPUT_TYPES: Record<string, string> = {
   store_whatsapp_phone: 'tel',
 };
 
+// Full-width fields. The two emails (support, admin alerts) share a row, as do the two phones.
 const WIDE_KEYS = new Set(['store_name', 'store_origin_address', 'storefront_brands']);
+
+const PLACEHOLDERS: Record<string, string> = {
+  admin_alert_email: 'e.g. owner@example.com, orders@example.com',
+  default_product_rating: 'e.g. 4.5 (empty = reviews only)',
+};
 
 function gatewayMode(mode: string) {
   if (mode === 'live') return <StatusPill label="Live" tone="green" />;
@@ -66,36 +76,32 @@ const METHODS: Array<{ id: PaymentMethodId; name: string; description: string }>
  */
 function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['readonly']; onSaved: () => Promise<void> }) {
   const toast = useToast();
-  const [busy, setBusy] = useState<PaymentMethodId | null>(null);
+  // Switches move at once and settle on the saved state once the answer and refresh are in.
+  const pending = usePendingValues<boolean | 'monnify' | 'kora'>();
+  const primary = pending.valueOf('primary', settings.primary_gateway) as 'monnify' | 'kora';
 
   const mode = (id: PaymentMethodId) =>
     id === 'kora' ? gatewayMode(settings.kora_mode) : id === 'monnify' ? gatewayMode(settings.monnify_mode) : null;
 
-  const choosePrimary = async (gateway: 'monnify' | 'kora') => {
-    setBusy(gateway);
+  const save = async (key: string, shown: boolean | 'monnify' | 'kora', change: () => Promise<unknown>, done: string) => {
+    if (pending.isPending(key)) return;
+    pending.show(key, shown);
     try {
-      await adminUpdatePaymentMethods({ primary_gateway: gateway });
-      toast.success(`"Pay now" now uses ${gateway === 'kora' ? 'Kora' : 'Monnify'}.`);
+      await change();
+      toast.success(done);
       await onSaved();
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The change could not be saved.'));
     } finally {
-      setBusy(null);
+      pending.settle(key);
     }
   };
 
-  const toggle = async (id: PaymentMethodId, on: boolean) => {
-    setBusy(id);
-    try {
-      await adminUpdatePaymentMethods({ [id]: on });
-      toast.success(`${METHODS.find((m) => m.id === id)?.name} is now ${on ? 'on' : 'off'} at checkout.`);
-      await onSaved();
-    } catch (err) {
-      if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The change could not be saved.'));
-    } finally {
-      setBusy(null);
-    }
-  };
+  const choosePrimary = (gateway: 'monnify' | 'kora') =>
+    save('primary', gateway, () => adminUpdatePaymentMethods({ primary_gateway: gateway }), `"Pay now" now uses ${gateway === 'kora' ? 'Kora' : 'Monnify'}.`);
+
+  const toggle = (id: PaymentMethodId, on: boolean) =>
+    save(id, on, () => adminUpdatePaymentMethods({ [id]: on }), `${METHODS.find((m) => m.id === id)?.name} is now ${on ? 'on' : 'off'} at checkout.`);
 
   return (
     <Panel title="Payment methods at checkout" bodyClassName="p-0">
@@ -111,11 +117,10 @@ function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['r
               key={g}
               type="button"
               role="radio"
-              aria-checked={settings.primary_gateway === g}
-              disabled={busy !== null}
-              onClick={() => settings.primary_gateway !== g && void choosePrimary(g)}
+              aria-checked={primary === g}
+              onClick={() => primary !== g && void choosePrimary(g)}
               className={`rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-60 ${
-                settings.primary_gateway === g ? 'bg-[#1f2937] text-white' : 'text-[#374151] hover:bg-[#f3f4f6]'
+                primary === g ? 'bg-[#1f2937] text-white' : 'text-[#374151] hover:bg-[#f3f4f6]'
               }`}
             >
               {g === 'kora' ? 'Kora' : 'Monnify'}
@@ -129,6 +134,7 @@ function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['r
       <ul className="divide-y divide-[#f3f4f6]">
         {METHODS.map((m) => {
           const s = settings.payment_methods[m.id];
+          const on = pending.valueOf(m.id, s.admin_on) === true;
           const labelId = `pm-${m.id}`;
           return (
             <li key={m.id} className="flex items-center justify-between gap-4 px-4 py-3">
@@ -144,22 +150,7 @@ function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['r
                   </p>
                 )}
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={s.admin_on}
-                aria-labelledby={labelId}
-                disabled={busy !== null}
-                onClick={() => toggle(m.id, !s.admin_on)}
-                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/50 disabled:opacity-60 ${
-                  s.admin_on ? 'bg-[#1f2937]' : 'bg-[#d1d5db]'
-                }`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`inline-block size-5 rounded-full bg-white shadow transition-transform ${s.admin_on ? 'translate-x-[22px]' : 'translate-x-0.5'}`}
-                />
-              </button>
+              <Switch on={on} onChange={(next) => void toggle(m.id, next)} labelledBy={labelId} />
             </li>
           );
         })}
@@ -174,7 +165,7 @@ function PaymentMethodsPanel({ settings, onSaved }: { settings: StoreSettings['r
  */
 export function AdminSettings() {
   const toast = useToast();
-  const { data, setData, loading, error, reload } = useAdminData(() => adminGetSettings(), []);
+  const { data, setData, loading, error, reload } = useAdminData('AdminSettings', () => adminGetSettings(), []);
   const [values, setValues] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -184,11 +175,28 @@ export function AdminSettings() {
     saved[s.key] = s.value ?? '';
   });
 
-  // The form starts from the saved settings each time they (re)load.
+  // The form starts from the saved settings. When they load again (this screen is shown from memory
+  // first, then checked with the server), only fields the admin has not touched follow the fresh
+  // values: what is being typed is never replaced. After a save the whole form follows the answer.
   const [valuesFor, setValuesFor] = useState<StoreSettings['editable'] | null>(null);
+  const [followAll, setFollowAll] = useState(false);
   if (data && data.editable !== valuesFor) {
+    const before: Record<string, string> = {};
+    (valuesFor ?? []).forEach((s) => {
+      before[s.key] = s.value ?? '';
+    });
+    const keepTyped = valuesFor !== null && !followAll;
     setValuesFor(data.editable);
-    setValues(saved);
+    setFollowAll(false);
+    setValues((typed) => {
+      const next = { ...saved };
+      if (keepTyped) {
+        Object.keys(typed).forEach((key) => {
+          if (key in next && typed[key] !== before[key]) next[key] = typed[key];
+        });
+      }
+      return next;
+    });
   }
 
   const changed = Object.keys(values).filter((key) => values[key] !== saved[key]);
@@ -216,6 +224,7 @@ export function AdminSettings() {
     try {
       await adminUpdateSettings(payload);
       toast.success('Settings saved.');
+      setFollowAll(true);
       reload();
     } catch (err) {
       if (redirectIfSignedOut(err)) return;
@@ -233,7 +242,7 @@ export function AdminSettings() {
     <div className="flex flex-col gap-4">
       <PageHeader title="Store settings" description="Details customers see at checkout, in emails and on receipts." />
 
-      <DataState loading={loading} error={error} onRetry={reload} hasData={!!data} empty={false}>
+      <DataState loading={loading} error={error} onRetry={reload} hasData={!!data} empty={false} skeleton="form">
         {data && ro && (
           <div className="flex flex-col gap-4">
             <Panel title="Store details" bodyClassName="p-4">
@@ -265,6 +274,7 @@ export function AdminSettings() {
                           <TextInput
                             {...p}
                             type={INPUT_TYPES[setting.key] ?? 'text'}
+                            placeholder={PLACEHOLDERS[setting.key]}
                             maxLength={255}
                             value={values[setting.key] ?? ''}
                             onChange={(e) => setValues((v) => ({ ...v, [setting.key]: e.target.value }))}
@@ -342,6 +352,10 @@ export function AdminSettings() {
                         ) : (
                           <StatusPill label="Log only (not sent)" tone="amber" />
                         ),
+                    },
+                    {
+                      label: 'Admin alerts go to',
+                      value: (ro.admin_alert_recipients ?? []).length > 0 ? (ro.admin_alert_recipients ?? []).join(', ') : 'Nobody (no address set)',
                     },
                     { label: 'Card / transfer payment window', value: `${ro.order_payment_window_minutes} minutes` },
                     { label: 'WhatsApp / manual payment window', value: `${ro.manual_payment_window_hours} hours` },

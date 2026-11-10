@@ -66,6 +66,25 @@ export const AuthModal: React.FC = () => {
 
   const tab: Tab = authModalTab as Tab;
 
+  // Closing the window forgets the password and any message, so reopening starts clean. What was
+  // typed for the name and email stays (closing by mistake should not cost the whole form).
+  const [wasOpen, setWasOpen] = useState(isAuthModalOpen);
+  if (wasOpen !== isAuthModalOpen) {
+    setWasOpen(isAuthModalOpen);
+    if (!isAuthModalOpen) {
+      setPassword('');
+      setMagicSent(false);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+    }
+  }
+
+  // An error is shown at the top of the form: bring it into view (on a short phone the shopper is
+  // down at the button when it appears).
+  useEffect(() => {
+    if (errorMessage) panelRef.current?.querySelector('[role="alert"]')?.scrollIntoView({ block: 'nearest' });
+  }, [errorMessage]);
+
   // When the tab changes, move focus to its first field (the Dialog focuses on open).
   const firstRender = useRef(true);
   useEffect(() => {
@@ -169,8 +188,9 @@ export const AuthModal: React.FC = () => {
       busy={isSubmitting}
       panelClassName="w-full max-w-md"
     >
-      <div ref={panelRef} className="relative w-full bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 sm:p-8 animate-in zoom-in-95 max-h-[92vh] overflow-y-auto">
-        <div className="flex items-center justify-between pb-4 border-b border-neutral-100 mb-6">
+      <div ref={panelRef} className="relative flex max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl animate-in zoom-in-95 sm:rounded-3xl">
+        {/* A fixed row: only the form below it scrolls (long sign-up form on a short phone). */}
+        <div className="flex shrink-0 items-center justify-between border-b border-neutral-100 py-3 pl-6 pr-4 sm:pl-8 sm:pr-6">
           <span className="font-integral text-xl font-bold tracking-tight text-black" aria-hidden="true">
             SHOP.CO
           </span>
@@ -178,12 +198,14 @@ export const AuthModal: React.FC = () => {
             type="button"
             onClick={closeAuthModal}
             disabled={isSubmitting}
-            className="p-1 text-neutral-600 hover:text-black transition-colors rounded-full disabled:opacity-50"
+            className="rounded-full p-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-black disabled:opacity-50"
             aria-label="Close sign-in"
           >
             <HugeiconsIcon icon={Cancel01Icon} size={20} aria-hidden="true" />
           </button>
         </div>
+
+        <div className="min-h-[min(32rem,70vh)] flex-1 overflow-y-auto p-6 sm:min-h-0 sm:px-8">
 
         <div role="tablist" aria-label="How do you want to sign in?" className="flex rounded-full bg-neutral-100 p-1 mb-6 text-sm font-medium" onKeyDown={onTabKeyDown}>
           {TABS.map((t) => {
@@ -379,6 +401,7 @@ export const AuthModal: React.FC = () => {
               )}
             </div>
           )}
+        </div>
         </div>
       </div>
     </Dialog>

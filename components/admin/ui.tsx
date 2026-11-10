@@ -8,10 +8,12 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Info, Loader2, RefreshCw, X } from 'lucide-react';
 import type { StatusTone } from '@/lib/order-status';
 import type { PaginationMeta } from '@/lib/admin-api';
 import { ApiError } from '@/lib/api-client';
+import { clearQueryCache } from '@/lib/query-client';
 import { createModalStack, pastEndPage, searchBoxOnUrlChange } from '@/lib/admin-logic';
 
 // =============================================================================
@@ -234,6 +236,44 @@ export function useConfirm(): ConfirmFn {
   return ctx;
 }
 
+/**
+ * A close function for an editor window that asks "Discard your changes?" first when the form is
+ * no longer as it was when the window opened (a stray click on Cancel or X must not throw away a
+ * long product form). `form` is whatever the editor is editing; it is compared as JSON. Saving
+ * closes the window directly, without going through this.
+ */
+export function useDiscardGuard(open: boolean, form: unknown, onClose: () => void): () => void {
+  const confirm = useConfirm();
+  const current = JSON.stringify(form);
+  const currentRef = useRef(current);
+  const openedWith = useRef<string | null>(null);
+  const onCloseRef = useRef(onClose);
+  useLayoutEffect(() => {
+    currentRef.current = current;
+    onCloseRef.current = onClose;
+  });
+  // The form as it stood when the window opened (it is filled in before this runs).
+  useEffect(() => {
+    openedWith.current = open ? currentRef.current : null;
+  }, [open]);
+
+  return useCallback(() => {
+    if (openedWith.current === null || openedWith.current === currentRef.current) {
+      onCloseRef.current();
+      return;
+    }
+    void confirm({
+      title: 'Discard your changes?',
+      message: 'What you changed in this form has not been saved.',
+      confirmLabel: 'Discard changes',
+      cancelLabel: 'Keep editing',
+      tone: 'danger',
+    }).then((ok) => {
+      if (ok) onCloseRef.current();
+    });
+  }, [confirm]);
+}
+
 // =============================================================================
 // Toasts
 // =============================================================================
@@ -345,6 +385,8 @@ export function AdminUiProvider({ children }: { children: React.ReactNode }) {
  */
 export function redirectIfSignedOut(err: unknown): boolean {
   if (err instanceof ApiError && err.statusCode === 401 && typeof window !== 'undefined' && navigateTo) {
+    // The session is over: whoever signs in next on this tab must not see this admin's screens.
+    clearQueryCache();
     const next = window.location.pathname + window.location.search;
     navigateTo(`/admin/login?next=${encodeURIComponent(next)}&expired=1`);
     return true;
@@ -368,9 +410,16 @@ export function useUrlFilters<K extends string>(defaults: Record<K, string>) {
   });
 
   const defaultsRef = useRef(defaults);
+  // The query this hook last asked for, until the address bar shows it: a second change made
+  // before the first one lands (search text, then a status) builds on it instead of undoing it.
+  const current = searchParams?.toString() ?? '';
+  const asked = useRef<string | null>(null);
+  useEffect(() => {
+    asked.current = null;
+  }, [current]);
   const set = useCallback(
     (changes: Partial<Record<K, string>>) => {
-      const next = new URLSearchParams(searchParams?.toString() ?? '');
+      const next = new URLSearchParams(asked.current ?? current);
       const touchesOtherThanPage = Object.keys(changes).some((k) => k !== 'page');
       Object.entries(changes).forEach(([key, value]) => {
         const v = value as string | undefined;
@@ -379,9 +428,10 @@ export function useUrlFilters<K extends string>(defaults: Record<K, string>) {
       });
       if (touchesOtherThanPage && !('page' in changes)) next.delete('page');
       const query = next.toString();
+      asked.current = query;
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     },
-    [router, pathname, searchParams]
+    [router, pathname, current]
   );
 
   return [values, set] as const;
@@ -419,15 +469,60 @@ export function useSearchBox(search: string, setFilters: (changes: { search: str
 }
 
 /**
- * Load data for a screen and reload when `deps` change. Out-of-order responses are ignored.
+ * Values shown before the server has confirmed them (switches that live outside a screen's list
+ * data). `show(key, value)` displays it at once; `settle(key)` goes back to the saved value once
+ * the save and refresh are done, or the save failed.
+ */
+export function usePendingValues<V>() {
+  const [pending, setPending] = useState<Record<string, V>>({});
+  const show = useCallback((key: string, value: V) => setPending((p) => ({ ...p, [key]: value })), []);
+  const settle = useCallback(
+    (key: string) =>
+      setPending((p) => {
+        const next = { ...p };
+        delete next[key];
+        return next;
+      }),
+    []
+  );
+  const valueOf = (key: string, saved: V): V => (key in pending ? pending[key] : saved);
+  const isPending = (key: string) => key in pending;
+  return { valueOf, isPending, show, settle };
+}
+
+/** How long a screen's last answer is kept in this tab after leaving it (shown at once on return). */
+const SCREEN_CACHE_MS = 30 * 60 * 1000;
+
+/**
+ * Load data for a screen and reload when `deps` change. `key` names the screen's data (unique
+ * per call site); with `deps` it is the cache key.
  * Returns data, loading, error and a reload() for retry buttons and after mutations.
+ *
+ * Answers are kept in the tab's query cache (TanStack Query, lib/query-client.ts): opening a
+ * screen again shows its last data at once and quietly checks with the server behind it, so
+ * there is no loading state when going back. Changing a filter or page keeps the previous list
+ * on screen (dimmed, `loading` true) until the new answer arrives.
  *
  * A list answer ({items, pagination}) that is empty only because its page is past the end moves
  * to the last page instead of showing a false "nothing here": through ?page= in the address, or
  * through `onPastEnd` for a list that keeps its page elsewhere.
  */
-export function useAdminData<T>(loader: () => Promise<T>, deps: React.DependencyList, options?: { onPastEnd?: (lastPage: number) => void }) {
+export function useAdminData<T>(
+  key: string,
+  loader: () => Promise<T>,
+  deps: React.DependencyList,
+  options?: {
+    onPastEnd?: (lastPage: number) => void;
+    /**
+     * Keep the list current by itself: checked again this often (milliseconds) while the tab is
+     * visible, and when the admin comes back to the tab. Quiet: no loading state, the rows just
+     * update. For screens where new work arrives on its own (orders, the shipping queue).
+     */
+    refreshEvery?: number;
+  }
+) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   // The latest loader, read only when a request starts (never during render).
   const loaderRef = useRef(loader);
   const onPastEndRef = useRef(options?.onPastEnd);
@@ -436,78 +531,97 @@ export function useAdminData<T>(loader: () => Promise<T>, deps: React.Dependency
     onPastEndRef.current = options?.onPastEnd;
   });
 
-  // One request per dependency set (plain values: filters, page...) and per reload().
   const depsKey = JSON.stringify(deps);
-  const [reloads, setReloads] = useState(0);
-  const [result, setResult] = useState<{ key: string | null; reloads: number; data: T | null; error: string | null }>({
-    key: null,
-    reloads: 0,
-    data: null,
-    error: null,
+  const queryKey = React.useMemo(() => ['admin-screen', key, depsKey] as const, [key, depsKey]);
+  const query = useQuery<T>({
+    queryKey,
+    queryFn: () => loaderRef.current(),
+    gcTime: SCREEN_CACHE_MS,
+    refetchInterval: options?.refreshEvery ?? false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: options?.refreshEvery ? true : undefined,
+    // Another page or filter of the same screen stays on screen until this one's answer is in.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === key ? previous : undefined),
   });
-  const waiting = useRef<Array<() => void>>([]);
+
+  // Past the end: what was on screen (or the skeleton) stays until the last page's answer.
+  const lastPage = query.data !== undefined && !query.isPlaceholderData ? pastEndPage(query.data) : null;
+  const [shown, setShown] = useState<T | undefined>(undefined);
+  if (lastPage === null && query.data !== undefined && query.data !== shown) setShown(query.data);
+  useEffect(() => {
+    if (lastPage === null) return;
+    if (onPastEndRef.current) {
+      onPastEndRef.current(lastPage);
+      return;
+    }
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('page')) {
+      if (lastPage > 1) url.searchParams.set('page', String(lastPage));
+      else url.searchParams.delete('page');
+      router.replace(url.pathname + url.search, { scroll: false });
+    }
+  }, [lastPage, router]);
 
   useEffect(() => {
-    let current = true;
-    loaderRef
-      .current()
-      .then(
-        (data) => {
-          if (!current) return;
-          // Past the end: what is on screen (or the spinner) stays until the last page's answer.
-          const lastPage = pastEndPage(data);
-          if (lastPage !== null) {
-            if (onPastEndRef.current) {
-              onPastEndRef.current(lastPage);
-              return;
-            }
-            const url = new URL(window.location.href);
-            if (url.searchParams.has('page')) {
-              if (lastPage > 1) url.searchParams.set('page', String(lastPage));
-              else url.searchParams.delete('page');
-              router.replace(url.pathname + url.search, { scroll: false });
-              return;
-            }
-          }
-          setResult({ key: depsKey, reloads, data, error: null });
-        },
-        (err) => {
-          if (redirectIfSignedOut(err) || !current) return;
-          const error = err instanceof Error ? err.message : 'Could not load this page.';
-          setResult((prev) => ({ key: depsKey, reloads, data: prev.data, error }));
-        }
-      )
-      .finally(() => {
-        if (!current) return;
-        const done = waiting.current;
-        waiting.current = [];
-        done.forEach((resolve) => resolve());
+    if (query.error) redirectIfSignedOut(query.error);
+  }, [query.error]);
+
+  // An explicit reload (retry, after a change) counts as loading until its answer is in; a
+  // quiet check behind cached data does not.
+  const [reloading, setReloading] = useState(0);
+  const refetchRef = useRef(query.refetch);
+  useLayoutEffect(() => {
+    refetchRef.current = query.refetch;
+  });
+
+  const loading = query.isPending || query.isPlaceholderData || reloading > 0 || lastPage !== null;
+  const error = !loading && query.isError ? (query.error instanceof Error ? query.error.message : 'Could not load this page.') : null;
+
+  const setData = useCallback(
+    (update: React.SetStateAction<T | null>) => {
+      queryClient.setQueryData<T>(queryKey, (prev) => {
+        const next = typeof update === 'function' ? (update as (p: T | null) => T | null)(prev ?? null) : update;
+        return next ?? undefined;
       });
-    // A newer request (filters changed, reload) makes this one's answer irrelevant.
-    return () => {
-      current = false;
-    };
-  }, [depsKey, reloads, router]);
-
-  // Loading until the answer for the current filters and reload count has arrived; the last
-  // data stays on screen meanwhile.
-  const loading = result.key !== depsKey || result.reloads !== reloads;
-
-  const setData = useCallback((update: React.SetStateAction<T | null>) => {
-    setResult((prev) => ({ ...prev, data: typeof update === 'function' ? (update as (p: T | null) => T | null)(prev.data) : update }));
-  }, []);
-
-  /** Load again (retry buttons, after changes); resolves once the new data is in. */
-  const reload = useCallback(
-    () =>
-      new Promise<void>((resolve) => {
-        waiting.current.push(resolve);
-        setReloads((n) => n + 1);
-      }),
-    []
+    },
+    [queryClient, queryKey]
   );
 
-  return { data: result.data, setData, loading, error: loading ? null : result.error, reload };
+  /** Load again (retry buttons, after changes); resolves once the new data is in. */
+  const reload = useCallback(async () => {
+    setReloading((n) => n + 1);
+    try {
+      await refetchRef.current();
+    } finally {
+      setReloading((n) => n - 1);
+    }
+  }, []);
+
+  /**
+   * Optimistic change: `update` is shown at once, then `save` runs. Afterwards the data is quietly
+   * re-read from the server (no loading state). If the save fails, the screen goes back to what it
+   * showed before and the error is thrown on for the caller's message.
+   */
+  const mutate = useCallback(
+    async <R,>(update: (current: T) => T, save: () => Promise<R>): Promise<R> => {
+      await queryClient.cancelQueries({ queryKey, exact: true });
+      const before = queryClient.getQueryData<T>(queryKey);
+      if (before !== undefined) queryClient.setQueryData<T>(queryKey, update(before));
+      try {
+        const result = await save();
+        void refetchRef.current();
+        return result;
+      } catch (err) {
+        if (before !== undefined) queryClient.setQueryData<T>(queryKey, before);
+        void refetchRef.current();
+        throw err;
+      }
+    },
+    [queryClient, queryKey]
+  );
+
+  const data = (lastPage !== null ? shown : query.data) ?? null;
+  return { data, setData, loading, error, reload, mutate };
 }
 
 // =============================================================================
@@ -529,7 +643,7 @@ export function PageHeader({
         <h1 className="text-xl font-medium tracking-tight text-[#1f2937]">{title}</h1>
         {description && <p className="mt-1 text-[13px] text-[#6b7280]">{description}</p>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
@@ -550,7 +664,7 @@ export function Panel({
   // Same card frame as the overview: a muted, hatched frame with the title in it and the
   // content on a white panel inside.
   return (
-    <section className={`relative min-w-0 overflow-clip rounded-xl bg-[#f6f6f6] p-1 shadow-[inset_0_0_0_0.8px_#e5e7eb] ${className}`}>
+    <section className={`relative flex min-w-0 flex-col overflow-clip rounded-xl bg-[#f6f6f6] p-1 shadow-[inset_0_0_0_0.8px_#e5e7eb] ${className}`}>
       <span
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-[url('/admin/card-pattern.svg')] bg-[length:1639px_560px] bg-[position:center_top] bg-no-repeat"
@@ -561,7 +675,7 @@ export function Panel({
           {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
         </div>
       )}
-      <div className={`relative overflow-hidden rounded-[10px] border-[0.8px] border-[#e5e7eb] bg-white ${bodyClassName}`}>{children}</div>
+      <div className={`relative flex-1 overflow-hidden rounded-[10px] border-[0.8px] border-[#e5e7eb] bg-white ${bodyClassName}`}>{children}</div>
     </section>
   );
 }
@@ -593,11 +707,149 @@ export function StatusPill({ label, tone }: { label: string; tone: StatusTone })
   );
 }
 
-export function LoadingState({ label = 'Loading…' }: { label?: string }) {
+/**
+ * On/off switch (role="switch"). Pass the label's id; the parent decides what a click saves.
+ * Dark mode colours: app/admin/admin-dark.css (.admin-switch).
+ */
+export function Switch({
+  on,
+  onChange,
+  labelledBy,
+  disabled = false,
+  className = '',
+}: {
+  on: boolean;
+  onChange: (next: boolean) => void;
+  labelledBy: string;
+  disabled?: boolean;
+  className?: string;
+}) {
   return (
-    <div role="status" aria-live="polite" className="flex items-center justify-center gap-2 px-4 py-12 text-[13px] text-[#6b7280]">
-      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-      {label}
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-labelledby={labelledBy}
+      disabled={disabled}
+      data-on={on || undefined}
+      onClick={() => onChange(!on)}
+      className={`admin-switch relative inline-flex h-6 w-11 shrink-0 items-center rounded-full outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/50 disabled:cursor-not-allowed disabled:opacity-60 ${
+        on ? 'bg-[#1f2937]' : 'bg-[#d1d5db]'
+      } ${className}`}
+    >
+      <span aria-hidden="true" className={`admin-switch-knob inline-block size-5 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+    </button>
+  );
+}
+
+/** A grey placeholder block that pulses while content loads. */
+export function Skeleton({ className = '' }: { className?: string }) {
+  return <span aria-hidden="true" className={`admin-skeleton block animate-pulse rounded-md bg-[#eceef1] ${className}`} />;
+}
+
+function SkeletonRows({ rows = 6 }: { rows?: number }) {
+  // Varying widths so it reads as content, not as a stripe pattern.
+  const widths = ['w-2/5', 'w-1/2', 'w-1/3', 'w-3/5', 'w-2/5', 'w-1/2', 'w-1/3', 'w-3/5'];
+  return (
+    <div className="divide-y divide-[#f3f4f6]">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 px-4 py-3.5">
+          <Skeleton className="size-9 shrink-0 rounded-lg" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className={`h-3 ${widths[i % widths.length]}`} />
+            <Skeleton className="h-2.5 w-1/4" />
+          </div>
+          <Skeleton className="hidden h-5 w-16 rounded-full sm:block" />
+          <Skeleton className="h-3 w-14" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Loading placeholder shaped like what is coming: `list` (rows of a table or panel), `page`
+ * (a whole screen: title, summary cards, panels) or `detail` (one record: title and cards).
+ * Screen readers hear `label`.
+ */
+/** The shape of the grey placeholder shown while a screen loads: it should look like what comes. */
+export type SkeletonVariant = 'list' | 'page' | 'detail' | 'form';
+
+export function LoadingState({ label = 'Loading…', variant = 'list' }: { label?: string; variant?: SkeletonVariant }) {
+  return (
+    <div role="status" aria-live="polite" aria-busy="true" className="w-full">
+      <span className="sr-only">{label}</span>
+      {variant === 'list' && <SkeletonRows />}
+      {variant === 'form' && (
+        <div className="space-y-5 p-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className={`space-y-2 ${i === 0 ? 'sm:col-span-2' : ''}`}>
+                <Skeleton className="h-3 w-28" />
+                <Skeleton className="h-9 w-full rounded-lg" />
+              </div>
+            ))}
+          </div>
+          <Skeleton className="h-9 w-28 rounded-lg" />
+        </div>
+      )}
+      {variant === 'page' && (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-48" />
+            <Skeleton className="h-3 w-72 max-w-full" />
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className="space-y-3 rounded-xl border border-[#e5e7eb] bg-white p-4">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-6 w-24" />
+                <Skeleton className="h-2.5 w-16" />
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="overflow-hidden rounded-xl border border-[#e5e7eb] bg-white lg:col-span-2">
+              <div className="p-4">
+                <Skeleton className="h-3 w-32" />
+              </div>
+              <SkeletonRows rows={5} />
+            </div>
+            <div className="space-y-3 rounded-xl border border-[#e5e7eb] bg-white p-4">
+              <Skeleton className="h-3 w-28" />
+              <Skeleton className="h-36 w-full rounded-lg" />
+            </div>
+          </div>
+        </div>
+      )}
+      {variant === 'detail' && (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-56" />
+            <Skeleton className="h-3 w-40" />
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="space-y-4 lg:col-span-2">
+              {[4, 3].map((rows, i) => (
+                <div key={i} className="overflow-hidden rounded-xl border border-[#e5e7eb] bg-white">
+                  <div className="p-4">
+                    <Skeleton className="h-3 w-28" />
+                  </div>
+                  <SkeletonRows rows={rows} />
+                </div>
+              ))}
+            </div>
+            <div className="space-y-3 rounded-xl border border-[#e5e7eb] bg-white p-4">
+              {Array.from({ length: 6 }, (_, i) => (
+                <div key={i} className="flex justify-between gap-4">
+                  <Skeleton className="h-3 w-20" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -637,6 +889,7 @@ export function DataState({
   emptyDescription,
   children,
   hasData,
+  skeleton,
 }: {
   loading: boolean;
   error: string | null;
@@ -646,12 +899,20 @@ export function DataState({
   emptyDescription?: React.ReactNode;
   /** When true, keep showing current content while a refresh runs. */
   hasData?: boolean;
+  /** The placeholder's shape while loading (rows by default; 'form' for settings-like screens). */
+  skeleton?: SkeletonVariant;
   children: React.ReactNode;
 }) {
   if (error) return <ErrorState message={error} onRetry={onRetry} />;
-  if (loading && !hasData) return <LoadingState />;
+  // An empty list kept from the previous filter is not "nothing here": the new answer is still loading.
+  if (loading && (!hasData || empty)) return <LoadingState variant={skeleton} />;
   if (empty) return <EmptyState title={emptyTitle} description={emptyDescription} />;
-  return <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>{children}</div>;
+  // While dimmed the rows may belong to the previous filter or page: they cannot be clicked.
+  return (
+    <div className={loading ? 'pointer-events-none opacity-60 transition-opacity' : 'transition-opacity'} aria-busy={loading || undefined}>
+      {children}
+    </div>
+  );
 }
 
 // =============================================================================
@@ -688,21 +949,25 @@ export function Table({ children, minWidth = 720 }: { children: React.ReactNode;
         });
       });
     };
-    // Cards whenever the table would not fit: narrower than its minimum width, or content
-    // wider than the space (a long email, an action button). The width the table needed is
-    // remembered, so it only turns back into a table once there is room for it. (Measuring
-    // right after switching is unreliable: browsers settle a table's width a frame later.)
+    // Cards on phones and narrow tablets when the table would not fit: narrower than its minimum
+    // width, or content wider than the space (a long email, an action button). From CARDS_BELOW
+    // up (a laptop, even with the sidebar open) it always stays a table and scrolls sideways if
+    // it must: a list that flips between a table and three columns of cards as filters change
+    // is harder to read than either. The width the table needed is remembered, so it only turns
+    // back into a table once there is room for it. (Measuring right after switching is
+    // unreliable: browsers settle a table's width a frame later.)
+    const CARDS_BELOW = 760;
     let stacked = false;
     let needed = minWidth;
     const layout = () => {
       const width = wrap.clientWidth;
       if (!stacked) {
-        if (width < minWidth || wrap.scrollWidth > width + 1) {
+        if (width < CARDS_BELOW && (width < minWidth || wrap.scrollWidth > width + 1)) {
           needed = Math.max(minWidth, wrap.scrollWidth);
           stacked = true;
           wrap.setAttribute('data-stacked', '');
         }
-      } else if (width >= needed) {
+      } else if (width >= needed || width >= CARDS_BELOW) {
         // Try the table again; the size observer re-checks it once it has been laid out.
         stacked = false;
         wrap.removeAttribute('data-stacked');
@@ -860,7 +1125,7 @@ export function FilterSelect({
 }) {
   const id = useId();
   return (
-    <div>
+    <div className="min-w-[calc(50%-0.25rem)] flex-1 sm:min-w-0 sm:flex-none">
       <label htmlFor={id} className="sr-only">
         {label}
       </label>
@@ -868,7 +1133,7 @@ export function FilterSelect({
         id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-9 rounded-lg border border-[#d1d5db] bg-white px-2.5 pr-8 text-[13px] text-[#111827] outline-none focus:border-[#6b7280] focus:shadow-[0_0_0_3px_rgba(156,163,175,0.25)]"
+        className="h-9 w-full rounded-lg border border-[#d1d5db] bg-white px-2.5 pr-8 text-[13px] text-[#111827] outline-none focus:border-[#6b7280] focus:shadow-[0_0_0_3px_rgba(156,163,175,0.25)] sm:w-auto"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -883,7 +1148,7 @@ export function FilterSelect({
 export function SearchInput({ value, onChange, placeholder, label }: { value: string; onChange: (v: string) => void; placeholder: string; label: string }) {
   const id = useId();
   return (
-    <div className="min-w-[200px] flex-1 sm:max-w-xs">
+    <div className="min-w-[200px] flex-1 sm:max-w-sm">
       <label htmlFor={id} className="sr-only">
         {label}
       </label>
@@ -908,7 +1173,7 @@ export function Checkbox({ label, checked, onChange, hint }: { label: string; ch
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 size-4 rounded border-[#d1d5db] accent-[#111827]"
+        className="mt-0.5 size-4 shrink-0 rounded border-[#d1d5db] accent-[#111827]"
       />
       <label htmlFor={id} className="text-[13px] text-[#1f2937]">
         {label}

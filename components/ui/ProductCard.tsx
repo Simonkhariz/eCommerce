@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import Image from '@/components/ui/StoreImage';
 import { useRouter } from 'next/navigation';
@@ -9,8 +9,7 @@ import { formatPrice } from '@/lib/currency';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { StarIcon, ShoppingBag01Icon, FavouriteIcon } from '@hugeicons/core-free-icons';
 import { useWishlist } from '@/context/WishlistContext';
-import { useCart } from '@/context/CartContext';
-import { getProductDetail, mapApiProductToStorefront } from '@/lib/api-client';
+import { useQuickAdd } from '@/lib/use-quick-add';
 import { QuickAddDialog } from '@/components/product/QuickAddDialog';
 
 interface ProductCardProps {
@@ -35,36 +34,22 @@ const PHOTO_SIZES = {
 export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = false, columns = 4 }) => {
   const router = useRouter();
   const { toggleWishlist, isInWishlist } = useWishlist();
-  const { addToCart } = useCart();
   const isFavorited = isInWishlist(product.id);
   const href = `/products/${product.slug}`;
   const soldOut = product.inStock === false;
-  const [checking, setChecking] = useState(false);
-  const [quickAdd, setQuickAdd] = useState<Product | null>(null);
+  const { add, warm, busy: checking, choose: quickAdd, closeChoose } = useQuickAdd(product);
 
-  const handleAdd = async () => {
+  const handleAdd = () => {
     if (soldOut) {
       router.push(href);
       return;
     }
-    setChecking(true);
-    try {
-      // The options and live stock come with the product's details (the list only has names).
-      const detail = mapApiProductToStorefront(await getProductDetail(product.slug));
-      const inStock = (detail.variants ?? []).filter((v) => v.stock > 0);
-      if (inStock.length === 1) addToCart(detail, inStock[0], 1);
-      else if (inStock.length > 1) setQuickAdd(detail);
-      else router.push(href); // sold out since the list loaded: the product page says so
-    } catch {
-      router.push(href);
-    } finally {
-      setChecking(false);
-    }
+    void add();
   };
 
   return (
     <article className="group relative flex flex-col h-full bg-white rounded-2xl overflow-hidden">
-      <div className="relative aspect-square w-full bg-[#F0EEED] rounded-2xl overflow-hidden mb-3">
+      <div className="relative aspect-square w-full bg-[#F0EEED] rounded-2xl overflow-hidden mb-3 ring-1 ring-inset ring-black/[0.06]">
         <Link href={href} className="absolute inset-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-black rounded-2xl" tabIndex={-1} aria-hidden="true">
           <Image
             src={product.images[0]}
@@ -88,7 +73,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = fal
           className={`absolute top-2 right-2 p-2.5 rounded-full transition-all duration-200 z-10 ${
             isFavorited
               ? 'bg-white text-red-500 shadow-md scale-105'
-              : 'bg-white/80 backdrop-blur-sm text-neutral-600 hover:text-red-500 hover:bg-white shadow-sm'
+              : 'bg-white/80 backdrop-blur-sm text-neutral-600 hover:text-red-500 hover:bg-white shadow-sm ring-1 ring-black/[0.06]'
           }`}
           aria-label={isFavorited ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}
           aria-pressed={isFavorited}
@@ -97,14 +82,18 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = fal
         </button>
       </div>
 
-      <h3 className="font-bold text-sm sm:text-base text-black line-clamp-1">
+      <h3 className="min-h-10 font-bold text-sm leading-5 text-black line-clamp-2 sm:min-h-12 sm:text-base sm:leading-6">
         <Link href={href} className="hover:text-neutral-700 focus:outline-none focus-visible:underline">
           {product.name}
         </Link>
       </h3>
 
-      {product.reviewCount > 0 ? (
-        <div className="flex items-center gap-1.5 my-1.5" role="img" aria-label={`Rated ${product.rating.toFixed(1)} out of 5 from ${product.reviewCount} ${product.reviewCount === 1 ? 'review' : 'reviews'}`}>
+      {product.rating > 0 ? (
+        <div
+          className="flex items-center gap-1.5 my-1.5"
+          role="img"
+          aria-label={`Rated ${product.rating.toFixed(1)} out of 5${product.reviewCount > 0 ? ` from ${product.reviewCount} ${product.reviewCount === 1 ? 'review' : 'reviews'}` : ''}`}
+        >
           <div className="flex items-center" aria-hidden="true">
             {Array.from({ length: 5 }).map((_, i) => {
               const isFilled = i + 1 <= Math.round(product.rating);
@@ -124,8 +113,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = fal
       )}
 
       <div className="flex items-center justify-between gap-2 mt-auto pt-2">
-        <div className="flex items-baseline sm:items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
-          <span className="font-bold text-base sm:text-xl md:text-lg lg:text-xl text-black">{formatPrice(product.price)}</span>
+        {/* Phones: the old price sits under the price in every card (room is kept for it), so prices
+            and buttons line up across a row. Wider cards have room for both on one line. */}
+        <div className="flex min-h-10 min-w-0 flex-col justify-center sm:min-h-0 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+          <span className="font-bold text-base leading-5 sm:text-xl md:text-lg lg:text-xl text-black">{formatPrice(product.price)}</span>
           {product.originalPrice && product.originalPrice > product.price && (
             <span className="font-semibold text-xs sm:text-sm text-neutral-600 line-through">
               <span className="sr-only">Was </span>
@@ -137,6 +128,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = fal
         <button
           type="button"
           onClick={handleAdd}
+          onPointerEnter={soldOut ? undefined : warm}
+          onTouchStart={soldOut ? undefined : warm}
+          onFocus={soldOut ? undefined : warm}
           disabled={checking}
           aria-busy={checking || undefined}
           className="bg-black hover:bg-neutral-800 text-white rounded-full p-2.5 sm:px-3.5 sm:py-2 md:p-2.5 lg:px-3.5 lg:py-2 flex items-center justify-center gap-1 text-xs font-semibold shadow-sm hover:shadow-md transition-all shrink-0 disabled:opacity-70"
@@ -151,7 +145,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, preload = fal
         </button>
       </div>
 
-      {quickAdd && <QuickAddDialog product={quickAdd} onClose={() => setQuickAdd(null)} />}
+      {quickAdd && <QuickAddDialog product={quickAdd} onClose={closeChoose} />}
     </article>
   );
 };

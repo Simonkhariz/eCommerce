@@ -80,12 +80,14 @@ export function whatsAppOrderFrom(order: ApiOrder): WhatsAppOrderDetails {
   };
 }
 
+/**
+ * The exact amount, kobo included when there are any, so the message says what checkout shows
+ * (the same rule as formatPrice in lib/currency; kept here so this file stands alone in tests).
+ */
 function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    maximumFractionDigits: 0,
-  }).format(amount);
+  const kobo = Math.round(amount * 100);
+  const text = (kobo / 100).toLocaleString('en-NG', { minimumFractionDigits: kobo % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 });
+  return `₦${text}`;
 }
 
 /**

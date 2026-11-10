@@ -112,3 +112,51 @@ html.admin-dark .hover\:text-black:hover { color: #f3f4f6; }
 html.admin-dark .hover\:text-red-600:hover { color: #f87171; }
 html.admin-dark .placeholder\:text-\[\#6b7280\]::placeholder { color: #9ca3af; }
 html.admin-dark .placeholder\:text-\[\#9ca3af\]::placeholder { color: #6b7280; }
+
+/* ---- Added 2026-11-10: things the generated list above did not cover ---- */
+/* The hatched card frames ("strips"): the light pattern is black at 3%, invisible on dark. */
+html.admin-dark [class*="card-pattern.svg"] { background-image: url('/admin/card-pattern-dark.svg'); }
+/* Outlines drawn with inset shadows (card frames, the page edge, chips): light grey turned into
+   sharp white lines on dark. Same width, dark grey. */
+html.admin-dark [class*="inset_0_0_0_0.8px_#e5e7eb"] { --tw-shadow: inset 0 0 0 0.8px #1f2937; }
+html.admin-dark [class*="inset_0_0_0_0.444px_#d8d8d8"] { --tw-shadow: inset 0 0 0 0.444px #374151; }
+html.admin-dark [class*="inset_0_0_0_1px_white"] { --tw-shadow: inset 0 0 0 0.444px #4b5563; }
+html.admin-dark [class*="0px_4px_7px_0px_rgba(0,0,0,0.04)"] { --tw-shadow: 0 0 0 0.8px #1f2937; }
+/* Chart bars: the grey ones were light grey, the highlighted one dark on dark. */
+html.admin-dark [class*="to-[rgba(230,230,230,0.6)]"] { --tw-gradient-to: rgb(55 65 81 / 0.6); }
+html.admin-dark [class*="bg-[linear-gradient(180deg,#37475d_0%,#1f2937_64.7%)]"] { background-image: linear-gradient(180deg, #e5e7eb 0%, #9ca3af 100%); border-color: #d1d5db; }
+/* Hover and pressed tints are a little black: on dark they need to be a little white. */
+html.admin-dark .hover\:bg-black\/\[0\.04\]:hover,
+html.admin-dark .hover\:bg-black\/\[0\.05\]:hover { background-color: rgb(255 255 255 / 0.06); }
+html.admin-dark .bg-black\/\[0\.04\],
+html.admin-dark .bg-black\/\[0\.05\] { background-color: rgb(255 255 255 / 0.06); }
+/* Loading skeletons. */
+html.admin-dark .bg-\[\#eceef1\] { background-color: #1f2937; }
+/* Inputs, selects and checkboxes keep the browser's light chrome unless told otherwise. */
+html.admin-dark input, html.admin-dark select, html.admin-dark textarea { color-scheme: dark; }
+/* Switches: on = light track with a dark knob, off = dark track with a grey knob, so the two
+   states can be told apart at a glance (the generic colour swaps made both look grey). */
+html.admin-dark .admin-switch { background-color: #374151; }
+html.admin-dark .admin-switch[data-on] { background-color: #e5e7eb; }
+html.admin-dark .admin-switch .admin-switch-knob { background-color: #9ca3af; }
+html.admin-dark .admin-switch[data-on] .admin-switch-knob { background-color: #111827; }
+/* A field with an error keeps its red border (the grey border swap above is more specific than
+   the aria-invalid variant and would hide it). */
+html.admin-dark input[aria-invalid="true"],
+html.admin-dark select[aria-invalid="true"],
+html.admin-dark textarea[aria-invalid="true"] { border-color: #f87171; }
+/* Ticked boxes and chosen radios: a light tick, not near-black on a near-black panel. */
+html.admin-dark input[type="checkbox"],
+html.admin-dark input[type="radio"] { accent-color: #e5e7eb; }
+/* Search boxes that light their border while typing. */
+html.admin-dark .focus-within\:border-\[\#9ca3af\]:focus-within { border-color: #6b7280; }
+/* <body> carries bg-white: the page behind the admin stays dark whatever the class order. */
+html.admin-dark body.bg-white { background-color: #0a0f1a; }
+/* Keyboard focus must be easy to see on the dark background (the grey swap above was not). */
+html.admin-dark .focus-visible\:ring-\[\#9ca3af\]\/40:focus-visible,
+html.admin-dark .focus-visible\:ring-\[\#9ca3af\]\/50:focus-visible { --tw-ring-color: rgb(209 213 219 / 0.65); }
+/* Behind a dialog or the menu drawer the page gets darker, not a lighter grey fog. */
+html.admin-dark .bg-black\/30 { background-color: rgb(0 0 0 / 0.55); }
+html.admin-dark .bg-black\/40 { background-color: rgb(0 0 0 / 0.65); }
+/* Colour swatches (Black, Navy) keep a visible edge on dark rows. */
+html.admin-dark .border-black\/10 { border-color: rgb(255 255 255 / 0.28); }

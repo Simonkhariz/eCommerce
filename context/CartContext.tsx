@@ -53,7 +53,8 @@ interface CartContextType {
   applyPromoCode: (code: string) => Promise<{ success: boolean; message: string }>;
   removePromoCode: () => void;
   /** Re-check every line against live price, stock and availability. */
-  revalidateCart: () => Promise<void>;
+  /** Re-checks prices and stock. True when something in the cart was changed (a notice says what). */
+  revalidateCart: () => Promise<boolean>;
   isRevalidating: boolean;
   /** Human-readable changes found during the last re-check (price changes, stock limits...). */
   cartNotices: string[];
@@ -311,9 +312,13 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!promoCode || !isLoaded) return;
     if (items.length === 0) return;
+    // The shopper may remove or replace the code while this check is on its way: its answer
+    // must not bring the old code back.
+    let current = true;
     const timer = setTimeout(async () => {
       try {
         const res = await apiValidatePromotion(promoCode, subtotal);
+        if (!current) return;
         if (res?.valid) {
           setAppliedPromo(promoFrom(res));
         } else {
@@ -322,13 +327,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (err) {
         // Only the server saying the code is invalid removes it. A network blip, a busy server
         // or the per-minute limit keeps it: the checkout quote checks the code again anyway.
-        if (!(err instanceof ApiError && err.errorCode === 'INVALID_PROMOTION')) return;
+        if (!current || !(err instanceof ApiError && err.errorCode === 'INVALID_PROMOTION')) return;
         setAppliedPromo(null);
         writeStorage(PROMO_STORAGE_KEY, null);
         setCartNotices((prev) => [...prev, `Promo code ${promoCode} was removed: ${errorMessage(err, 'it is no longer valid.')}`]);
       }
     }, 500);
-    return () => clearTimeout(timer);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
   }, [promoCode, subtotal, isLoaded, items.length]);
 
   const addToCart = (product: Product, variant: ProductVariant, quantity: number = 1) => {
@@ -454,7 +462,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // An order placed from this cart can be paid away from the payment return page: a WhatsApp
   // transfer the store confirms later, or a gateway tab closed before it redirected back.
   const lastPendingCheck = useRef(0);
-  const revalidateRef = useRef<() => Promise<void>>(async () => {});
+  const revalidateRef = useRef<() => Promise<boolean>>(async () => false);
   const checkPendingOrder = useCallback(async (force = false): Promise<PendingOrderOutcome> => {
     const pending = readPendingOrder();
     if (!pending) return 'none';
@@ -468,6 +476,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const orderStatus = String(res.order_status || '');
       if (res.status === 'successful' && orderStatus !== 'cancelled') {
         completePaidOrder(pending.orderNumber);
+        // Found on returning to the tab (a transfer the store confirmed, a payment tab closed
+        // early): say why the items left the cart. Callers that ask on purpose show their own page.
+        if (!force) showToast('Payment received', `Order ${pending.orderNumber} is paid. Follow it under Track order.`);
         return 'paid';
       }
       if (orderStatus === 'cancelled') {
@@ -481,7 +492,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Offline or no access from this device: try again on the next visit.
       return 'unknown';
     }
-  }, [completePaidOrder]);
+  }, [completePaidOrder, showToast]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -504,7 +515,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const revalidateCart = useCallback(async () => {
     const current = itemsRef.current;
-    if (current.length === 0) return;
+    if (current.length === 0) return false;
     setIsRevalidating(true);
     const notices: string[] = [];
 
@@ -596,8 +607,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (notices.length > 0) {
         setCartNotices(notices);
       }
+      return notices.length > 0;
     } catch {
       // Network problem: keep the cart as-is; checkout still re-verifies everything server-side.
+      return false;
     } finally {
       setIsRevalidating(false);
     }

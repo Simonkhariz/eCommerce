@@ -26,19 +26,19 @@ export const FilterDrawer: React.FC<FilterDrawerProps> = ({ isOpen, onClose, fil
       onClose={onClose}
       title="Filters"
       placement="bottom"
-      panelClassName="w-full max-h-[85vh] bg-white rounded-t-3xl shadow-2xl flex flex-col"
+      panelClassName="w-full max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] bg-white rounded-t-3xl shadow-2xl flex flex-col"
     >
       <div className="w-12 h-1.5 bg-neutral-300 rounded-full mx-auto mt-3" aria-hidden="true" />
 
-      <div className="px-6 py-4 border-b border-neutral-100 flex items-center justify-between">
-        <p className="font-bold text-xl text-black" aria-hidden="true">
+      <div className="flex shrink-0 items-center justify-between border-b border-neutral-100 py-2.5 pl-6 pr-4">
+        <p className="text-lg font-bold text-black" aria-hidden="true">
           Filters
         </p>
         <div className="flex items-center gap-4">
           <button type="button" onClick={onReset} className="text-sm text-neutral-700 hover:text-black underline">
             Reset
           </button>
-          <button type="button" onClick={onClose} className="p-1 rounded-full text-neutral-600 hover:text-black" aria-label="Close filters">
+          <button type="button" data-autofocus onClick={onClose} className="rounded-full p-2 text-neutral-600 hover:bg-neutral-100 hover:text-black" aria-label="Close filters">
             <HugeiconsIcon icon={Cancel01Icon} size={20} aria-hidden="true" />
           </button>
         </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCart, MAX_QUANTITY_PER_LINE } from '@/context/CartContext';
@@ -47,6 +47,13 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
   const [selectedColor, setSelectedColor] = useState<ProductColor | null>(firstChoice(initialProduct)?.color ?? null);
   const [selectedSize, setSelectedSize] = useState<string | null>(firstChoice(initialProduct)?.size ?? null);
   const [quantity, setQuantity] = useState(1);
+  // The latest choice, for the quiet background refresh below.
+  const selectedColorRef = useRef(selectedColor);
+  const selectedSizeRef = useRef(selectedSize);
+  useEffect(() => {
+    selectedColorRef.current = selectedColor;
+    selectedSizeRef.current = selectedSize;
+  }, [selectedColor, selectedSize]);
 
   const { addToCart } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
@@ -79,8 +86,11 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
             setProduct(mapped);
             if (background) {
               // Keep the shopper's choice when it still exists.
-              setSelectedColor((color) => (mapped.variants?.some((v) => v.color.name === color?.name) ? color : firstChoice(mapped)?.color ?? null));
-              setSelectedSize((size) => (mapped.variants?.some((v) => v.size === size) ? size : firstChoice(mapped)?.size ?? null));
+              // A size that has sold out since is dropped (it is no longer shown).
+              const mv = mapped.variants ?? [];
+              const color = mv.find((v) => v.color.name === selectedColorRef.current?.name)?.color ?? firstChoice(mapped)?.color ?? null;
+              setSelectedColor(color);
+              setSelectedSize(color ? sizeAfterColorChange(mv, color, selectedSizeRef.current) : null);
             } else {
               setQuantity(1);
               setSelectedColor(firstChoice(mapped)?.color ?? null);
@@ -285,9 +295,12 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
               <ShareProduct name={product.name} slug={product.slug} price={displayPrice} />
             </div>
 
-            {/* Star Rating (only from approved reviews) */}
-            {product.reviewCount > 0 ? (
-              <div className="flex items-center gap-2 mt-3" aria-label={`Rated ${product.rating.toFixed(1)} out of 5 from ${product.reviewCount} reviews`}>
+            {/* Star rating: the starting rating blended with approved reviews; the count is real reviews only. */}
+            {product.rating > 0 ? (
+              <div
+                className="flex items-center gap-2 mt-3"
+                aria-label={`Rated ${product.rating.toFixed(1)} out of 5${product.reviewCount > 0 ? ` from ${product.reviewCount} ${product.reviewCount === 1 ? 'review' : 'reviews'}` : ''}`}
+              >
                 <div className="flex items-center text-[#FFC633]" aria-hidden="true">
                   {Array.from({ length: 5 }).map((_, i) => (
                     <span key={i} className={i < Math.round(product.rating) ? 'text-[#FFC633]' : 'text-neutral-300'}>
@@ -302,9 +315,11 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
                 <span className="text-sm font-medium text-black">
                   {product.rating.toFixed(1)}/<span className="text-neutral-500">5</span>
                 </span>
-                <span className="text-xs text-neutral-500">
-                  ({product.reviewCount} {product.reviewCount === 1 ? 'review' : 'reviews'})
-                </span>
+                {product.reviewCount > 0 && (
+                  <span className="text-xs text-neutral-500">
+                    ({product.reviewCount} {product.reviewCount === 1 ? 'review' : 'reviews'})
+                  </span>
+                )}
               </div>
             ) : (
               <p className="mt-3 text-xs text-neutral-500">No reviews yet</p>

@@ -85,8 +85,10 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, productName 
       {/* Main photo: hover to magnify, click / Enter to open the full-screen view */}
       <button
         type="button"
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onPointerEnter={(e) => {
+          if (e.pointerType === 'mouse') setIsHovered(true);
+        }}
+        onPointerLeave={() => setIsHovered(false)}
         onMouseMove={handleMouseMove}
         onClick={() => setIsZoomModalOpen(true)}
         aria-label={`Open full-screen view of ${altFor(selectedIndex)}`}

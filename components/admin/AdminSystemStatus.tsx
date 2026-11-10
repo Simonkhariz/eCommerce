@@ -78,7 +78,7 @@ function refreshState(refresh: SystemStatus['storefront_refresh']): { state: Che
 
 /** Health of the pieces the store depends on, read live from the backend. */
 export function AdminSystemStatus() {
-  const { data, loading, error, reload } = useAdminData<SystemStatus>(() => adminGetSystemStatus(), []);
+  const { data, loading, error, reload } = useAdminData<SystemStatus>('AdminSystemStatus', () => adminGetSystemStatus(), []);
 
   return (
     <div className="flex w-full flex-col gap-4">

@@ -7,8 +7,45 @@ import { useWishlist } from '@/context/WishlistContext';
 import { formatPrice } from '@/lib/currency';
 import { PRODUCT_IMAGE_PLACEHOLDER } from '@/lib/api-client';
 import { Dialog } from '@/components/ui/Dialog';
+import { QuickAddDialog } from '@/components/product/QuickAddDialog';
+import { useQuickAdd } from '@/lib/use-quick-add';
+import type { Product } from '@/types';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Cancel01Icon, FavouriteIcon, ShoppingBag01Icon, Delete02Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
+
+/**
+ * The one action on a saved item: add it to the cart (the size picker opens when the product has
+ * options). The picture and the name open the product page, so no separate "View" button.
+ */
+function AddToCartButton({ product, onClose }: { product: Product; onClose: () => void }) {
+  const { add, warm, busy, choose, closeChoose } = useQuickAdd(product, onClose);
+  if (product.inStock === false) {
+    return <span className="shrink-0 rounded-full bg-neutral-100 px-3 py-2 text-xs font-semibold text-neutral-600">Sold out</span>;
+  }
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void add()}
+        onPointerEnter={warm}
+        onTouchStart={warm}
+        onFocus={warm}
+        disabled={busy}
+        aria-busy={busy || undefined}
+        className="flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-black px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-neutral-800 disabled:opacity-70"
+        aria-label={`Add ${product.name} to cart`}
+      >
+        {busy ? (
+          <span className="block h-[14px] w-[14px] animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
+        ) : (
+          <HugeiconsIcon icon={ShoppingBag01Icon} size={14} aria-hidden="true" />
+        )}
+        <span>Add to cart</span>
+      </button>
+      {choose && <QuickAddDialog product={choose} onClose={closeChoose} />}
+    </>
+  );
+}
 
 export const WishlistDrawer: React.FC = () => {
   const { wishlist, isWishlistOpen, closeWishlist, removeFromWishlist } = useWishlist();
@@ -22,19 +59,19 @@ export const WishlistDrawer: React.FC = () => {
       panelClassName="animate-in slide-in-from-right flex h-full w-full max-w-md flex-col bg-white shadow-2xl"
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-neutral-100 p-6">
+      <div className="flex shrink-0 items-center justify-between border-b border-neutral-100 py-3 pl-6 pr-4">
         <div className="flex items-center gap-2.5">
           <span className="text-red-600" aria-hidden="true">
             <HugeiconsIcon icon={FavouriteIcon} size={22} className="fill-current" />
           </span>
-          <p className="text-xl font-bold text-black" aria-hidden="true">
+          <p className="text-lg font-bold text-black" aria-hidden="true">
             Your wishlist <span className="text-sm font-normal text-neutral-600">({wishlist.length})</span>
           </p>
         </div>
         <button
           type="button"
           onClick={closeWishlist}
-          className="rounded-full p-2 text-neutral-600 transition-colors hover:text-black"
+          className="rounded-full p-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-black"
           aria-label="Close wishlist"
         >
           <HugeiconsIcon icon={Cancel01Icon} size={20} />
@@ -46,7 +83,7 @@ export const WishlistDrawer: React.FC = () => {
         {wishlist.length > 0 ? (
           <ul className="divide-y divide-neutral-100">
             {wishlist.map((product) => (
-              <li key={product.id} className="flex items-center gap-4 py-4 first:pt-0 last:pb-0">
+              <li key={product.id} className="flex items-stretch gap-4 py-4 first:pt-0 last:pb-0">
                 <Link
                   href={`/products/${product.slug}`}
                   onClick={closeWishlist}
@@ -57,46 +94,43 @@ export const WishlistDrawer: React.FC = () => {
                   <Image src={product.images[0] || PRODUCT_IMAGE_PLACEHOLDER} alt="" fill sizes="80px" className="object-cover" />
                 </Link>
 
-                <div className="min-w-0 flex-1">
-                  <Link
-                    href={`/products/${product.slug}`}
-                    onClick={closeWishlist}
-                    className="block truncate text-sm font-bold text-black hover:underline"
-                  >
-                    {product.name}
-                  </Link>
-                  {(product.categoryName || product.category) && (
-                    <p className="mt-0.5 text-xs capitalize text-neutral-600">{product.categoryName || product.category}</p>
-                  )}
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <span className="text-sm font-bold text-black">{formatPrice(product.price)}</span>
-                    {product.originalPrice && product.originalPrice > product.price && (
-                      <span className="text-xs text-neutral-600 line-through">
-                        <span className="sr-only">Was </span>
-                        {formatPrice(product.originalPrice)}
-                      </span>
-                    )}
+                <div className="flex min-w-0 flex-1 flex-col justify-between gap-2">
+                  {/* Name and category, with remove in the corner */}
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        href={`/products/${product.slug}`}
+                        onClick={closeWishlist}
+                        className="block truncate text-sm font-bold text-black hover:underline"
+                      >
+                        {product.name}
+                      </Link>
+                      {(product.categoryName || product.category) && (
+                        <p className="mt-0.5 truncate text-xs capitalize text-neutral-600">{product.categoryName || product.category}</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeFromWishlist(product.id)}
+                      className="-mr-1.5 -mt-1.5 shrink-0 rounded-full p-1.5 text-neutral-500 transition-colors hover:bg-red-50 hover:text-red-700"
+                      aria-label={`Remove ${product.name} from wishlist`}
+                    >
+                      <HugeiconsIcon icon={Delete02Icon} size={18} />
+                    </button>
                   </div>
-                </div>
-
-                <div className="flex shrink-0 flex-col items-center gap-2">
-                  <Link
-                    href={`/products/${product.slug}`}
-                    onClick={closeWishlist}
-                    className="flex items-center gap-1 rounded-xl bg-black p-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-neutral-800"
-                    aria-label={`Choose size and colour for ${product.name}`}
-                  >
-                    <HugeiconsIcon icon={ShoppingBag01Icon} size={14} />
-                    <span>Choose</span>
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => removeFromWishlist(product.id)}
-                    className="p-1.5 text-neutral-600 transition-colors hover:text-red-700"
-                    aria-label={`Remove ${product.name} from wishlist`}
-                  >
-                    <HugeiconsIcon icon={Delete02Icon} size={16} />
-                  </button>
+                  {/* Price, with the one action beside it */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 flex-col">
+                      <span className="text-sm font-bold text-black">{formatPrice(product.price)}</span>
+                      {product.originalPrice && product.originalPrice > product.price && (
+                        <span className="text-xs text-neutral-600 line-through">
+                          <span className="sr-only">Was </span>
+                          {formatPrice(product.originalPrice)}
+                        </span>
+                      )}
+                    </div>
+                    <AddToCartButton product={product} onClose={closeWishlist} />
+                  </div>
                 </div>
               </li>
             ))}

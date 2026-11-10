@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useEffectEvent, useState } from 'react';
 import Link from 'next/link';
 import {
   adminCreateRefund,
@@ -51,13 +51,15 @@ function refundStatus(status: string) {
 export function AdminRefunds() {
   const [filters, setFilters] = useUrlFilters({ status: 'all', page: '1', order: '' });
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
-  const list = useAdminData(() => adminGetRefunds({ status: filters.status, page, per_page: 20 }), [filters.status, page]);
+  const list = useAdminData('AdminRefunds', () => adminGetRefunds({ status: filters.status, page, per_page: 20 }), [filters.status, page]);
+  // Counts refunds completed or rejected in the list, so the "record a refund" figures follow.
+  const [listChanges, setListChanges] = useState(0);
 
   return (
     <div className="space-y-5">
       <PageHeader title="Refunds" description="Record money returned to customers and track refunds that are still to be paid." />
 
-      <RecordRefundPanel initialOrder={filters.order} onRecorded={list.reload} />
+      <RecordRefundPanel initialOrder={filters.order} onRecorded={list.reload} listChanges={listChanges} />
 
       <div>
         <Toolbar>
@@ -80,7 +82,10 @@ export function AdminRefunds() {
           hasData={!!list.data}
           filtered={filters.status !== 'all'}
           onRetry={list.reload}
-          onChanged={list.reload}
+          onChanged={() => {
+            list.reload();
+            setListChanges((n) => n + 1);
+          }}
         />
         {list.data && (
           <div className="rounded-b-xl border border-t-0 border-[#e5e7eb] bg-white">
@@ -106,7 +111,7 @@ interface RefundForm {
 
 const EMPTY_FORM: RefundForm = { amount: '', reason: '', status: 'completed', reference: '', restock: false };
 
-function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string; onRecorded: () => void }) {
+function RecordRefundPanel({ initialOrder, onRecorded, listChanges }: { initialOrder: string; onRecorded: () => void; listChanges: number }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [orderNumber, setOrderNumber] = useState(initialOrder);
@@ -138,6 +143,20 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
       setChecking(false);
     }
   };
+
+  // A refund completed or rejected in the list below changes what this order can still be
+  // refunded: bring the figures up to date without clearing what is being typed.
+  const refreshFigures = useEffectEvent(() => {
+    if (!eligibility) return;
+    const number = eligibility.order_number;
+    adminGetRefundEligibility(number).then(
+      (result) => setEligibility((shown) => (shown && shown.order_number === number ? result : shown)),
+      () => undefined // the figures stay as they were; "Check order" still works
+    );
+  });
+  useEffect(() => {
+    if (listChanges > 0) refreshFigures();
+  }, [listChanges]);
 
   // Arriving from an order page with ?order=… checks it straight away: shown as checking on
   // the first paint, then looked up.
@@ -190,9 +209,9 @@ function RecordRefundPanel({ initialOrder, onRecorded }: { initialOrder: string;
     setErrors(local);
     if (Object.keys(local).length) return;
 
-    // The server returns items to stock only when the order ends up fully refunded.
-    const completesRefund = (value: number) =>
-      value + eligibility.refunded_amount + eligibility.pending_refund_amount >= eligibility.paid_amount - 0.01;
+    // The server returns items to stock only when the order ends up fully refunded. Refunds still
+    // pending are not money returned yet, so they do not count towards "fully".
+    const completesRefund = (value: number) => value + eligibility.refunded_amount >= eligibility.paid_amount - 0.01;
 
     const ok = await confirm({
       title: `Record a ${formatPrice(amount)} refund?`,

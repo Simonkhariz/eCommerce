@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { FilterState } from '@/types';
 import { CatalogFacets } from '@/lib/api-client';
 import { priceFilterFrom } from '@/lib/catalog-query';
@@ -20,7 +20,8 @@ interface FilterContentProps {
 
 function Section({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
-  const id = `filter-${title.toLowerCase().replace(/\s+/g, '-')}`;
+  // Unique per copy: the desktop sidebar and the phone drawer can both be on the page.
+  const id = `filter-${useId()}`;
   return (
     <div className="pb-6 border-b border-neutral-200">
       <button
@@ -184,7 +185,7 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
 
       {colors.length > 0 && (
         <Section title="Colors">
-          <fieldset className="grid grid-cols-5 gap-3">
+          <fieldset className="flex flex-wrap gap-2">
             <legend className="sr-only">Colours</legend>
             {colors.map((col) => {
               const isSelected = filters.selectedColors.some((c) => c.toLowerCase() === col.name.toLowerCase());
@@ -195,14 +196,19 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                   type="button"
                   aria-pressed={isSelected}
                   onClick={() => onFilterChange({ selectedColors: toggleIn(filters.selectedColors, col.name) })}
-                  style={{ backgroundColor: hex }}
-                  className={`w-9 h-9 rounded-full flex items-center justify-center transition-transform hover:scale-110 ${
-                    isLight(hex) ? 'border border-neutral-300' : ''
-                  } ${isSelected ? 'ring-2 ring-black ring-offset-2' : ''}`}
-                  title={col.name}
+                  className={`inline-flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3 text-sm font-medium transition-colors ${
+                    isSelected ? 'border-black bg-black text-white' : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-400'
+                  }`}
                   aria-label={`${col.name} (${col.product_count})`}
                 >
-                  {isSelected && <HugeiconsIcon icon={Tick02Icon} size={16} className={isLight(hex) ? 'text-black' : 'text-white'} aria-hidden="true" />}
+                  <span
+                    style={{ backgroundColor: hex }}
+                    className={`flex size-6 shrink-0 items-center justify-center rounded-full ${isLight(hex) || isSelected ? 'ring-1 ring-inset ring-neutral-300' : ''}`}
+                    aria-hidden="true"
+                  >
+                    {isSelected && <HugeiconsIcon icon={Tick02Icon} size={14} className={isLight(hex) ? 'text-black' : 'text-white'} />}
+                  </span>
+                  <span className="capitalize">{col.name}</span>
                 </button>
               );
             })}

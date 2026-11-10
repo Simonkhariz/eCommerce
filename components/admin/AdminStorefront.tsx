@@ -35,6 +35,7 @@ import {
   useAdminData,
   useClientPagination,
   useConfirm,
+  useDiscardGuard,
   useToast,
   useUrlFilters,
 } from '@/components/admin/ui';
@@ -57,7 +58,7 @@ export function AdminStorefront() {
     <div>
       <PageHeader title="Banners & reviews" description="What shoppers see on the homepage, and which reviews appear on product pages." />
 
-      <div role="tablist" aria-label="Storefront content" className="mb-4 flex gap-1 border-b border-[#e5e7eb]">
+      <div role="tablist" aria-label="Storefront content" className="mb-3 inline-flex rounded-lg border border-[#e5e7eb] bg-[#f9fafb] p-0.5">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -65,8 +66,8 @@ export function AdminStorefront() {
             role="tab"
             aria-selected={view === tab.id}
             onClick={() => setFilters({ view: tab.id })}
-            className={`-mb-px border-b-2 px-3 py-2 text-[13px] font-semibold outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40 ${
-              view === tab.id ? 'border-[#111827] text-[#111827]' : 'border-transparent text-[#6b7280] hover:text-[#111827]'
+            className={`h-8 rounded-md px-3 text-[13px] font-semibold outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40 ${
+              view === tab.id ? 'bg-white text-[#111827] shadow-sm' : 'text-[#6b7280] hover:text-[#111827]'
             }`}
           >
             {tab.label}
@@ -105,7 +106,7 @@ const EMPTY_BANNER: BannerInput = {
 function BannersPanel() {
   const toast = useToast();
   const confirm = useConfirm();
-  const { data, loading, error, reload } = useAdminData(() => adminGetBanners(), []);
+  const { data, loading, error, reload, mutate } = useAdminData('AdminStorefront', () => adminGetBanners(), []);
   const [editing, setEditing] = useState<{ id: number | null; form: BannerInput } | null>(null);
 
   const banners = [...(data ?? [])].sort((a, b) => a.display_order - b.display_order || a.id - b.id);
@@ -139,9 +140,8 @@ function BannersPanel() {
     });
     if (!ok) return;
     try {
-      await adminDeleteBanner(b.id);
+      await mutate((list) => list.filter((x) => x.id !== b.id), () => adminDeleteBanner(b.id));
       toast.success('Banner deleted.');
-      reload();
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err));
     }
@@ -237,6 +237,7 @@ function BannersPanel() {
 function BannerModal({ id, initial, onClose, onSaved }: { id: number | null; initial: BannerInput; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [form, setForm] = useState<BannerInput>(initial);
+  const guardedClose = useDiscardGuard(true, form, onClose);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -280,14 +281,14 @@ function BannerModal({ id, initial, onClose, onSaved }: { id: number | null; ini
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={guardedClose}
       busy={saving || uploading}
       persistent
       title={id ? 'Edit banner' : 'New banner'}
       size="lg"
       footer={
         <>
-          <Button onClick={onClose} disabled={saving || uploading}>
+          <Button onClick={guardedClose} disabled={saving || uploading}>
             Cancel
           </Button>
           <Button variant="primary" type="submit" form="banner-form" loading={saving} disabled={uploading}>
@@ -362,20 +363,32 @@ function ReviewsPanel({
   onPage: (page: number) => void;
 }) {
   const toast = useToast();
-  const [busyId, setBusyId] = useState<number | null>(null);
+  // Every review being saved right now (approving one does not free the buttons of another).
+  const [busyIds, setBusyIds] = useState<ReadonlySet<number>>(new Set());
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
-  const { data, loading, error, reload } = useAdminData(() => adminGetReviews({ status, page, per_page: 20 }), [status, page]);
+  const { data, loading, error, reload, mutate } = useAdminData('AdminStorefront#2', () => adminGetReviews({ status, page, per_page: 20 }), [status, page]);
 
   const moderate = async (review: ReviewRow, next: 'approved' | 'rejected' | 'pending') => {
-    setBusyId(review.id);
+    if (busyIds.has(review.id)) return;
+    setBusyIds((ids) => new Set(ids).add(review.id));
     try {
-      await adminUpdateReviewStatus(review.id, next);
+      // Shown at once: a review that no longer matches the filter leaves the list.
+      await mutate(
+        (d) => ({
+          ...d,
+          items: status && status !== 'all' && status !== next ? d.items.filter((r) => r.id !== review.id) : d.items.map((r) => (r.id === review.id ? { ...r, status: next } : r)),
+        }),
+        () => adminUpdateReviewStatus(review.id, next)
+      );
       toast.success(next === 'approved' ? 'Review approved and shown on the product page.' : next === 'rejected' ? 'Review rejected.' : 'Review moved back to pending.');
-      reload();
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err));
     } finally {
-      setBusyId(null);
+      setBusyIds((ids) => {
+        const rest = new Set(ids);
+        rest.delete(review.id);
+        return rest;
+      });
     }
   };
 
@@ -470,17 +483,17 @@ function ReviewsPanel({
                   <td>
                     <div className="flex justify-end gap-1">
                       {r.status !== 'approved' && (
-                        <Button size="sm" variant="primary" loading={busyId === r.id} onClick={() => moderate(r, 'approved')}>
+                        <Button size="sm" variant="primary" loading={busyIds.has(r.id)} onClick={() => moderate(r, 'approved')}>
                           Approve
                         </Button>
                       )}
                       {r.status !== 'rejected' && (
-                        <Button size="sm" disabled={busyId === r.id} onClick={() => moderate(r, 'rejected')}>
+                        <Button size="sm" disabled={busyIds.has(r.id)} onClick={() => moderate(r, 'rejected')}>
                           Reject
                         </Button>
                       )}
                       {r.status !== 'pending' && (
-                        <Button size="sm" variant="ghost" disabled={busyId === r.id} onClick={() => moderate(r, 'pending')}>
+                        <Button size="sm" variant="ghost" disabled={busyIds.has(r.id)} onClick={() => moderate(r, 'pending')}>
                           Move to pending
                         </Button>
                       )}

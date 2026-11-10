@@ -145,7 +145,7 @@ export const ProductTabs: React.FC<ProductTabsProps> = ({ product }) => {
           </div>
 
           {reviews.length === 0 ? (
-            <div className="text-center py-10 text-neutral-600 text-sm">No reviews yet. Bought this item? Be the first to review it.</div>
+            <div className="text-center py-10 text-neutral-600 text-sm">No customer reviews yet. Bought this item? Be the first to review it.</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
               {sortedReviews.map((rev) => (
@@ -162,7 +162,9 @@ export const ProductTabs: React.FC<ProductTabsProps> = ({ product }) => {
                     {rev.verified && (
                       <span className="inline-flex items-center gap-1 text-xs font-medium text-[#01803a]" title="Verified purchase">
                         <HugeiconsIcon icon={CheckmarkCircle01Icon} size={16} className="fill-current" aria-hidden="true" />
-                        <span className="sr-only sm:not-sr-only">Verified purchase</span>
+                        <span>
+                          Verified<span className="sr-only sm:not-sr-only"> purchase</span>
+                        </span>
                       </span>
                     )}
                   </div>

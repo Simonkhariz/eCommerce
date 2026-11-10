@@ -602,9 +602,9 @@ export const Header: React.FC = () => {
         onClose={closeMobile}
         title="Menu"
         placement="left"
-        panelClassName="animate-in slide-in-from-left flex h-full w-full max-w-xs flex-col overflow-y-auto bg-white p-6 shadow-2xl"
+        panelClassName="animate-in slide-in-from-left flex h-full w-full max-w-xs flex-col overflow-hidden bg-white shadow-2xl"
       >
-        <div className="mb-6 flex items-center justify-between">
+        <div className="flex shrink-0 items-center justify-between border-b border-neutral-100 py-3 pl-6 pr-4">
           <Link href="/" onClick={closeMobile} className="font-integral text-2xl tracking-tighter text-black">
             SHOP.CO
           </Link>
@@ -613,6 +613,7 @@ export const Header: React.FC = () => {
           </button>
         </div>
 
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
         <nav aria-label="Mobile" className="flex-1 space-y-5">
           <div className="space-y-1">
             <Link href="/category" onClick={closeMobile} className="block py-1.5 text-base font-semibold text-neutral-900">
@@ -706,6 +707,7 @@ export const Header: React.FC = () => {
         </nav>
 
         <p className="mt-6 border-t border-neutral-100 pt-4 text-xs text-neutral-600">© {new Date().getFullYear()} SHOP.CO</p>
+        </div>
       </Dialog>
     </header>
   );

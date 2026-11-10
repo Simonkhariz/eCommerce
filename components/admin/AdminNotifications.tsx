@@ -37,19 +37,19 @@ function statusPill(row: OutboxRow): { label: string; tone: 'amber' | 'green' | 
   return row.attempt_count > 0 ? { label: 'Retrying', tone: 'amber' } : { label: 'Waiting', tone: 'amber' };
 }
 
-/** Sign-in links carry a one-time token that is never stored, so they cannot be re-sent. */
-const NOT_RESENDABLE = ['magic_link', 'account_verification'];
+/** Sign-in links and confirmation codes carry a one-time secret that is never stored, so they cannot be re-sent. */
+const NOT_RESENDABLE = ['magic_link', 'account_verification', 'admin_confirm_code'];
 
 /** Every email the store has queued: order confirmations, shipping updates, sign-in links, newsletters. */
 export function AdminNotifications() {
   const toast = useToast();
   const [filters, setFilters] = useUrlFilters({ status: 'all', page: '1' });
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
-  const { data, loading, error, reload } = useAdminData(
+  const { data, loading, error, reload } = useAdminData('AdminNotifications',
     () => adminGetOutbox({ status: filters.status, page, per_page: 25 }),
     [filters.status, page]
   );
-  const { data: mail, reload: reloadStatus } = useAdminData(() => adminGetOutboxStatus(), []);
+  const { data: mail, reload: reloadStatus } = useAdminData('AdminNotifications#2', () => adminGetOutboxStatus(), []);
   const [retrying, setRetrying] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
 
@@ -81,6 +81,8 @@ export function AdminNotifications() {
     } catch (err) {
       if (redirectIfSignedOut(err)) return;
       toast.error(errorMessage(err, 'The email could not be re-sent.'));
+      // The server already tried again and updated the row: show where it stands now.
+      void Promise.all([reload(), reloadStatus()]);
     } finally {
       setRetrying(null);
     }

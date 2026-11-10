@@ -37,6 +37,11 @@ export interface DialogProps {
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/** Dialogs open right now, newest last: only the newest one handles Escape and Tab. */
+const openDialogs: symbol[] = [];
+/** What <body>'s overflow was before the first dialog opened; put back when the last one closes. */
+let overflowBeforeDialogs: string | null = null;
+
 const PLACEMENT_WRAPPER: Record<Placement, string> = {
   center: 'items-end justify-center p-0 sm:items-center sm:p-4',
   left: 'items-stretch justify-start',
@@ -75,7 +80,12 @@ export function Dialog({
     const first = initialFocusRef?.current ?? panel?.querySelector<HTMLElement>('[data-autofocus]') ?? panel?.querySelector<HTMLElement>(FOCUSABLE);
     (first ?? panel)?.focus({ preventScroll: true });
 
+    const self = Symbol('dialog');
+    openDialogs.push(self);
+
     const onKey = (e: KeyboardEvent) => {
+      // A dialog opened over this one (quick add over the wishlist) answers the keys, not this one.
+      if (openDialogs[openDialogs.length - 1] !== self) return;
       if (e.key === 'Escape') {
         if (closeOnEscape()) e.stopPropagation();
         return;
@@ -88,6 +98,13 @@ export function Dialog({
       }
       const firstEl = items[0];
       const lastEl = items[items.length - 1];
+      // Focus fell outside the dialog (the focused control was removed, or a click on the page
+      // edge): Tab comes back in instead of wandering through the page behind.
+      if (!panel.contains(document.activeElement)) {
+        e.preventDefault();
+        (e.shiftKey ? lastEl : firstEl).focus();
+        return;
+      }
       if (e.shiftKey && (document.activeElement === firstEl || document.activeElement === panel)) {
         e.preventDefault();
         lastEl.focus();
@@ -98,11 +115,18 @@ export function Dialog({
     };
 
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
+    // The page stays locked until the last dialog closes, whatever order they close in (each one
+    // restoring "what it found" could leave the page locked when an underneath one closes first).
+    if (openDialogs.length === 1) overflowBeforeDialogs = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      const at = openDialogs.indexOf(self);
+      if (at !== -1) openDialogs.splice(at, 1);
+      if (openDialogs.length === 0) {
+        document.body.style.overflow = overflowBeforeDialogs ?? '';
+        overflowBeforeDialogs = null;
+      }
       previouslyFocused?.focus?.({ preventScroll: true });
     };
   }, [open, initialFocusRef]);

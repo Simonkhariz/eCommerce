@@ -25,7 +25,7 @@ function pretty(value: unknown): string {
 export function AdminAuditLogs() {
   const [filters, setFilters] = useUrlFilters({ action: 'all', entity_type: 'all', page: '1' });
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
-  const { data, loading, error, reload } = useAdminData(
+  const { data, loading, error, reload } = useAdminData('AdminAuditLogs',
     () => adminGetAuditLogs({ action: filters.action, entity_type: filters.entity_type, page, per_page: 25 }),
     [filters.action, filters.entity_type, page]
   );
@@ -116,10 +116,11 @@ function AuditRow({ row, open, onToggle }: { row: AuditLogRow; open: boolean; on
         </td>
         <td className="whitespace-nowrap text-xs text-[#374151]">{formatDateTime(row.created_at)}</td>
         <td className="max-w-[220px]">
-          {row.admin_id ? (
+          {row.admin_id || row.admin_name ? (
             <>
-              <span className="block truncate">{row.admin_name || 'Admin'}</span>
-              <span className="block truncate text-xs text-[#6b7280]">{row.admin_email}</span>
+              {/* A deleted admin has no account any more: the kept name says so. */}
+              <span className="block truncate" title={row.admin_name || undefined}>{row.admin_name || 'Admin'}</span>
+              {row.admin_email && <span className="block truncate text-xs text-[#6b7280]">{row.admin_email}</span>}
             </>
           ) : (
             <span className="text-[#6b7280]">System</span>

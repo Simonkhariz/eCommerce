@@ -37,7 +37,7 @@ export function AdminPayments() {
   const [searchText, setSearchText] = useSearchBox(filters.search, setFilters);
 
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
-  const { data, loading, error, reload } = useAdminData(
+  const { data, loading, error, reload } = useAdminData('AdminPayments',
     () => adminGetPayments({ gateway: filters.gateway, status: filters.status, search: filters.search, page, per_page: 25 }),
     [filters.gateway, filters.status, filters.search, page]
   );

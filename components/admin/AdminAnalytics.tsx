@@ -45,7 +45,7 @@ export function AdminAnalytics() {
       : null
     : { range: filters.range };
 
-  const { data, loading, error, reload } = useAdminData<AnalyticsReport | null>(
+  const { data, loading, error, reload } = useAdminData<AnalyticsReport | null>('AdminAnalytics',
     async () => (params ? adminGetAnalyticsReport(params) : null),
     [filters.range, filters.start_date, filters.end_date]
   );
@@ -149,7 +149,7 @@ export function AdminAnalytics() {
           <p className="px-4 py-10 text-center text-[13px] text-[#6b7280]">Choose a start and end date, then select Apply.</p>
         </Panel>
       ) : (
-        <DataState loading={loading} error={error} onRetry={reload} hasData={!!data} empty={!data}>
+        <DataState loading={loading} error={error} onRetry={reload} hasData={!!data} empty={!data} skeleton="page">
           {data && <Report report={data} />}
         </DataState>
       )}
@@ -256,7 +256,7 @@ function Report({ report }: { report: AnalyticsReport }) {
         {!hasActivity ? (
           <p className="px-4 py-8 text-center text-[13px] text-[#6b7280]">No orders, payments or refunds in this range.</p>
         ) : (
-          <div className="max-h-[420px] overflow-y-auto">
+          <div className="sm:max-h-[420px] sm:overflow-y-auto">
             <Table minWidth={560}>
               <thead>
                 <tr>
@@ -387,7 +387,7 @@ function Report({ report }: { report: AnalyticsReport }) {
             <dl id="analytics-formulas" className="divide-y divide-[#f3f4f6] text-[13px]">
               {formulas.map(([key, text]) => (
                 <div key={key} className="grid gap-1 px-4 py-2.5 sm:grid-cols-[200px_1fr]">
-                  <dt className="font-medium text-[#111827]">{humanize(key)}</dt>
+                  <dt className="font-medium text-[#111827]">{key.toLowerCase() === 'aov' ? 'Average order value' : humanize(key)}</dt>
                   <dd className="text-[#374151]">{text}</dd>
                 </div>
               ))}

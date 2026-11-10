@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useEffectEvent, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
@@ -226,10 +227,11 @@ function CheckoutSession({
   const submitErrorRef = useRef<HTMLDivElement>(null);
   // Whether this cart's unpaid order still has to be looked at. Until it has been, a new order
   // could duplicate it, so "Continue" waits; 'failed' offers another try.
-  const [resumeState, setResumeState] = useState<'idle' | 'checking' | 'failed'>(() => {
-    const pending = readPendingOrder();
-    return pending && pending.cartSignature === cartSignature(items) ? 'checking' : 'idle';
-  });
+  // An unpaid order for a different cart is looked at too: its items are given back first, or
+  // they would be held twice and could block this very checkout ("only 0 available").
+  const [resumeState, setResumeState] = useState<'idle' | 'checking' | 'failed'>(() => (readPendingOrder() ? 'checking' : 'idle'));
+  // An earlier order that could not be given up because a payment was started for it.
+  const [heldOrder, setHeldOrder] = useState<string | null>(null);
   const [resumeAttempt, setResumeAttempt] = useState(0);
   const [isReleasing, setIsReleasing] = useState(false);
   const [order, setOrder] = useState<PayableOrder | null>(null);
@@ -268,9 +270,31 @@ function CheckoutSession({
   // On open: resume this cart's unpaid order if there is one (otherwise the details step).
   const resumePendingOrder = useEffectEvent(() => {
     const pending = readPendingOrder();
-    if (!pending || pending.cartSignature !== cartSignature(items)) return;
+    if (!pending) {
+      // It was there when the window opened and is gone now (settled in another tab).
+      void Promise.resolve().then(() => setResumeState('idle'));
+      return;
+    }
 
     const token = readGuestToken(pending.orderNumber);
+    if (pending.cartSignature !== cartSignature(items)) {
+      // The cart changed since that order was placed, so this checkout makes a new one. Give the
+      // old order's items back first (the server refuses if a payment was started for it).
+      apiReleaseOrder(pending.orderNumber, token)
+        .then(
+          ({ released }) => {
+            if (released) clearPendingOrder(pending.orderNumber);
+            else setHeldOrder(pending.orderNumber);
+          },
+          (err) => {
+            // The server says this device can't have that order: nothing here to give back.
+            if (err instanceof ApiError && (err.statusCode === 403 || err.statusCode === 404)) clearPendingOrder(pending.orderNumber);
+          }
+        )
+        .finally(() => setResumeState('idle'));
+      return;
+    }
+
     apiGetOrder(pending.orderNumber, token ? { token } : undefined)
       .then((o) => {
         if (o.order_status !== 'pending_payment') {
@@ -351,10 +375,15 @@ function CheckoutSession({
 
   // The Dialog handles Escape, focus trapping and scroll locking. When the step changes,
   // move focus to the first field of the new step (skipping the close button).
+  // Once per step and order (not each time the same order is refreshed, which would pull focus
+  // away from the button just pressed). The new step also starts at its top.
+  const focusedOrder = order?.order_number;
   useEffect(() => {
     const firstField = dialogRef.current?.querySelector<HTMLElement>('input, select, button:not([data-close])');
     firstField?.focus({ preventScroll: true });
-  }, [step, order]);
+    const scroller = dialogRef.current?.querySelector<HTMLElement>('[data-dialog-body]');
+    if (scroller) scroller.scrollTop = 0;
+  }, [step, focusedOrder]);
 
   const checkoutItems = useCallback(
     () =>
@@ -367,9 +396,10 @@ function CheckoutSession({
   );
 
   // Server quote for the chosen state: authoritative prices, discount and delivery fee.
-  // One request per distinct question; only the answer to the current one counts.
+  // One request per distinct question; only the answer to the current one counts. It waits until
+  // an earlier unpaid order has been looked at: that order may still hold this cart's stock.
   const quoteRequest =
-    step === 'details' && items.length > 0 && formData.state
+    step === 'details' && items.length > 0 && formData.state && resumeState !== 'checking'
       ? JSON.stringify({
           items: checkoutItems(),
           shipping_address: { state: formData.state, country: 'Nigeria' },
@@ -401,6 +431,10 @@ function CheckoutSession({
   // While a new quote loads, the last one stays on screen (the order button waits for it).
   const quote = formData.state && items.length > 0 ? (quoteAnswer?.quote ?? null) : null;
   const quoteError = !isQuoting && quoteRequest !== null ? (quoteAnswer?.error ?? null) : null;
+  // The state was just changed and its quote is on the way: the one on screen is another state's,
+  // so its zone, fee and total are not shown as this one's.
+  const quoteForOtherState =
+    isQuoting && !!quoteAnswer && (JSON.parse(quoteAnswer.request) as { shipping_address?: { state?: string } }).shipping_address?.state !== formData.state;
 
   const setField = (field: CheckoutField, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -652,34 +686,48 @@ function CheckoutSession({
     >
       <div
         ref={dialogRef}
-        className="bg-white rounded-t-2xl sm:rounded-3xl p-5 sm:p-6 w-full shadow-2xl relative max-h-[92vh] overflow-y-auto"
+        className="relative flex max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-3xl"
         aria-busy={busy || undefined}
       >
-        {/* Stays in view while the window scrolls (long invoices on small phones). */}
-        <div className="sticky top-0 z-10 -mb-9 flex justify-end pointer-events-none">
+        {/* A fixed row: only the part below it scrolls (long forms and invoices on small phones). */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-100 py-2.5 pl-5 pr-3 sm:pl-6 sm:pr-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <HugeiconsIcon icon={DeliveryTruck01Icon} size={20} className="shrink-0 text-black" aria-hidden="true" />
+            <p className="truncate font-bold text-lg text-black" aria-hidden="true">
+              {step === 'details' ? 'Delivery details' : 'Checkout'}
+            </p>
+          </div>
           <button
             type="button"
             data-close
             onClick={handleClose}
             disabled={busy}
-            className="pointer-events-auto p-2 rounded-full bg-white/95 text-neutral-600 shadow-sm ring-1 ring-neutral-200 hover:text-black hover:bg-neutral-100 disabled:opacity-50"
+            className="shrink-0 p-2 rounded-full text-neutral-600 hover:text-black hover:bg-neutral-100 disabled:opacity-50"
             aria-label="Close checkout"
           >
             <HugeiconsIcon icon={Cancel01Icon} size={18} aria-hidden="true" />
           </button>
         </div>
 
+        <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
         {step === 'details' ? (
           <div>
-            <div className="flex items-center gap-2 mb-4">
-              <HugeiconsIcon icon={DeliveryTruck01Icon} size={20} className="text-black" aria-hidden="true" />
-              <p className="font-bold text-lg text-black" aria-hidden="true">Delivery details</p>
-            </div>
 
             {submitError && (
               <div ref={submitErrorRef} tabIndex={-1} role="alert" className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2 text-sm text-red-800 outline-none">
                 <HugeiconsIcon icon={AlertCircleIcon} size={16} className="shrink-0 mt-0.5 text-red-600" aria-hidden="true" />
                 <span>{submitError}</span>
+              </div>
+            )}
+
+            {heldOrder && (
+              <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                Order <span className="font-semibold">{heldOrder}</span> is still waiting for the payment you started, and its items stay
+                reserved for it. Finish paying it from{' '}
+                <Link href={`/track-order?order=${encodeURIComponent(heldOrder)}`} className="font-semibold underline underline-offset-2">
+                  Track order
+                </Link>{' '}
+                before ordering the same items again.
               </div>
             )}
 
@@ -811,6 +859,10 @@ function CheckoutSession({
                       </label>
                     ))}
                   </fieldset>
+                ) : quoteForOtherState ? (
+                  <p className="text-xs text-neutral-600" role="status">
+                    Calculating delivery to {formData.state === 'FCT' ? 'Abuja (FCT)' : formData.state}…
+                  </p>
                 ) : quote?.shipping_zone ? (
                   <p className="text-xs text-neutral-700">
                     Delivery to {formData.state === 'FCT' ? 'Abuja (FCT)' : formData.state}: <strong>{quote.shipping_zone.name}</strong> · {quote.shipping_zone.estimated_days}
@@ -844,13 +896,13 @@ function CheckoutSession({
                 <div className="flex justify-between">
                   <span>Delivery</span>
                   <span className="font-semibold text-black">
-                    {quote?.shipping_zone ? formatPrice(quote.shipping_fee) : '—'}
+                    {quote?.shipping_zone && !quoteForOtherState ? formatPrice(quote.shipping_fee) : '—'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center pt-2 border-t border-neutral-200">
                   <span className="font-bold text-black">Total</span>
                   <span className="font-black text-lg sm:text-xl text-black">
-                    {quote?.shipping_zone ? formatPrice(quote.grand_total) : '—'}
+                    {quote?.shipping_zone && !quoteForOtherState ? formatPrice(quote.grand_total) : '—'}
                   </span>
                 </div>
 
@@ -1018,6 +1070,7 @@ function CheckoutSession({
         ) : (
           <div className="py-10 text-center text-sm text-neutral-600" role="status">Loading your order…</div>
         )}
+        </div>
       </div>
     </Dialog>
   );

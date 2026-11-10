@@ -32,6 +32,7 @@ import {
   useAdminData,
   useClientPagination,
   useConfirm,
+  useDiscardGuard,
   useToast,
 } from '@/components/admin/ui';
 
@@ -60,7 +61,7 @@ function stateLabel(state: string): string {
 export function AdminShippingZones() {
   const toast = useToast();
   const confirm = useConfirm();
-  const { data, loading, error, reload } = useAdminData(() => adminGetShippingZones(), []);
+  const { data, loading, error, reload, mutate } = useAdminData('AdminShippingZones', () => adminGetShippingZones(), []);
   const [editing, setEditing] = useState<{ id: number | null; zone: ShippingZoneInput } | null>(null);
 
   const zones = data?.zones ?? [];
@@ -83,9 +84,8 @@ export function AdminShippingZones() {
     });
     if (!ok) return;
     try {
-      await adminDeleteShippingZone(zone.id);
+      await mutate((d) => ({ ...d, zones: d.zones.filter((z) => z.id !== zone.id) }), () => adminDeleteShippingZone(zone.id));
       toast.success('Delivery zone deleted.');
-      reload();
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err));
     }
@@ -250,6 +250,7 @@ function ZoneModal({
   const toast = useToast();
   const [form, setForm] = useState<ShippingZoneInput>(EMPTY_ZONE);
   const [feeText, setFeeText] = useState('');
+  const guardedClose = useDiscardGuard(!!editing, [form, feeText], onClose);
   const [includedText, setIncludedText] = useState('1');
   const [extraText, setExtraText] = useState('0');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -318,14 +319,14 @@ function ZoneModal({
   return (
     <Modal
       open={!!editing}
-      onClose={onClose}
+      onClose={guardedClose}
       busy={saving}
       persistent
       size="lg"
       title={editing?.id ? `Edit ${editing.zone.name}` : 'Add delivery zone'}
       footer={
         <>
-          <Button onClick={onClose} disabled={saving}>
+          <Button onClick={guardedClose} disabled={saving}>
             Cancel
           </Button>
           <Button type="submit" form="zone-form" variant="primary" loading={saving}>

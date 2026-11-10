@@ -71,3 +71,29 @@ test('the store address adds what is missing, and a street named after a city is
   assert.equal(storeAddressLine('', 'Ikeja', 'Ikeja'), 'Ikeja');
   assert.equal(storeAddressLine(null, null, ' '), '');
 });
+
+test('only sizes in stock in the chosen colour are offered', async () => {
+  const { sizeStatesFor, visibleSizes, sizeAfterColorChange } = await import('../lib/variants.ts');
+  const red = { name: 'Red', hex: '#f00' };
+  const blue = { name: 'Blue', hex: '#00f' };
+  const variants = [
+    { id: 1, color: red, size: 'S', stock: 0 },
+    { id: 2, color: red, size: 'M', stock: 4 },
+    { id: 3, color: blue, size: 'S', stock: 2 },
+    { id: 4, color: blue, size: 'L', stock: 0 },
+  ];
+  const sizes = ['S', 'M', 'L'];
+  assert.deepEqual(visibleSizes(sizes, sizeStatesFor(sizes, variants, red)), ['M']);
+  assert.deepEqual(visibleSizes(sizes, sizeStatesFor(sizes, variants, blue)), ['S']);
+  // switching colour drops a size that is sold out there
+  // ...but a size that is sold out there is never swapped for another behind the shopper's back
+  assert.equal(sizeAfterColorChange(variants, red, 'S'), null);
+  // nothing chosen yet and the colour comes in one size: that size
+  assert.equal(sizeAfterColorChange(variants, red, null), 'M');
+  // a colour with nothing in stock: no size
+  assert.equal(sizeAfterColorChange(variants, { name: 'Green', hex: '#0f0' }, 'S'), null);
+  assert.equal(sizeAfterColorChange(variants, blue, 'S'), 'S');
+  // everything sold out: nothing is offered
+  const none = variants.map((v) => ({ ...v, stock: 0 }));
+  assert.deepEqual(visibleSizes(sizes, sizeStatesFor(sizes, none, red)), []);
+});

@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useEffectEvent, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { ApiUser, apiPeekSession, apiGetSetupStatus, apiLogout } from '@/lib/api-client';
-import { LoadingState } from '@/components/admin/ui';
+import { LoadingState, Skeleton } from '@/components/admin/ui';
 
 interface AdminSession {
   admin: ApiUser;
@@ -86,9 +86,28 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
 
   if (!admin) {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-[#f8f8f8]">
-        <LoadingState label="Checking your admin session…" />
-      </main>
+      // Shaped like the admin (sidebar, top bar, page) so nothing jumps when it appears.
+      <div className="flex min-h-dvh w-full bg-[#f8f8f8]">
+        <div className="hidden w-[250px] shrink-0 flex-col gap-5 border-r border-[#e5e7eb] p-4 lg:flex" aria-hidden="true">
+          <Skeleton className="h-7 w-32" />
+          {Array.from({ length: 9 }, (_, i) => (
+            <Skeleton key={i} className={`h-4 ${i % 3 === 0 ? 'w-20' : 'w-36'}`} />
+          ))}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col bg-white">
+          <div className="flex h-[52px] items-center justify-between border-b border-[#e5e7eb] px-4" aria-hidden="true">
+            <Skeleton className="h-4 w-40" />
+            <div className="flex gap-2">
+              <Skeleton className="size-9 rounded-lg" />
+              <Skeleton className="size-9 rounded-lg" />
+              <Skeleton className="size-9 rounded-lg" />
+            </div>
+          </div>
+          <main className="mx-auto w-full max-w-[1280px] flex-1 px-3 py-4 sm:px-5 sm:py-5">
+            <LoadingState label="Checking your admin session…" variant="page" />
+          </main>
+        </div>
+      </div>
     );
   }
 

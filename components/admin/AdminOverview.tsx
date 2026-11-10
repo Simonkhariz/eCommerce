@@ -49,7 +49,7 @@ export function AdminOverview() {
   const { admin } = useAdminSession();
   const [filters, setFilters] = useUrlFilters({ period: '30' });
   const period = toPeriod(filters.period);
-  const { data, loading, error, reload } = useAdminData(() => adminGetOverview(period), [period]);
+  const { data, loading, error, reload } = useAdminData('AdminOverview', () => adminGetOverview(period), [period]);
   const firstName = (admin.full_name || '').trim().split(/\s+/)[0];
 
   return (
@@ -96,7 +96,7 @@ export function AdminOverview() {
         </Shell>
       ) : !data ? (
         <Shell title="Overview" icon={<BarChart3 className="size-4" aria-hidden="true" />}>
-          <LoadingState label="Loading the overview…" />
+          <LoadingState label="Loading the overview…" variant="page" />
         </Shell>
       ) : (
         <div className={`flex flex-col gap-4 transition-opacity ${loading ? 'opacity-60' : ''}`}>
@@ -443,7 +443,7 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
             <MiniStat label="New customers" value={num(data.kpis.new_customers).toLocaleString()} delta={data.deltas.new_customers} />
           </dl>
         </div>
-        <p className="-mt-3 text-xs text-[#6b7280]">Payments verified each day, before refunds.</p>
+        <p className="text-xs text-[#6b7280]">Payments verified each day, before refunds.</p>
 
         {showTable ? (
           <div className="max-h-[300px] overflow-auto rounded-lg border-[0.8px] border-[#e5e7eb]">
@@ -872,7 +872,7 @@ function WorkloadTiles({ data }: { data: DashboardOverview }) {
                   {t.value.toLocaleString()}
                   {t.urgent && <span className="size-2 rounded-full bg-[#ef4444]" aria-label="needs action" role="img" />}
                 </span>
-                <span className="truncate text-xs text-[#6b7280]">{t.hint}</span>
+                <span className="line-clamp-2 text-xs leading-snug text-[#6b7280]">{t.hint}</span>
               </span>
               <ArrowUpRight className="size-4 shrink-0 text-[#9ca3af] transition-colors group-hover/kpi:text-[#1f2937]" aria-hidden="true" />
             </Link>
@@ -927,15 +927,15 @@ function RecentOrders({ data }: { data: DashboardOverview }) {
           </div>
         ) : (
           <div className="w-full overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-left text-[13px] text-[#52525b]">
+            <table className="w-full border-collapse text-left text-[13px] text-[#52525b] md:min-w-[760px]">
               <thead>
                 <tr className="bg-[#f9fafb] text-[13px] text-[#4b5563]">
                   <th scope="col" className="rounded-tl-[10px] px-4 py-2.5 font-normal">Order</th>
-                  <th scope="col" className="px-4 py-2.5 font-normal">Customer</th>
-                  <th scope="col" className="px-4 py-2.5 font-normal">Status</th>
-                  <th scope="col" className="px-4 py-2.5 font-normal">Payment</th>
-                  <th scope="col" className="px-4 py-2.5 text-right font-normal">Total</th>
-                  <th scope="col" className="rounded-tr-[10px] px-4 py-2.5 font-normal">Placed</th>
+                  <th scope="col" className="hidden px-4 py-2.5 font-normal md:table-cell">Customer</th>
+                  <th scope="col" className="hidden px-3 py-2.5 font-normal sm:table-cell md:px-4">Status</th>
+                  <th scope="col" className="hidden px-4 py-2.5 font-normal sm:table-cell">Payment</th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-normal md:px-4">Total</th>
+                  <th scope="col" className="hidden rounded-tr-[10px] px-4 py-2.5 font-normal md:table-cell">Placed</th>
                 </tr>
               </thead>
               <tbody>
@@ -943,16 +943,19 @@ function RecentOrders({ data }: { data: DashboardOverview }) {
                   const who = o.customer_name || o.customer_email || 'Guest';
                   return (
                     <tr key={o.id} className="group/row border-t border-[#f3f4f6] transition-colors hover:bg-[#fafafa]">
-                      <td className="px-4 py-2.5">
-                        <Link href={orderHref(o.order_number)} className="font-medium text-[#1f2937] hover:underline">
+                      <td className="px-3 py-2.5 md:px-4">
+                        <Link href={orderHref(o.order_number)} className="whitespace-nowrap font-medium text-[#1f2937] hover:underline">
                           {o.order_number}
                         </Link>
                         <span className="block text-xs text-[#6b7280]">
                           {num(o.items_count)} item{num(o.items_count) === 1 ? '' : 's'}
                           {!!num(o.requires_attention) && <span className="font-medium text-[#b45309]"> · needs attention</span>}
                         </span>
+                        <span className="mt-1 block sm:hidden">
+                          <StatusDot status={orderStatus(o.order_status)} />
+                        </span>
                       </td>
-                      <td className="max-w-[240px] px-4 py-2.5">
+                      <td className="hidden max-w-[240px] px-4 py-2.5 md:table-cell">
                         <span className="flex items-center gap-2">
                           <span
                             className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[#f3f4f6] text-[10px] font-semibold text-[#4b5563] shadow-[inset_0_0_0_0.8px_#e5e7eb] transition-transform duration-200 group-hover/row:scale-110"
@@ -966,14 +969,14 @@ function RecentOrders({ data }: { data: DashboardOverview }) {
                           </span>
                         </span>
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="hidden px-3 py-2.5 sm:table-cell md:px-4">
                         <StatusDot status={orderStatus(o.order_status)} />
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="hidden px-4 py-2.5 sm:table-cell">
                         <PaymentCell status={o.payment_status} method={o.payment_method} />
                       </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-[#1f2937]">{formatPrice(num(o.total_amount))}</td>
-                      <td className="whitespace-nowrap px-4 py-2.5" title={formatDateTime(o.created_at)}>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-[#1f2937] md:px-4">{formatPrice(num(o.total_amount))}</td>
+                      <td className="hidden whitespace-nowrap px-4 py-2.5 md:table-cell" title={formatDateTime(o.created_at)}>
                         {formatRelative(o.created_at)}
                       </td>
                     </tr>

@@ -38,8 +38,28 @@ export function DeliveryZonesTable() {
     return [named.join(', '), rest].filter(Boolean).join(' · ') || '—';
   };
 
+  const extraFee = (zone: (typeof active)[number]) =>
+    Number(zone.extra_item_fee) > 0
+      ? `${Number(zone.items_included) > 1 ? `covers ${zone.items_included} items, then ` : 'for 1 item, then '}+${formatPrice(Number(zone.extra_item_fee))} each extra item`
+      : null;
+
   return (
-    <div className="mt-6 overflow-x-auto rounded-2xl border border-neutral-200">
+    <>
+    {/* Phones: one card per zone, so the fee is always on screen (the table needs 520px). */}
+    <ul className="mt-6 space-y-3 sm:hidden">
+      {active.map((zone) => (
+        <li key={zone.id} className="rounded-2xl border border-neutral-200 p-4 text-sm">
+          <div className="flex items-start justify-between gap-3">
+            <p className="font-semibold text-black">{zone.name}</p>
+            <p className="shrink-0 whitespace-nowrap font-bold text-black">{formatPrice(Number(zone.fee))}</p>
+          </div>
+          {extraFee(zone) && <p className="mt-0.5 text-right text-xs text-neutral-600">{extraFee(zone)}</p>}
+          <p className="mt-2 text-neutral-700">{statesLabel(zone.states_covered ?? [])}</p>
+          {zone.estimated_days && <p className="mt-1 text-xs text-neutral-600">Estimated delivery: {zone.estimated_days}</p>}
+        </li>
+      ))}
+    </ul>
+    <div className="mt-6 hidden overflow-x-auto rounded-2xl border border-neutral-200 sm:block">
       <table className="w-full min-w-[520px] text-left text-sm">
         <caption className="sr-only">Delivery fees by zone</caption>
         <thead className="bg-neutral-50 text-xs uppercase tracking-wider text-neutral-700">
@@ -81,5 +101,6 @@ export function DeliveryZonesTable() {
         </tbody>
       </table>
     </div>
+    </>
   );
 }

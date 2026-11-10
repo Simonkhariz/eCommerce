@@ -51,7 +51,7 @@ export function AdminCustomers() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
-  const { data, loading, error, reload } = useAdminData(
+  const { data, loading, error, reload } = useAdminData('AdminCustomers',
     () => adminGetCustomers({ status: filters.status, search: filters.search, page, per_page: 20 }),
     [filters.status, filters.search, page]
   );
@@ -143,7 +143,7 @@ function CustomerDetailModal({ customerId, onClose, onChanged }: { customerId: n
   const confirm = useConfirm();
   const [saving, setSaving] = useState(false);
 
-  const { data, loading, error, reload } = useAdminData<CustomerDetail | null>(
+  const { data, loading, error, reload } = useAdminData<CustomerDetail | null>('AdminCustomers#detail',
     async () => (customerId !== null ? adminGetCustomer(customerId) : null),
     [customerId]
   );

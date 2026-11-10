@@ -506,3 +506,17 @@ input[type="range"]::-webkit-slider-thumb {
 .admin-table[data-stacked] table td:empty {
   display: none;
 }
+
+/* In a card, a value with its own width limit (a long email, a truncated title) still lines up on
+   the right under the other values instead of drifting to the middle of the row. */
+.admin-table[data-stacked] table td:not(:first-child):not([data-label='']) > [class*='max-w-'] {
+  margin-left: auto;
+}
+
+/* On a phone product page the "added to cart" notice sits above the fixed purchase bar, not on
+   top of its buttons (the bar is hidden while the page's own Add to Cart is on screen). */
+@media (max-width: 767.98px) {
+  body:has([data-sticky-purchase-bar]:not([data-off-screen])) [data-toast] {
+    bottom: 5.25rem;
+  }
+}

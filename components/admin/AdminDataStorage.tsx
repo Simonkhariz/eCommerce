@@ -144,7 +144,7 @@ function recordCount(n: number): string {
  * and confirms a clean-up with their password and a code emailed to them.
  */
 export function AdminDataStorage() {
-  const { data, loading, error, reload } = useAdminData<DataOverview>(() => adminGetDataOverview(), []);
+  const { data, loading, error, reload } = useAdminData<DataOverview>('AdminDataStorage#overview', () => adminGetDataOverview(), []);
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -384,7 +384,7 @@ function cellValue(column: DataRecordColumn, value: string | number | null): Rea
 /** The exact records one rule would remove, page by page. */
 function RecordsDialog({ rule, label, asOf, onClose }: { rule: string; label: string; asOf: string; onClose: () => void }) {
   const [page, setPage] = useState(1);
-  const { data, loading, error, reload } = useAdminData(() => adminGetDataRecords(rule, asOf, page), [rule, asOf, page], { onPastEnd: setPage });
+  const { data, loading, error, reload } = useAdminData('AdminDataStorage', () => adminGetDataRecords(rule, asOf, page), [rule, asOf, page], { onPastEnd: setPage });
   const right = (c: DataRecordColumn) => c.type === 'money' || c.type === 'number';
 
   return (
@@ -453,6 +453,13 @@ function CleanupDialog({
 
   const fail = (err: unknown, field: 'password' | 'code') => {
     if (redirectIfSignedOut(err)) return;
+    // No answer in time: the clean-up may still be finishing on the server. The code is used
+    // either way, so close and show the current list instead of asking for it again.
+    if (field === 'code' && err instanceof ApiError && err.errorCode === 'TIMEOUT') {
+      toast.error('The server is taking long to answer. The clean-up may still be finishing: check the list again in a minute.');
+      onDone();
+      return;
+    }
     // The records changed, or the review is over 30 minutes old: show the current list.
     if (err instanceof ApiError && (err.statusCode === 409 || err.errorCode === 'REVIEW_EXPIRED')) {
       toast.error(errorMessage(err));

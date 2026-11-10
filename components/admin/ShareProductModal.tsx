@@ -80,7 +80,7 @@ export function ShareProductModal({ product, onClose }: { product: ShareableProd
 
         <Field label="Product link">
           {(p) => (
-            <div className="flex gap-2">
+            <div className="flex items-stretch gap-2 [&>button]:!h-auto [&>button]:self-stretch">
               <TextInput {...p} readOnly value={url} onFocus={(e) => e.currentTarget.select()} />
               <Button onClick={copy}>
                 <Copy className="size-3.5" aria-hidden="true" />
@@ -93,7 +93,7 @@ export function ShareProductModal({ product, onClose }: { product: ShareableProd
         <form onSubmit={sendToNumber} noValidate>
           <Field label="Send on WhatsApp to" hint="Type the customer's number (080…, 070…, 090… or +234…)." error={phoneError}>
             {(p) => (
-              <div className="flex gap-2">
+              <div className="flex items-stretch gap-2 [&>button]:!h-auto [&>button]:self-stretch">
                 <TextInput {...p} type="tel" inputMode="tel" placeholder="0803 123 4567" value={phone} onChange={(e) => setPhone(e.target.value)} />
                 <Button type="submit" variant="primary">
                   Send

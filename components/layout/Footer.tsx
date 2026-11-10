@@ -21,7 +21,11 @@ function NewsletterForm() {
   const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault();
     const value = email.trim();
-    if (!value) return;
+    if (!value) {
+      setState('error');
+      setMessage('Enter your email address first.');
+      return;
+    }
     setState('sending');
     setMessage('');
     try {
@@ -69,7 +73,7 @@ function NewsletterForm() {
       </div>
       <button
         type="submit"
-        disabled={state === 'sending' || !email.trim()}
+        disabled={state === 'sending'}
         className="w-full rounded-full bg-white py-3 text-sm font-semibold text-black shadow-md sm:w-auto sm:px-6 lg:w-full transition-colors hover:bg-neutral-100 disabled:opacity-60 sm:py-3.5"
       >
         {state === 'sending' ? 'Subscribing…' : 'Subscribe to newsletter'}

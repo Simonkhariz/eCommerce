@@ -63,7 +63,10 @@ export default async function RootLayout({
   const version = versionData?.version ?? null;
 
   return (
-    <html lang="en" className={`${satoshi.variable} ${spaceGrotesk.variable}`}>
+    // suppressHydrationWarning: the admin's dark mode is set on <html> before React loads
+    // (app/admin/layout.tsx), so its class differs from the server's on purpose. Only this
+    // element's own attributes are exempt; the rest of the page is still checked.
+    <html lang="en" className={`${satoshi.variable} ${spaceGrotesk.variable}`} suppressHydrationWarning>
       <body className="min-h-screen flex flex-col bg-white text-black antialiased selection:bg-black selection:text-white">
         <QueryProvider>
           <StoreDataProvider seed={{ facets, shipping, payments, version }}>

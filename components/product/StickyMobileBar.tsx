@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Product } from '@/types';
 import { formatPrice } from '@/lib/currency';
 import { useHydrated } from '@/lib/use-hydrated';
@@ -27,10 +27,29 @@ export const StickyMobileBar: React.FC<StickyMobileBarProps> = ({
   onBuyNow,
 }) => {
   const ready = useHydrated();
+  // While the page's own quantity / Add to Cart row is on screen this bar would only repeat it
+  // (two identical buttons, one overlapping the other), so it waits below the screen edge.
+  const [mainOnScreen, setMainOnScreen] = useState(false);
+  useEffect(() => {
+    const main = document.querySelector('[data-main-purchase]');
+    if (!main || typeof IntersectionObserver === 'undefined') return;
+    const watcher = new IntersectionObserver(([entry]) => setMainOnScreen(entry.isIntersecting), { threshold: 0.6 });
+    watcher.observe(main);
+    return () => watcher.disconnect();
+  }, []);
   return (
     // z-30: under the header (z-40), whose phone menu opens above this bar. data-sticky-purchase-bar
     // makes room for it below the footer (globals.css).
-    <div role="region" aria-label="Quick purchase" data-sticky-purchase-bar className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-neutral-200 p-3 px-4 shadow-2xl flex items-center justify-between gap-3">
+    <div
+      role="region"
+      aria-label="Quick purchase"
+      data-sticky-purchase-bar
+      data-off-screen={mainOnScreen || undefined}
+      inert={mainOnScreen}
+      className={`md:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-neutral-200 p-3 px-4 shadow-2xl flex items-center justify-between gap-3 transition-transform duration-200 ${
+        mainOnScreen ? 'translate-y-full' : ''
+      }`}
+    >
       <div className="flex flex-col min-w-0">
         <span className="text-xs text-neutral-600 font-medium truncate max-w-[140px]">{selectionLabel}</span>
         <div className="flex items-baseline gap-1.5">

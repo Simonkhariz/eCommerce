@@ -37,7 +37,7 @@ export default function CustomerOrdersPage() {
         <div className="flex items-center justify-between">
           <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-neutral-700 hover:text-black">
             <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-            <span>Back to store</span>
+            <span>Back to the store</span>
           </Link>
           <Link href="/track-order" className="inline-flex items-center gap-1.5 text-sm font-semibold text-black hover:underline">
             <Search className="w-3.5 h-3.5" aria-hidden="true" />

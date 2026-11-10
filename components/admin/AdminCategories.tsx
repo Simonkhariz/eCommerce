@@ -24,6 +24,7 @@ import {
   useAdminData,
   useClientPagination,
   useConfirm,
+  useDiscardGuard,
   useToast,
 } from '@/components/admin/ui';
 
@@ -41,13 +42,14 @@ const EMPTY_FORM: CategoryForm = { name: '', slug: '', description: '', image_ur
 export function AdminCategories() {
   const toast = useToast();
   const confirm = useConfirm();
-  const { data, loading, error, reload } = useAdminData(() => adminGetCategories(), []);
+  const { data, loading, error, reload, mutate } = useAdminData('AdminCategories', () => adminGetCategories(), []);
   const categories = data ?? [];
   const { pageItems, meta, setPage } = useClientPagination(categories);
 
   const [editing, setEditing] = useState<AdminCategory | null>(null);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<CategoryForm>(EMPTY_FORM);
+  const closeEditor = useDiscardGuard(open, form, () => setOpen(false));
   const [slugTouched, setSlugTouched] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -151,9 +153,8 @@ export function AdminCategories() {
     if (!ok) return;
     setBusyId(cat.id);
     try {
-      await adminDeactivateCategory(cat.id);
+      await mutate((list) => list.map((c) => (c.id === cat.id ? { ...c, is_active: false } : c)), () => adminDeactivateCategory(cat.id));
       toast.success(`"${cat.name}" is hidden from the store.`);
-      reload();
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The category could not be hidden.'));
     } finally {
@@ -164,9 +165,8 @@ export function AdminCategories() {
   const handleRestore = async (cat: AdminCategory) => {
     setBusyId(cat.id);
     try {
-      await adminSaveCategory(cat.id, { is_active: true });
+      await mutate((list) => list.map((c) => (c.id === cat.id ? { ...c, is_active: true } : c)), () => adminSaveCategory(cat.id, { is_active: true }));
       toast.success(`"${cat.name}" is visible in the store again.`);
-      reload();
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The category could not be restored.'));
     } finally {
@@ -232,11 +232,11 @@ export function AdminCategories() {
                         Edit
                       </Button>
                       {cat.is_active ? (
-                        <Button size="sm" variant="ghost" loading={busyId === cat.id} onClick={() => handleHide(cat)}>
+                        <Button size="sm" variant="ghost" disabled={busyId === cat.id} onClick={() => handleHide(cat)}>
                           Hide
                         </Button>
                       ) : (
-                        <Button size="sm" variant="ghost" loading={busyId === cat.id} onClick={() => handleRestore(cat)}>
+                        <Button size="sm" variant="ghost" disabled={busyId === cat.id} onClick={() => handleRestore(cat)}>
                           Restore
                         </Button>
                       )}
@@ -252,13 +252,13 @@ export function AdminCategories() {
 
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={closeEditor}
         busy={saving || uploading}
         persistent
         title={editing ? `Edit ${editing.name}` : 'New category'}
         footer={
           <>
-            <Button onClick={() => setOpen(false)} disabled={saving || uploading}>
+            <Button onClick={closeEditor} disabled={saving || uploading}>
               Cancel
             </Button>
             <Button variant="primary" type="submit" form="category-form" loading={saving} disabled={uploading}>
@@ -288,7 +288,7 @@ export function AdminCategories() {
           </Field>
           <Field label="Image URL" error={errors.image_url} hint="Optional. Upload a JPG, PNG or WebP, or paste an image address." className="sm:col-span-2">
             {(p) => (
-              <div className="flex items-center gap-2">
+              <div className="flex items-stretch gap-2 [&>button]:!h-auto [&>button]:self-stretch">
                 <TextInput
                   {...p}
                   className="min-w-0 flex-1"

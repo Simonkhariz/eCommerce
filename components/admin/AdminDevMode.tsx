@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   type DevMode,
   type DevSwitch,
@@ -24,8 +24,10 @@ import {
   PageHeader,
   Panel,
   StatusPill,
+  Switch,
   TextInput,
   redirectIfSignedOut,
+  usePendingValues,
   useToast,
 } from '@/components/admin/ui';
 
@@ -140,11 +142,11 @@ export function DevModePanel() {
   );
 }
 
-function SwitchRow({ item, disabled, onToggle }: { item: DevSwitch; disabled: boolean; onToggle: (on: boolean) => void }) {
+function SwitchRow({ item, shownOn, disabled, onToggle }: { item: DevSwitch; shownOn: boolean; disabled: boolean; onToggle: (on: boolean) => void }) {
   const labelId = `dev-switch-${item.key}`;
   const differs = item.available && item.on !== item.recommended;
   // Not set up on this server: it is not running, whatever the saved choice says.
-  const on = item.on && item.available;
+  const on = shownOn && item.available;
   return (
     <li className="flex items-start justify-between gap-4 px-4 py-3">
       <div className="min-w-0">
@@ -159,19 +161,7 @@ function SwitchRow({ item, disabled, onToggle }: { item: DevSwitch; disabled: bo
         </p>
         {item.note && <p className="mt-1 text-xs font-medium text-amber-700">{item.note}</p>}
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on}
-        aria-labelledby={labelId}
-        disabled={disabled || !item.available}
-        onClick={() => onToggle(!on)}
-        className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/50 disabled:opacity-60 ${
-          on ? 'bg-[#1f2937]' : 'bg-[#d1d5db]'
-        }`}
-      >
-        <span aria-hidden="true" className={`inline-block size-5 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
-      </button>
+      <Switch on={on} onChange={onToggle} labelledBy={labelId} disabled={disabled || !item.available} className="mt-0.5" />
     </li>
   );
 }
@@ -192,7 +182,23 @@ function SwitchesContent({ data }: { data: DevMode }) {
     }
   };
 
-  const toggle = (item: DevSwitch, on: boolean) => void run(() => adminUpdateDevSwitch(item.key, on), `${item.label} is now ${on ? 'on' : 'off'}.`);
+  // The switch moves at once; the saved state comes back with the answer (or it moves back).
+  const queryClient = useQueryClient();
+  const { admin } = useAdminSession();
+  const pending = usePendingValues<boolean>();
+  const toggle = async (item: DevSwitch, on: boolean) => {
+    if (pending.isPending(item.key)) return; // one save per switch at a time
+    pending.show(item.key, on);
+    try {
+      const fresh = await adminUpdateDevSwitch(item.key, on);
+      queryClient.setQueryData(devModeQuery(admin.id).queryKey, fresh);
+      toast.success(`${item.label} is now ${on ? 'on' : 'off'}.`);
+    } catch (err) {
+      if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The change could not be saved.'));
+    } finally {
+      pending.settle(item.key);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -214,7 +220,13 @@ function SwitchesContent({ data }: { data: DevMode }) {
       >
         <ul className="divide-y divide-[#f3f4f6]">
           {(data.switches ?? []).map((item) => (
-            <SwitchRow key={item.key} item={item} disabled={busy} onToggle={(on) => toggle(item, on)} />
+            <SwitchRow
+              key={item.key}
+              item={item}
+              shownOn={pending.valueOf(item.key, item.on)}
+              disabled={busy}
+              onToggle={(on) => void toggle(item, on)}
+            />
           ))}
         </ul>
       </Panel>

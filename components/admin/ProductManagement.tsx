@@ -42,6 +42,7 @@ import {
   useAdminData,
   useConfirm,
   useSearchBox,
+  useDiscardGuard,
   useToast,
   useUrlFilters,
 } from '@/components/admin/ui';
@@ -49,7 +50,9 @@ import {
 type ProductStatus = 'draft' | 'published' | 'archived';
 
 const DRESS_STYLES = ['Casual', 'Formal', 'Party', 'Gym'];
-const SIZES = ['XX-Small', 'X-Small', 'Small', 'Medium', 'Large', 'X-Large', 'XX-Large', '3X-Large', 'One Size'];
+// Short names, one per size: the shop's size filter lists every distinct name, so "M" and "Medium"
+// would show as two sizes. A product saved with another name keeps it in its own list.
+const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', '28', '30', '32', '34', '36', '38', '40', 'One Size'];
 
 const STATUS_LABELS: Record<ProductStatus, { label: string; tone: 'green' | 'amber' | 'neutral' }> = {
   published: { label: 'Published', tone: 'green' },
@@ -89,6 +92,8 @@ interface ProductForm {
   is_flash_deal: boolean;
   /** datetime-local value ('YYYY-MM-DDTHH:MM'); empty = no end date. */
   flash_deal_ends_at: string;
+  /** Optional starting star rating, '' = the store default. */
+  rating_start: string;
   images: ImageForm[];
   variants: VariantForm[];
 }
@@ -132,6 +137,7 @@ const EMPTY_FORM: ProductForm = {
   is_featured: false,
   is_flash_deal: false,
   flash_deal_ends_at: '',
+  rating_start: '',
   images: [],
   variants: [{ ...NEW_VARIANT }],
 };
@@ -158,6 +164,7 @@ function productToForm(p: AdminProduct): ProductForm {
     is_featured: Boolean(p.is_featured),
     is_flash_deal: Boolean(p.is_flash_deal),
     flash_deal_ends_at: toDateTimeLocal(p.flash_deal_ends_at),
+    rating_start: p.rating_start != null ? String(num(p.rating_start)) : '',
     images,
     variants: (p.variants ?? []).map((v) => ({
       id: v.id,
@@ -170,6 +177,31 @@ function productToForm(p: AdminProduct): ProductForm {
       low_stock_threshold: String(v.low_stock_threshold ?? 5),
     })),
   };
+}
+
+/** Server field messages the editor shows beside a field (anything else goes in the banner). */
+const SHOWN_ERROR_FIELDS = new Set([
+  'name', 'slug', 'category_id', 'dress_style', 'description', 'base_price', 'original_price', 'sku', 'status',
+  'rating_start', 'flash_deal_ends_at', 'variants', 'images',
+]);
+
+/** '4.5' -> 4.5; null when empty or not 1 to 5 with at most one decimal. */
+function startingRating(value: string): number | null {
+  const n = Number(value.trim());
+  if (value.trim() === '' || !Number.isFinite(n) || n < 1 || n > 5) return null;
+  return Math.abs(Math.round(n * 10) - n * 10) < 1e-9 ? Math.round(n * 10) / 10 : null;
+}
+
+/** Under the starting rating: what it does, and for a saved product what customers see now. */
+function ratingHint(p: AdminProduct | undefined): string {
+  const base = 'Optional, 1 to 5. Empty uses the store default (Settings). Counts like 5 reviews, so real reviews take over.';
+  if (!p) return base;
+  const shown = p.rating_avg > 0 ? `${p.rating_avg.toFixed(1)}★` : 'no stars';
+  const reviews =
+    p.rating_count > 0
+      ? `${p.rating_count} ${p.rating_count === 1 ? 'review' : 'reviews'}, customers' own average ${(p.review_avg ?? 0).toFixed(1)}★`
+      : 'no reviews yet';
+  return `${base} Shown now: ${shown} (${reviews}).`;
 }
 
 function stockPill(p: AdminProduct) {
@@ -188,7 +220,7 @@ export function ProductManagement() {
 
   const [searchText, setSearchText] = useSearchBox(filters.search, setFilters);
 
-  const { data, loading, error, reload } = useAdminData(
+  const { data, loading, error, reload, mutate } = useAdminData('ProductManagement',
     () =>
       apiGetAdminProducts({
         page,
@@ -202,7 +234,7 @@ export function ProductManagement() {
   );
   const products = data?.items ?? [];
 
-  const categoriesData = useAdminData(() => adminGetCategories(), []);
+  const categoriesData = useAdminData('ProductManagement#2', () => adminGetCategories(), []);
   const categories = categoriesData.data ?? [];
 
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -213,7 +245,9 @@ export function ProductManagement() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [sharing, setSharing] = useState<ShareableProduct | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const editingProduct = editingId ? products.find((p) => p.id === editingId) : undefined;
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
+  const closeEditor = useDiscardGuard(editorOpen, form, () => setEditorOpen(false));
   const [slugTouched, setSlugTouched] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -327,6 +361,9 @@ export function ProductManagement() {
       e.original_price = 'Must be higher than the price (it is shown crossed out).';
     }
     if (editingId && form.sku.trim().length < 3) e.sku = 'Use at least 3 characters.';
+    if (form.rating_start.trim() !== '' && startingRating(form.rating_start) === null) {
+      e.rating_start = 'Enter 1 to 5 with at most one decimal, e.g. 4.5, or leave it empty.';
+    }
     if (form.variants.length === 0) e.variants = 'Add at least one size and colour.';
     const seen = new Set<string>();
     form.variants.forEach((v, i) => {
@@ -372,6 +409,7 @@ export function ProductManagement() {
       is_flash_deal: form.is_flash_deal ? 1 : 0,
       // Empty clears the end date; the server ignores it when the product is not a flash deal.
       flash_deal_ends_at: form.is_flash_deal ? form.flash_deal_ends_at : '',
+      rating_start: startingRating(form.rating_start),
       images: form.images.map((img, idx) => ({
         image_url: img.image_url,
         alt_text: img.alt_text.trim() || form.name.trim(),
@@ -404,7 +442,15 @@ export function ProductManagement() {
       if (redirectIfSignedOut(err)) return;
       const fields = fieldErrors(err);
       setErrors(fields);
-      setFormError(Object.keys(fields).length ? 'Please fix the highlighted fields.' : errorMessage(err, 'The product could not be saved.'));
+      // A message for something the form has no box for is spelled out, never just "fix the highlighted fields".
+      const unplaced = Object.entries(fields)
+        .filter(([key]) => !SHOWN_ERROR_FIELDS.has(key) && !key.startsWith('variant_'))
+        .map(([, message]) => message);
+      setFormError(
+        Object.keys(fields).length
+          ? ['Please fix the highlighted fields.', ...unplaced].join(' ')
+          : errorMessage(err, 'The product could not be saved.')
+      );
     } finally {
       setSaving(false);
     }
@@ -426,10 +472,12 @@ export function ProductManagement() {
     }
     setBusyId(p.id);
     try {
-      if (status === 'archived') await apiDeleteAdminProduct(p.id);
-      else await apiUpdateAdminProductStatus(p.id, status);
+      // The new status shows at once; the list is re-read from the server afterwards.
+      await mutate(
+        (d) => ({ ...d, items: d.items.map((x) => (x.id === p.id ? { ...x, status } : x)) }),
+        () => (status === 'archived' ? apiDeleteAdminProduct(p.id) : apiUpdateAdminProductStatus(p.id, status))
+      );
       toast.success(`"${p.name}" is now ${STATUS_LABELS[status].label.toLowerCase()}.`);
-      reload();
     } catch (err) {
       if (!redirectIfSignedOut(err)) toast.error(errorMessage(err, 'The status could not be changed.'));
     } finally {
@@ -615,7 +663,7 @@ export function ProductManagement() {
 
       <Modal
         open={editorOpen}
-        onClose={() => setEditorOpen(false)}
+        onClose={closeEditor}
         busy={saving || uploading}
         persistent
         size="xl"
@@ -623,7 +671,7 @@ export function ProductManagement() {
         description="Physical products only. Prices are in naira."
         footer={
           <>
-            <Button onClick={() => setEditorOpen(false)} disabled={saving || uploading}>
+            <Button onClick={closeEditor} disabled={saving || uploading}>
               Cancel
             </Button>
             <Button variant="primary" type="submit" form="product-form" loading={saving} disabled={uploading}>
@@ -725,7 +773,22 @@ export function ProductManagement() {
                 </Select>
               )}
             </Field>
-            <div className="flex flex-col justify-end gap-2 pb-1 sm:col-span-2">
+            <Field label="Starting rating (★)" error={errors.rating_start} hint={ratingHint(editingProduct)}>
+              {(p) => (
+                <TextInput
+                  {...p}
+                  type="number"
+                  inputMode="decimal"
+                  min={1}
+                  max={5}
+                  step="0.1"
+                  placeholder="Store default"
+                  value={form.rating_start}
+                  onChange={(e) => update('rating_start', e.target.value)}
+                />
+              )}
+            </Field>
+            <div className="flex flex-col justify-end gap-2 pb-1 sm:col-span-3">
               <Checkbox label="Featured on the home page" hint="The home page's Featured row shows the 4 newest ticked products; View All lists the rest. Must be Published." checked={form.is_featured} onChange={(v) => update('is_featured', v)} />
               <Checkbox label="Show in flash deals" checked={form.is_flash_deal} onChange={(v) => update('is_flash_deal', v)} />
             </div>
@@ -750,6 +813,7 @@ export function ProductManagement() {
 
           <fieldset className="space-y-3">
             <legend className="mb-2 text-[13px] font-semibold text-[#111827]">Photos ({form.images.length})</legend>
+            {errors.images && <Notice tone="danger">{errors.images}</Notice>}
             <div className="flex flex-wrap items-start gap-2">
               <input
                 ref={fileRef}
@@ -910,7 +974,7 @@ export function ProductManagement() {
                             aria-label={`${label} size`}
                             value={v.size}
                             onChange={(e) => updateVariant(idx, { size: e.target.value })}
-                            className={`${inputClass} h-9 w-full py-1 lg:h-8`}
+                            className={`${inputClass} h-9 w-full !py-0 pr-7 lg:h-8`}
                             aria-invalid={rowError ? true : undefined}
                           >
                             <option value="">Choose…</option>

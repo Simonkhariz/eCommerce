@@ -44,25 +44,25 @@ export function QuickAddDialog({ product, onClose }: { product: Product; onClose
   // (content-visibility on the home page, hover transforms).
   return createPortal(
     <Dialog open onClose={onClose} title={`Add ${product.name} to cart`} panelClassName="w-full max-w-md">
-      <div className="relative max-h-[90vh] overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-6">
-        <button
-          type="button"
-          onClick={onClose}
-          data-close
-          className="absolute right-3 top-3 rounded-full p-2 text-neutral-600 hover:bg-neutral-100 hover:text-black"
-          aria-label="Close"
-        >
-          <HugeiconsIcon icon={Cancel01Icon} size={18} aria-hidden="true" />
-        </button>
-
-        <div className="mb-5 flex items-center gap-4 pr-8">
-          <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-[#F0EEED]">
-            {product.images[0] && <Image src={product.images[0]} alt="" fill sizes="80px" className="object-cover" />}
+      <div className="relative flex max-h-[90vh] supports-[height:100dvh]:max-h-[90dvh] flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
+        {/* A fixed row with the product and the close button: only the options below it scroll. */}
+        <div className="relative flex shrink-0 items-center gap-3 border-b border-neutral-100 py-3 pl-5 pr-12 sm:pl-6 sm:pr-14">
+          <button
+            type="button"
+            onClick={onClose}
+            data-close
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-2 text-neutral-600 hover:bg-neutral-100 hover:text-black sm:right-4"
+            aria-label="Close"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={18} aria-hidden="true" />
+          </button>
+          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[#F0EEED]">
+            {product.images[0] && <Image src={product.images[0]} alt="" fill sizes="56px" className="object-cover" />}
           </div>
           <div className="min-w-0">
-            <p className="line-clamp-2 font-bold text-black">{product.name}</p>
-            <p className="mt-1 flex items-baseline gap-2">
-              <span className="text-lg font-bold text-black">{formatPrice(price)}</span>
+            <p className="line-clamp-1 font-bold text-black">{product.name}</p>
+            <p className="mt-0.5 flex items-baseline gap-2">
+              <span className="text-base font-bold text-black">{formatPrice(price)}</span>
               {product.originalPrice && product.originalPrice > price && (
                 <span className="text-sm font-semibold text-neutral-600 line-through">
                   <span className="sr-only">Was </span>
@@ -73,6 +73,7 @@ export function QuickAddDialog({ product, onClose }: { product: Product; onClose
           </div>
         </div>
 
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
         <VariantSelector
           colors={product.colors}
           sizes={product.sizes}
@@ -103,6 +104,7 @@ export function QuickAddDialog({ product, onClose }: { product: Product; onClose
         <Link href={href} onClick={onClose} className="mt-4 block text-center text-sm font-semibold text-neutral-700 underline hover:no-underline">
           View full details
         </Link>
+        </div>
       </div>
     </Dialog>,
     document.body

@@ -93,7 +93,7 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
 
   const [searchText, setSearchText] = useSearchBox(filters.search, setFilters);
 
-  const { data, loading, error, reload } = useAdminData(
+  const { data, loading, error, reload } = useAdminData('AdminInventory',
     // 50 rows: every size and colour is its own row, so a page of 25 holds only a few products.
     () => adminGetInventory({ filter: stockFilter, search: filters.search, page, per_page: 50 }),
     [stockFilter, filters.search, page]
@@ -125,8 +125,8 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
     e.preventDefault();
     if (!target) return;
     const local: Record<string, string> = {};
+    // "Below 0" is decided by the server from the live stock: the figure on screen can be old.
     if (!validAmount) local.change = 'Enter a whole number other than 0 (e.g. 10 or -3).';
-    else if (resulting < 0) local.change = `Stock can't go below 0 (only ${current} in stock).`;
     if (reason === 'Other' && !note.trim()) local.note = 'Describe the reason.';
     setErrors(local);
     if (Object.keys(local).length) return;
@@ -134,8 +134,15 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
     const reasonText = (reason === 'Other' ? note.trim() : note.trim() ? `${reason} – ${note.trim()}` : reason).slice(0, 240);
     setSaving(true);
     try {
-      await adminAdjustStock({ variant_id: target.id, change_amount: amount, reason: reasonText });
-      toast.success(`Stock for ${target.product_name} (${variantLabel(target.size, target.color_name)}) is now ${resulting}.`);
+      const saved = await adminAdjustStock({ variant_id: target.id, change_amount: amount, reason: reasonText });
+      const name = `${target.product_name} (${variantLabel(target.size, target.color_name)})`;
+      const now = num(saved?.new_stock ?? resulting);
+      // Sales since this screen loaded change the starting figure: say what it really was.
+      toast.success(
+        saved && num(saved.previous_stock) !== current
+          ? `Stock for ${name} is now ${now} (it was ${num(saved.previous_stock)}, not ${current}, when you saved).`
+          : `Stock for ${name} is now ${now}.`
+      );
       setTarget(null);
       reload();
     } catch (err) {
@@ -304,7 +311,7 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
 }
 
 function StockMovements({ page, onPage }: { page: number; onPage: (page: number) => void }) {
-  const { data, loading, error, reload } = useAdminData(() => adminGetInventoryLogs({ page, per_page: 25 }), [page]);
+  const { data, loading, error, reload } = useAdminData('AdminInventory#2', () => adminGetInventoryLogs({ page, per_page: 25 }), [page]);
   const rows = data?.items ?? [];
 
   return (

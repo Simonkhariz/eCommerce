@@ -430,8 +430,9 @@ export const apiRequestFull = fetchFullFromApi;
 
 /**
  * Maps an API product summary or detail into the storefront Product shape.
- * Only real data is used: no invented reviews, ratings, specifications, FAQs,
- * colours or sizes. Missing information stays empty and the UI shows nothing for it.
+ * Only data from the API is used: no invented reviews, specifications, FAQs, colours or sizes.
+ * The rating is the server's (the owner's starting rating blended with approved reviews), and
+ * the review count is real reviews only. Missing information stays empty and the UI shows nothing.
  */
 export function mapApiProductToStorefront(item: ApiProductSummary | ApiProductDetail): Product {
   const images =
@@ -458,6 +459,13 @@ export function mapApiProductToStorefront(item: ApiProductSummary | ApiProductDe
           stock: Math.max(0, Number(v.stock_quantity) || 0),
         }))
       : undefined;
+
+  // Lists send total_stock / in_stock; a product's own page sends the stock per option instead.
+  // Without this, a refreshed wishlist item (read from the product page answer) looked sold out.
+  const variantStock = variants ? variants.reduce((sum, v) => sum + v.stock, 0) : null;
+  const listed = item as { total_stock?: number | string | null; in_stock?: boolean | null };
+  const totalStock = listed.total_stock !== undefined && listed.total_stock !== null ? Number(listed.total_stock) || 0 : (variantStock ?? 0);
+  const inStock = listed.in_stock !== undefined && listed.in_stock !== null ? Boolean(listed.in_stock) : variantStock !== null ? variantStock > 0 : totalStock > 0;
 
   const reviews: Review[] =
     'reviews' in item && Array.isArray(item.reviews)
@@ -497,8 +505,8 @@ export function mapApiProductToStorefront(item: ApiProductSummary | ApiProductDe
     colors,
     sizes,
     variants,
-    totalStock: Number(item.total_stock) || 0,
-    inStock: Boolean(item.in_stock),
+    totalStock,
+    inStock,
     sku: item.sku,
     details,
     faqs: [],
@@ -882,8 +890,14 @@ export interface AdminProduct {
   original_price: number | null;
   currency: string;
   sku: string;
+  /** The rating the shop shows: the starting rating blended with approved reviews. */
   rating_avg: number;
+  /** Approved reviews only. */
   rating_count: number;
+  /** The product's own starting rating; null = the store default. */
+  rating_start?: number | null;
+  /** The customers' own average (approved reviews only). */
+  review_avg?: number;
   is_featured: boolean;
   is_flash_deal: boolean;
   flash_deal_ends_at?: string | null;
@@ -925,6 +939,8 @@ export interface AdminProductPayload {
   is_featured: 0 | 1;
   is_flash_deal: 0 | 1;
   flash_deal_ends_at: string;
+  /** 1 to 5; null = use the store default starting rating. */
+  rating_start: number | null;
   images: Array<{ image_url: string; alt_text: string; is_primary: 0 | 1; display_order: number }>;
   variants: Array<{
     id?: number;

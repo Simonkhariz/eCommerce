@@ -8,7 +8,7 @@ export default function AdminPanelLayout({ children }: { children: React.ReactNo
   return (
     <AdminAuthGate>
       <AdminShell>
-        <Suspense fallback={<LoadingState />}>{children}</Suspense>
+        <Suspense fallback={<LoadingState variant="page" />}>{children}</Suspense>
       </AdminShell>
     </AdminAuthGate>
   );

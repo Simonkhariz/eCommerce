@@ -131,7 +131,7 @@ export const PRIVACY: { intro: string; sections: ContentSection[] } = {
       heading: 'How we use it',
       body: [
         'To process and deliver your order, send you order emails, answer your questions and handle refunds.',
-        'Newsletters are only sent to people who subscribed, and every newsletter has a one-click unsubscribe link.',
+        'Newsletters go to people who subscribed and to customers with a confirmed email address or a paid order. Every newsletter has a one-click unsubscribe link, and once you unsubscribe you are not added back.',
       ],
     },
     {

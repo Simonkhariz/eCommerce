@@ -335,7 +335,7 @@ function TrackOrderContent() {
   // What the step happening now is waiting for, in the customer's words.
   const currentNote =
     currentStage === 1
-      ? awaitingConfirmation ? 'Awaiting confirmation' : 'Awaiting payment'
+      ? awaitingConfirmation ? 'Awaiting confirmation' : statusDisplay?.label === 'Payment window closed' ? 'Not paid in time' : 'Awaiting payment'
       : currentStage === 2
         ? rawStatus === 'processing' ? 'Being packed' : 'Up next'
         : currentStage === 3
@@ -438,12 +438,9 @@ function TrackOrderContent() {
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label htmlFor="track-verification" className="text-xs font-bold uppercase tracking-wider text-neutral-600">
-                    Checkout Email
-                  </label>
-                  <span id="track-verification-hint" className="text-xs text-neutral-600">Not needed on the device you ordered from</span>
-                </div>
+                <label htmlFor="track-verification" className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-neutral-600">
+                  Checkout Email
+                </label>
                 <input
                   id="track-verification"
                   aria-describedby="track-verification-hint"
@@ -454,6 +451,7 @@ function TrackOrderContent() {
                   placeholder="Email or access key"
                   className="w-full text-sm px-4 py-3 bg-neutral-50 border border-neutral-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-black"
                 />
+                <p id="track-verification-hint" className="mt-1.5 text-xs text-neutral-600">Not needed on the device you ordered from.</p>
               </div>
             </div>
 
@@ -517,10 +515,10 @@ function TrackOrderContent() {
                       type="button"
                       onClick={() => void handleInitiatePayment(payNowGateway)}
                       disabled={Boolean(isInitializingPayment)}
-                      className="flex-1 sm:flex-initial bg-black hover:bg-neutral-800 text-white font-bold px-5 py-2.5 rounded-full text-xs transition-all shadow flex items-center justify-center gap-1.5"
+                      className="flex-1 sm:flex-initial bg-black hover:bg-neutral-800 text-white font-bold px-5 py-2.5 rounded-full text-xs transition-all shadow flex items-center justify-center gap-1.5 disabled:opacity-60"
                     >
                       <CreditCard className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>{isInitializingPayment ? 'Connecting…' : `Pay now (${formatPrice(order.grand_total)})`}</span>
+                      <span>{isInitializingPayment === payNowGateway ? 'Connecting…' : `Pay now (${formatPrice(order.grand_total)})`}</span>
                     </button>
                     )}
 
@@ -892,8 +890,9 @@ function TrackOrderContent() {
             panelClassName="w-full max-w-md"
             describedBy="track-pay-summary"
           >
-            <div className="relative w-full bg-white rounded-t-3xl sm:rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 animate-rise">
-              <div className="sticky top-0 z-10 -mx-6 -mt-6 sm:-mx-7 sm:-mt-7 px-6 pt-6 sm:px-7 sm:pt-7 bg-white rounded-t-3xl flex items-center justify-between border-b border-neutral-100 pb-3">
+            <div className="relative flex max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl animate-rise sm:rounded-3xl">
+              {/* A fixed row: only the payment options below it scroll. */}
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-100 py-3 pl-6 pr-4 sm:pl-7 sm:pr-5">
                 <div>
                   <p className="text-base font-bold text-black" aria-hidden="true">Pay for your order</p>
                   <p id="track-pay-summary" className="text-xs text-neutral-600 font-mono">
@@ -905,11 +904,13 @@ function TrackOrderContent() {
                   onClick={() => setShowPaymentModal(false)}
                   disabled={Boolean(isInitializingPayment)}
                   aria-label="Close payment options"
-                  className="p-1.5 hover:bg-neutral-100 rounded-full text-neutral-600 hover:text-black transition-colors disabled:opacity-50"
+                  className="shrink-0 p-2 hover:bg-neutral-100 rounded-full text-neutral-600 hover:text-black transition-colors disabled:opacity-50"
                 >
                   <X className="w-5 h-5" aria-hidden="true" />
                 </button>
               </div>
+
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6 sm:p-7">
 
               {paymentError && (
                 <div role="alert" className="p-3 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-2 text-sm text-red-800">
@@ -959,6 +960,7 @@ function TrackOrderContent() {
                     <span>{isInitializingPayment === 'whatsapp' ? 'Opening WhatsApp…' : 'Pay via WhatsApp (bank transfer)'}</span>
                   </button>
                 )}
+              </div>
               </div>
             </div>
           </Dialog>

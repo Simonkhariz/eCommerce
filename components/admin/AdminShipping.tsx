@@ -34,17 +34,20 @@ const VIEWS = [
 export function AdminShipping() {
   const toast = useToast();
   const confirm = useConfirm();
-  const [filters, setFilters] = useUrlFilters({ view: 'to_ship', status: 'paid', page: '1' });
+  const [filters, setFilters] = useUrlFilters({ view: 'to_ship', status: 'to_ship', page: '1' });
   const [shipOrder, setShipOrder] = useState<string | null>(null);
   const [busyOrder, setBusyOrder] = useState<string | null>(null);
 
   const view = filters.view === 'in_transit' ? 'in_transit' : 'to_ship';
-  const status = view === 'in_transit' ? 'shipped' : filters.status === 'processing' ? 'processing' : 'paid';
+  // "To ship" starts with paid and processing orders together, so an order marked Processing
+  // while it is being packed never drops out of the queue.
+  const status = view === 'in_transit' ? 'shipped' : filters.status === 'processing' || filters.status === 'paid' ? filters.status : 'to_ship';
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
 
-  const { data, loading, error, reload } = useAdminData(
+  const { data, loading, error, reload } = useAdminData('AdminShipping',
     () => adminGetOrders({ status, page, per_page: 20 }),
-    [status, page]
+    [status, page],
+    { refreshEvery: 60_000 }
   );
 
   const markDelivered = async (o: AdminOrderListItem) => {
@@ -91,7 +94,7 @@ export function AdminShipping() {
             type="button"
             role="tab"
             aria-selected={view === v.value}
-            onClick={() => setFilters({ view: v.value, status: 'paid' })}
+            onClick={() => setFilters({ view: v.value, status: 'to_ship' })}
             className={`h-8 rounded-md px-3 text-[13px] font-semibold outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40 ${
               view === v.value ? 'bg-white text-[#111827] shadow-sm' : 'text-[#6b7280] hover:text-[#111827]'
             }`}
@@ -108,6 +111,7 @@ export function AdminShipping() {
             value={status}
             onChange={(s) => setFilters({ status: s })}
             options={[
+              { value: 'to_ship', label: 'All waiting to ship' },
               { value: 'paid', label: 'Paid – not started' },
               { value: 'processing', label: 'Processing – being packed' },
             ]}
@@ -123,7 +127,7 @@ export function AdminShipping() {
           hasData={!!data}
           empty={items.length === 0}
           emptyTitle={view === 'in_transit' ? 'No parcels in transit' : 'Nothing to ship'}
-          emptyDescription={view === 'in_transit' ? 'Shipped orders appear here until they are delivered.' : 'Paid orders appear here until they are shipped.'}
+          emptyDescription={view === 'in_transit' ? 'Shipped orders appear here until they are delivered.' : 'Paid and processing orders appear here until they are shipped.'}
         >
           <Table minWidth={860}>
             <thead>
@@ -147,6 +151,9 @@ export function AdminShipping() {
               {items.map((o) => {
                 const addr = o.shipping_address_snapshot ?? {};
                 const s = orderStatus(o.order_status);
+                // The action follows the row's own status, never the tab: while a tab is loading,
+                // the rows on screen can still be the other tab's.
+                const inTransit = o.order_status === 'shipped';
                 return (
                   <tr key={o.id} className="hover:bg-[#fafafa]">
                     <td>
@@ -161,7 +168,7 @@ export function AdminShipping() {
                     <td className="text-right tabular-nums">{num(o.total_quantity) || num(o.items_count)}</td>
                     <td className="whitespace-nowrap text-right tabular-nums">{formatPrice(num(o.grand_total))}</td>
                     <td>
-                      {view === 'in_transit' ? (
+                      {inTransit ? (
                         <>
                           <span className="block">{o.carrier || '—'}</span>
                           {o.tracking_number && <span className="block text-xs text-[#6b7280]">{o.tracking_number}</span>}
@@ -171,15 +178,15 @@ export function AdminShipping() {
                       )}
                     </td>
                     <td className="whitespace-nowrap text-[#4b5563]">
-                      {view === 'in_transit' ? formatDateTime(o.shipped_at) : formatDate(o.created_at)}
+                      {inTransit ? formatDateTime(o.shipped_at) : formatDate(o.created_at)}
                     </td>
                     <td className="text-right">
-                      {view === 'in_transit' ? (
-                        <Button size="sm" onClick={() => markDelivered(o)} loading={busyOrder === o.order_number}>
+                      {inTransit ? (
+                        <Button size="sm" onClick={() => markDelivered(o)} loading={busyOrder === o.order_number} disabled={loading}>
                           Mark delivered
                         </Button>
                       ) : (
-                        <Button size="sm" variant="primary" onClick={() => setShipOrder(o.order_number)}>
+                        <Button size="sm" variant="primary" onClick={() => setShipOrder(o.order_number)} disabled={loading}>
                           Ship
                         </Button>
                       )}

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiGetStorefrontVersion, clearApiCache } from '@/lib/api-client';
 import { useStoreSeed } from '@/components/layout/StoreDataProvider';
+import { clearProductDetailCache } from '@/lib/product-detail-cache';
 import { resetStoreInfoCaches } from '@/lib/use-store-info';
 import { resetStoreSupportCache } from '@/lib/use-store-support';
 
@@ -52,6 +53,7 @@ export function StoreLiveUpdates() {
         if (latest !== known.current) {
           known.current = latest;
           clearApiCache();
+          clearProductDetailCache();
           resetStoreInfoCaches();
           resetStoreSupportCache();
           void queryClient.invalidateQueries();

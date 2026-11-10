@@ -334,8 +334,9 @@ export function adminGetInventoryLogs(params: { variant_id?: number; page?: numb
   return apiRequest<Paginated<InventoryLog>>(`/admin/inventory/logs${qs(params)}`);
 }
 
+/** The answer carries the stock before and after, as the server applied it (the screen's figure can be old). */
 export function adminAdjustStock(data: { variant_id: number; change_amount: number; reason: string }) {
-  return send<unknown>('/admin/inventory/adjust', 'POST', data);
+  return send<{ previous_stock: number; new_stock: number }>('/admin/inventory/adjust', 'POST', data);
 }
 
 // =============================================================================
@@ -731,6 +732,8 @@ export interface StoreSettings {
     pay_now_gateway: 'monnify' | 'kora' | null;
     order_payment_window_minutes: number;
     manual_payment_window_hours: number;
+    /** Where new-order, payment and storage alerts go right now ("Send admin alerts to", else every active admin). */
+    admin_alert_recipients: string[];
   };
 }
 
@@ -923,7 +926,11 @@ export function adminVerifyCleanup(password: string, asOf: string, skip: string[
 
 /** Step 2: the emailed code; removes exactly the records reviewed as of the challenge's time. */
 export function adminRunCleanup(confirmationId: string, code: string) {
-  return refreshAfter(send<{ removed: Record<string, number> }>('/admin/data/cleanup', 'POST', { confirmation_id: confirmationId, code }), refreshStorageAlert);
+  // Removing many pictures from the bucket can take a while: wait up to two minutes.
+  return refreshAfter(
+    send<{ removed: Record<string, number> }>('/admin/data/cleanup', 'POST', { confirmation_id: confirmationId, code }, { timeoutMs: SLOW_ACTION_TIMEOUT_MS }),
+    refreshStorageAlert
+  );
 }
 
 export interface AdminAccount {
@@ -941,34 +948,87 @@ export function adminGetAccount() {
   return apiRequest<AdminAccount>('/admin/account');
 }
 
-export function adminUpdateAccount(data: { full_name: string; phone: string; current_password?: string; new_password?: string }) {
-  return apiRequestFull<{ id: number; full_name: string; phone: string }>('/admin/account', {
+/** Changing `email` (the sign-in email) or setting `new_password` needs `current_password`. */
+/** Fields left out are kept as they are on the server. */
+export function adminUpdateAccount(data: { full_name?: string; phone?: string; email?: string; current_password?: string; new_password?: string }) {
+  return apiRequestFull<{ id: number; full_name: string; phone: string; email: string }>('/admin/account', {
     method: 'PUT',
     body: JSON.stringify(data),
   });
 }
 
 // =============================================================================
-// Marketing (newsletter subscribers only)
+// Admin team
+// =============================================================================
+
+export interface AdminTeamMember {
+  id: number;
+  email: string;
+  full_name: string;
+  role: 'admin' | 'super_admin';
+  status: 'active' | 'unverified' | 'suspended';
+  created_at: string;
+  last_seen_at: string | null;
+  is_you: boolean;
+}
+
+export function adminListAdmins() {
+  return apiRequest<{ items: AdminTeamMember[]; min_password_length: number }>('/admin/admins');
+}
+
+/** Leave `password` empty to have one made up; it comes back once as generated_password. */
+export function adminCreateAdmin(data: { full_name: string; email: string; password?: string; current_password: string }) {
+  return apiRequestFull<AdminTeamMember & { generated_password: string | null }>('/admin/admins', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function adminSetAdminStatus(id: number, status: 'active' | 'suspended', currentPassword: string) {
+  return apiRequestFull<{ id: number; status: string }>(`/admin/admins/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, current_password: currentPassword }),
+  });
+}
+
+/** Removes the admin account for good. The activity log keeps their name on what they did. */
+export function adminDeleteAdmin(id: number, currentPassword: string) {
+  return apiRequestFull<{ id: number }>(`/admin/admins/${id}/delete`, {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword }),
+  });
+}
+
+// =============================================================================
+// Marketing (newsletter subscribers + registered customers)
 // =============================================================================
 
 export interface Subscriber {
-  id: number;
   email: string;
   status: 'active' | 'unsubscribed';
-  source: string;
+  /** subscriber: joined from the store footer. customer: on the list because they have an account. */
+  origin: 'subscriber' | 'customer';
+  /** The email has an active customer account (also true for a subscriber who registered). */
+  has_account: boolean;
   subscribed_at: string;
   unsubscribed_at: string | null;
 }
 
-export function adminGetSubscribers(params: { status?: string; page?: number; per_page?: number }) {
-  return apiRequest<Paginated<Subscriber> & { counts: { active: number; unsubscribed: number } }>(
+export function adminGetSubscribers(params: { status?: string; origin?: string; page?: number; per_page?: number }) {
+  return apiRequest<
+    Paginated<Subscriber> & { counts: { active: number; unsubscribed: number; active_subscribers: number; active_customers: number } }
+  >(
     // The server defaults to 'active'; 'any' (not one of its statuses) lists everyone.
-    `/admin/marketing/subscribers${qs({ status: params.status === 'all' ? 'any' : params.status ?? 'active', page: params.page, per_page: params.per_page })}`
+    `/admin/marketing/subscribers${qs({
+      status: params.status === 'all' ? 'any' : params.status ?? 'active',
+      origin: params.origin && params.origin !== 'all' ? params.origin : undefined,
+      page: params.page,
+      per_page: params.per_page,
+    })}`
   );
 }
 
-/** confirm_recipients must equal the active-subscriber count the admin saw and confirmed. */
+/** confirm_recipients must equal the active count (subscribers + customers) the admin saw and confirmed. */
 export function adminSendBroadcast(data: { subject: string; content: string; confirm_recipients: number }) {
   // already_queued_today: subscribers who already had this exact newsletter queued today (not sent twice).
   return send<{ queued_count: number; already_queued_today: number; mail_mode: string }>('/admin/marketing/broadcast', 'POST', data, { timeoutMs: SLOW_ACTION_TIMEOUT_MS });

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { useAuth } from '@/context/AuthContext';
 import { ApiError, apiSubmitReview } from '@/lib/api-client';
@@ -85,11 +85,26 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
     return next;
   };
 
+  // After a refused submit, bring its first message into view: on a phone the stars and the
+  // form-level notice are above the fold of the scrolling body, and the button is at the bottom.
+  const formRef = useRef<HTMLFormElement>(null);
+  const [refusals, setRefusals] = useState(0);
+  useEffect(() => {
+    if (refusals === 0) return;
+    const first = formRef.current?.querySelector<HTMLElement>('[role="alert"], [data-field-error]');
+    first?.scrollIntoView({ block: 'center' });
+    const field = first?.closest('div, fieldset')?.querySelector<HTMLElement>('input, textarea, button[role="radio"]');
+    field?.focus({ preventScroll: true });
+  }, [refusals]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const local = validate();
     setErrors(local);
-    if (Object.keys(local).length > 0) return;
+    if (Object.keys(local).length > 0) {
+      setRefusals((n) => n + 1);
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -117,6 +132,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
       } else {
         setErrors({ form: 'Your review could not be sent. Please try again.' });
       }
+      setRefusals((n) => n + 1);
     } finally {
       setSubmitting(false);
     }
@@ -135,23 +151,26 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
       onClose={onClose}
       title={`Review ${productName}`}
       busy={submitting}
-      panelClassName="w-full sm:max-w-lg max-h-[92dvh] overflow-y-auto bg-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl"
+      panelClassName="flex max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:max-w-lg sm:rounded-3xl"
     >
-      <div className="flex items-start justify-between gap-4 mb-4" aria-hidden="true">
-        <div>
-          <p className="font-bold text-xl text-black">Write a review</p>
-          <p className="text-sm text-neutral-600 mt-0.5 line-clamp-1">{productName}</p>
+      {/* A fixed row: only the form below it scrolls. */}
+      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-neutral-100 py-3 pl-6 pr-4">
+        <div className="min-w-0" aria-hidden="true">
+          <p className="text-lg font-bold leading-tight text-black">Write a review</p>
+          <p className="line-clamp-1 text-sm text-neutral-600">{productName}</p>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={submitting}
+          aria-label="Close"
+          className="shrink-0 rounded-full p-2 text-neutral-600 hover:bg-neutral-100 hover:text-black disabled:opacity-40"
+        >
+          <HugeiconsIcon icon={Cancel01Icon} size={20} />
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={onClose}
-        disabled={submitting}
-        aria-label="Close"
-        className="absolute top-5 right-5 p-1.5 rounded-full text-neutral-600 hover:text-black hover:bg-neutral-100 disabled:opacity-40"
-      >
-        <HugeiconsIcon icon={Cancel01Icon} size={20} />
-      </button>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-6">
 
       {doneMessage ? (
         <div className="text-center py-6 space-y-4" role="status">
@@ -169,7 +188,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
           </button>
         </div>
       ) : (
-        <form onSubmit={submit} noValidate className="space-y-4">
+        <form ref={formRef} onSubmit={submit} noValidate className="space-y-4">
           {errors.form && (
             <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
               {errors.form}
@@ -206,7 +225,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
               </span>
             </div>
             {errors.rating && (
-              <p id={errorId('rating')} className="mt-1 text-xs text-red-700">
+              <p id={errorId('rating')} data-field-error className="mt-1 text-xs text-red-700">
                 {errors.rating}
               </p>
             )}
@@ -228,7 +247,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
                 className={fieldClass(!!errors.author_name)}
               />
               {errors.author_name && (
-                <p id={errorId('author_name')} className="mt-1 text-xs text-red-700">
+                <p id={errorId('author_name')} data-field-error className="mt-1 text-xs text-red-700">
                   {errors.author_name}
                 </p>
               )}
@@ -252,7 +271,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
                 Not published. Used to check for a matching order.
               </p>
               {errors.email && (
-                <p id={errorId('email')} className="mt-1 text-xs text-red-700">
+                <p id={errorId('email')} data-field-error className="mt-1 text-xs text-red-700">
                   {errors.email}
                 </p>
               )}
@@ -273,7 +292,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
               className={fieldClass(!!errors.title)}
             />
             {errors.title && (
-              <p id={errorId('title')} className="mt-1 text-xs text-red-700">
+              <p id={errorId('title')} data-field-error className="mt-1 text-xs text-red-700">
                 {errors.title}
               </p>
             )}
@@ -298,7 +317,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
               {commentLength > 0 && commentLength < COMMENT_MIN ? ` (at least ${COMMENT_MIN})` : ''}
             </p>
             {errors.comment && (
-              <p id={errorId('comment')} className="mt-1 text-xs text-red-700">
+              <p id={errorId('comment')} data-field-error className="mt-1 text-xs text-red-700">
                 {errors.comment}
               </p>
             )}
@@ -318,6 +337,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
           </button>
         </form>
       )}
+      </div>
     </Dialog>
   );
 }
