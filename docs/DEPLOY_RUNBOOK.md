@@ -187,6 +187,12 @@ switched off.
    account oqlfyktj, for the domain shopco-api.kharizdigital.com.ng."* Nothing else needs changing:
    after an update, OPcache notices changed files by itself.
 
+**Leave `opcache.validate_timestamps` at 1 (On).** If it is 0, PHP never looks at the files again:
+after you upload a new `shopco-api.zip` the old code keeps running until the host restarts PHP, so
+an update seems to do nothing (or the new and old files mix). If you also see `opcache.revalidate_freq`,
+2 to 60 seconds is fine. Seen 10 Nov 2026: the INI editor showed `validate_timestamps` = 0 while
+OPcache itself was **Off**, so it had no effect yet; set it to 1 before OPcache is switched on.
+
 ## Card payments in test mode (sandbox)
 
 The demo shows Monnify and Kora with their **sandbox** keys (the same test keys as the PC): the
@@ -308,6 +314,7 @@ keep the Node.js app from being put to sleep by the host.
 
 | Date | Done |
 |---|---|
+| 10 Nov 2026 | **Prepared, not uploaded yet:** API + storefront release with a database update (migration 024: indexes only, no data changed; migration 025: starting ratings, adds two product columns and the 4.5 default, then recomputes every product's stars; migration 026: one new column on the activity log so a deleted admin's name stays on their past actions; migration 027: the oldest active admin becomes the Owner, whom other admins cannot switch off or delete; migration 028: sizes saved with long names become S, M, L, XL...). Order: API zip first → run the migrate cron once (step 3.6) and check `migrate.log` says 024 to 028 applied (5 migrations); then open My account -> Admin team and check that the Owner is your own account → storefront zip → Restart. Then: Settings → "Send admin alerts to" if alerts should go somewhere other than the admin accounts; My account can now change the sign-in email (needs the password) and add admins |
 | 7 Nov 2026 | Bought Truehost Starter and `kharizdigital.com.ng`; created both subdomains; host check passed; upload files built |
 | 8 Nov 2026 | Resend verified on `shopco.kharizdigital.com.ng`, test and sample emails delivered; https live; database created, imported and up to date (MySQL 8.4) |
 | 8 Nov 2026 | API online after the 403 fix: `/api/v1/health` answers healthy, database up |

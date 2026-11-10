@@ -15,7 +15,7 @@ It is written for three uses:
 > **Keep this file current.** Any change to what shoppers or admins see, to a safeguard, a limit
 > or a measured number updates this file in the same commit (changelog at the end).
 
-**Last updated:** 6 November 2026, branch `scalability-phase1`.
+**Last updated:** 10 November 2026, branch `main`.
 
 ---
 
@@ -59,7 +59,7 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **Daily database backups,** copied off the server to cloud storage, with a careful restore that
     works even on hosts without SSH.
 
-The backend has 1,693 automated checks in 22 test suites, the storefront 80 unit tests, and the
+The backend has 1,847 automated checks in 25 test suites, the storefront 81 unit tests, and the
 system has passed a full load test.
 
 ---
@@ -199,7 +199,7 @@ Empty sections hide themselves. **The shop never shows made-up products, prices 
 - Friendly states throughout: loading placeholders, "No matching products – try removing a
   filter", and a "Try again" button if the connection drops.
 
-**Product cards** show picture, name, rating (only when there are reviews), price, the old price
+**Product cards** show picture, name, star rating (section 5.6, "Starting rating"), price, the old price
 crossed out on sale items, a "Sold out" badge, and a heart.
 - The quick **Add** button checks live stock first.
 - One option in stock: added straight away. Several: a quick picker opens.
@@ -240,7 +240,9 @@ crossed out on sale items, a "Sold out" badge, and a heart.
 
 ### 4.4 Wishlist and cart
 
-- **Wishlist:** a slide-in drawer.
+- **Wishlist:** a slide-in drawer. Each saved item has one **Add to cart** button (the size picker
+  opens when the product has options; a sold-out item says "Sold out" instead) and a bin icon to
+  remove it. The picture and the name open the product page.
   - Guests: saved on the device. Opening the list brings prices and stock up to date, once per
     visit, and a product that no longer exists leaves the list.
   - Signed-in customers: also saved to the account and merged on sign-in. **The account's list is the
@@ -328,7 +330,8 @@ happen at all:**
   last moment.
 - An order number like `ORD-20261030-A1B2C3` is created, with a payment deadline (60 minutes by
   default).
-- **The owner is emailed too** (*"New order … (₦…)"*): every active admin, once per order.
+- **The owner is emailed too** (*"New order … (₦…)"*), once per order: to the addresses in Settings →
+  "Send admin alerts to" or, when that is empty, to every active admin account.
 - Guests receive a private **order access key** (only a scrambled copy is stored).
 - The email *"Order … received – complete your payment"* is queued.
 
@@ -534,7 +537,12 @@ Protection:
   - Every newsletter email has a **one-click unsubscribe** link. Unsubscribing doesn't stop order
     emails.
   - The unsubscribe page confirms the result, including for a link already used or invalid.
-  - Customers are never added without subscribing themselves.
+  - **Confirmed customers are on the list too** (one email each, even if they also subscribed): a
+    customer whose email is confirmed, or who has paid for an order. Signing up alone is not enough,
+    because anyone can type someone else's address into the sign-up form.
+  - Anyone who unsubscribes stops getting newsletters. A subscriber without an account can
+    subscribe again in the footer. **A customer's unsubscribe can only be undone by that customer,
+    signed in:** the footer form refuses, so nobody else can put them back.
 - **Help pages:**
   - About, Contact (live details, plus **"Our location"** with a Google Maps link, built from the
     dispatch address in Settings, so that address is public), FAQ (7 common questions), Shipping &
@@ -585,8 +593,16 @@ Protection:
   - **System:** Email outbox, Audit log, Store settings, My account.
   - **Dev mode** (only while dev mode is on, section 5.15): Tech switches, Data & storage, System
     status.
-- **Top bar:** breadcrumb, "View store", the sun/moon button, the **alert bell**, settings. The
-  sidebar can be hidden, and shows the admin's name with a sign-out button.
+- **Top bar:** the sidebar button, breadcrumb, **search**, "View store", the sun/moon button, the
+  **alert bell**, settings; every button is the same size.
+- **Search from anywhere** (wide screens; press `/` or Ctrl+K): type an order number, a customer's
+  name or email, a product name or SKU. Results are grouped; choosing one opens that order, or the
+  customers / products list narrowed to it. Enter with nothing highlighted searches the orders. The sidebar shows the admin's name with a
+  sign-out button.
+- **Mini sidebar (wide screens):** the sidebar button shrinks the menu to a narrow strip of icons and
+  back. Pointing at an icon shows its name; an icon that holds several pages (Orders, Catalogue &
+  stock, Payments, Marketing) opens a small menu of them. The choice is remembered on that browser.
+  On phones and tablets the same button is a menu (☰) that opens the sidebar as a drawer.
 - **The bell** has three rows. The first two refresh every minute while the tab is open, the
   database row every 5 minutes, and each right after the admin acts on it:
   1. **"Customers say they have paid"**: WhatsApp transfers to check.
@@ -741,8 +757,12 @@ past its deadline (section 6.2).
 ### 5.5 Shipping queue and delivery zones
 
 - **Shipping queue:**
-  - "To ship" (paid and not started, or being packed) and "In transit".
-  - One-click **Ship** and **Mark delivered**.
+  - "To ship" (paid and not started, and being packed, together by default; a filter narrows it to
+    one) and "In transit".
+  - One-click **Ship** and **Mark delivered**. The button follows the order's own status, and rows
+    cannot be clicked while a tab is still loading.
+  - The queue and the orders list **refresh by themselves** every minute while the tab is open, and
+    when the admin comes back to it: new orders appear without reloading.
 - **Delivery zones:**
   - Groups of states, each with a code (2-30 characters), description, fee and delivery estimate,
     with "Select all states", an Active switch, and Delete. Deleting asks for confirmation and is
@@ -770,6 +790,13 @@ past its deadline (section 6.2).
       refused, and one made from the name "501" becomes `product-501` (`category-501` for a category);
     - price, and an optional "was" price shown crossed out, up to ₦99,999,999.99 (section 6.10);
     - "Show in flash deals" and a deal end time;
+    - **Starting rating (optional):** the stars a product starts with, 1 to 5 (e.g. 4.5). Empty uses
+      the store default from Settings (4.5 unless changed). It counts like 5 reviews, so real reviews
+      take over as they come in: with a 4.5 start, one 1-star review shows 3.9, and twenty 3-star
+      reviews show 3.3. The review count shown is always the real number of approved reviews (a
+      product with none shows stars but no count), and the editor shows the rating customers see now
+      next to the customers' own average. If the store default is emptied, products without their
+      own starting rating show stars only from reviews;
     - "Featured on the home page": puts a published product in the home page's Featured row (the 4
       newest ticked show; all are under "View All"). To put an older product on the page, untick
       newer ones. The product list shows "Featured" beside it;
@@ -877,10 +904,16 @@ past its deadline (section 6.2).
   - A code that was used is switched off rather than deleted, so order history keeps it. **An unused
     code is deleted for good,** after a confirmation.
 - **Newsletter:**
-  - A list of subscribers with counts.
+  - Goes to footer subscribers **and every active registered customer**, each email once. The list
+    shows where each address comes from: *Subscriber*, *Subscriber · has an account* or *Registered
+    customer*, with counts of each and a Source filter.
+  - Someone who unsubscribed is never put back because they have an account. Suspended or removed
+    customers drop out. The data clean-up keeps an unsubscribe while the email still has an account
+    (removing it would sign them back up).
   - Write a subject (up to 150 characters) and message, review the recipient count, then queue it.
-  - Each subscriber gets their own copy with an unsubscribe link.
-  - If the subscriber count changed since the owner looked, the shop asks them to confirm again.
+  - Each person gets their own copy with an unsubscribe link; a customer's email says it comes
+    "because you have an account".
+  - If the count changed since the owner looked, the shop asks them to confirm again.
   - **The same newsletter goes to each person at most once a day,** so a double click or retry
     never sends it twice.
 - **Homepage banners:**
@@ -888,7 +921,7 @@ past its deadline (section 6.2).
   - links are checked to be shop pages or https addresses;
   - **Delete** removes a banner for good, after a confirmation (it is recorded in the audit log).
 - **Reviews:** filter by status, then Approve, Reject or Move to pending. Only approved reviews show
-  and count toward ratings.
+  and count toward ratings (blended with the product's starting rating, section 5.6).
 
 ### 5.10 Analytics and reports
 
@@ -982,7 +1015,14 @@ past its deadline (section 6.2).
 
 - **Store settings:**
   - Store name, support email and phone, WhatsApp number (saved in international format), dispatch
-    address and the brand strip (up to 20 brands, 40 characters each). **Without a WhatsApp number
+    address and the brand strip (up to 20 brands, 40 characters each).
+  - **Starting star rating for products:** the default starting rating (section 5.6), 4.5 unless
+    changed; empty = stars only from reviews. Changing it recomputes every product's rating at once.
+  - **Send admin alerts to:** one or more addresses (up to 10, separated by commas) for the new-order,
+    payment and storage alerts. Empty means every active admin account gets them. "Configured on the
+    server" shows where alerts go right now. The support email is only what customers see; it does
+    not receive alerts. A data clean-up notice always goes to every admin account as well, so it
+    cannot be hidden by pointing alerts elsewhere. **Without a WhatsApp number
     here or on the server, customers aren't offered WhatsApp at all.**
   - **Payment methods on/off:** Monnify, Kora, WhatsApp. The shop refuses to switch off the last one
     that is on and allowed by the server. It doesn't check for keys, so a gateway with no keys can
@@ -1008,8 +1048,28 @@ past its deadline (section 6.2).
   - **On a live server it warns about settings to fix before customers arrive** (for example
     test payment keys still in use). On a PC it warns when the API was started without its router,
     which makes bucket pictures disappear.
-- **My account:** name, phone, and password change. Changing the password signs out every other
-  device.
+- **My account:** name, phone, sign-in email and password. Changing the email or the password needs
+  the current password; changing the password signs out every other device. Admin alerts follow the
+  new email unless "Send admin alerts to" is set.
+- **Admin team** (on My account): every admin account with role, last seen and status.
+  - **Add admin:** full name, email and either a password (10+ characters) or none, in which case one
+    is made up and shown once to copy. The owner types their own password to confirm. New accounts
+    are ordinary admins; an email used by a customer or another admin is refused. At most 10 an hour.
+  - **Switch off / Switch on:** a switched-off admin is signed out everywhere and can't sign in;
+    nothing is deleted. Nobody can switch off themselves or the last active admin, and only a super
+    admin can switch off a super admin. Five wrong passwords lock these checks for 15 minutes.
+  - **Delete** (the bin icon): removes the account for good after the owner's own password. They are
+    signed out everywhere and can't sign in again. The same limits apply: not yourself, not the last
+    active admin, a super admin only by a super admin. **Their history stays:** orders, stock
+    changes and refunds are kept, and the activity log shows "Name (deleted admin, email)" on
+    everything they did. To stop someone for a while, Switch off is the gentler choice.
+  - **The owner is protected.** The account made at first-run setup is the **Owner**. Only an
+    owner can switch off or delete an owner, so staff added later can never lock the owner out.
+    (Shops set up before 10 Nov 2026: the update makes the oldest active admin the owner.)
+  - An admin who is switched off or deleted is also taken out of "Send admin alerts to".
+  - One limit covers every "type your password again" check (team, account email, dev mode, data
+    clean-up): five wrong tries in 15 minutes lock them all.
+  - All of it is in the audit log.
 
 ### 5.15 Dev mode and tech switches
 
@@ -1473,7 +1533,7 @@ proposal.
 
 **Proof in numbers:**
 
-- **1,693 automated backend checks** in 22 test suites. They run against a throw-away database
+- **1,823 automated backend checks** in 25 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data, buckets and Redis are never touched.
 - Plus 79 storefront unit tests, type checks, lint and a production build. They are run by hand
   before changes are finished; there is no automatic build server yet.
@@ -1596,7 +1656,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive once." |
 | 5 | A clean-up button behind a password field and an emailed code | "No clean-up without your password and an emailed code." |
 | 6 | A calendar with a backup box every night, flying to a cloud | "Daily backups, copied off the server, with a careful restore." |
-| 7 | A counter climbing: 1,693 ✓ | "Over 1,600 automated backend checks." |
+| 7 | A counter climbing: 1,823 ✓ | "Over 1,800 automated backend checks." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
@@ -1811,3 +1871,10 @@ When something changes, update the matching section in the same commit:
 | 9 Nov 2026 | **Admin changes show at once.** Pages were cached for a minute and browsers were allowed to show a stale copy while fetching a new one, so on phones new contact details and the homepage coupon took hours to appear. Pages are now built for each visit and never kept by browsers; pages already open check a tiny "storefront version" every 5 seconds (and when the shopper returns to the tab) and reload their content in place when the owner has changed something; the store details shared by the header, footer and checkout now follow the newest page data. Order tracking follows its order every 5 seconds, and a reported WhatsApp transfer is checked every 5 seconds. The WhatsApp payment message now gives the order number and amount and asks for the account number. System status reports OPcache correctly on hosts that hide its status. Checked end to end on a production build: an open page showed a new contact email, phone and WhatsApp number together in 5-6 seconds without reloading; saving them through admin Settings reaches the very next shop request (backend test) |
 | 9 Nov 2026 | Payment waiting page: WhatsApp transfers now show the amount to transfer (or the amount sent) in a grey panel, the "Ask the store on WhatsApp" button matches the shop's black-and-white style and no longer wraps on phones, the duplicate "Awaiting confirmation" line became "Checking every few seconds", and the card sits near the top on phones. Footer credit: "Developed with ♥ by KharizDigital". Order tracker fixed: a new order showed "Order placed: in progress" and "Payment confirmed" before any payment; now placing is ticked, the current step says what it waits for, paid and packing differ, the line lines up with the circles, and phones get a connecting line |
 | 8 Nov 2026 | Email replies: new `MAIL_REPLY_TO` setting sends customers' replies to an inbox the owner reads (such as Gmail), because the sender address needs no mailbox and has none. Works with Resend and SMTP. All 14 emails redesigned to match the storefront: the SHOP.CO wordmark, bold uppercase headings, rounded item and order-summary panels, discounts in red, black pill buttons, a grey footer with the store's contact details, and an inbox preview line; checked at phone width and sent as samples through Resend. Deployment to Truehost started, recorded step by step in `docs/DEPLOY_RUNBOOK.md`; fixed there: the API answered 403 on LiteSpeed until `public/.htaccess` allowed access itself. The host checker no longer shows a false NO for R2: Cloudflare's certificate on its bare test address expired, while the shop's own R2 address is fine |
+| 10 Nov 2026 | **Admin alerts:** new setting "Send admin alerts to" (Settings); empty = every active admin account, as before. Why the owner's alerts kept going to the old address: they go to admin accounts, not to the support email, and the account email could not be changed. Now **My account** can change the sign-in email (current password needed). **Admin team** on My account: add an admin (own password to confirm, made-up password shown once) and switch admins off or on. **Newsletter** now also goes to registered customers, one email each, and an unsubscribe always wins. **Indexes:** migration 024 adds 8 indexes for the admin lists, dashboard and reports; sign-in and the guest-order claim no longer scan whole tables (`LOWER()` removed from indexed email lookups). Query strings sent as lists (`?search[]=`) get a 400 instead of a server error |
+| 10 Nov 2026 | **Admin feels instant.** Screens keep their last data in the tab (TanStack Query): going back to a screen shows it at once and quietly checks with the server behind it. Loading shows grey skeletons shaped like the page instead of spinners. Switches and quick actions (tech switches, payment methods, promo pause/delete, product status, review moderation, category hide/restore, banner and zone delete) change on screen at once and go back with a message if the save fails. **Dark mode:** the card stripes show again, the sharp white outlines are dark grey, switches are clearly on (white) or off (grey), the chart's highlighted bar is light, and the sign-in and session check open dark without a light flash. Top-right header buttons are all the same size. **Storefront:** sold-out sizes are hidden instead of crossed out; the card's cart button loads the product's options as the finger or pointer reaches it (shared for 30 seconds), so the tap rarely waits; the wishlist has "View" and "Add to cart" on each item (the size picker opens for products with options), and its items no longer showed as sold out after the list refreshed (the product page answer has no overall stock figure; it is now added up from the sizes). Dialogs keep their title and close button at the top while the content scrolls, and only the top dialog answers Escape. Fixed: a hydration warning in the admin (the "1 Issue" badge in dev). 1,788 backend checks, 81 storefront tests |
+| 10 Nov 2026 | **Starting ratings.** The product editor has an optional "Starting rating" (1 to 5); empty uses the new Settings default "Starting star rating for products" (4.5; empty = stars only from reviews). The starting rating counts like 5 reviews and approved reviews take over as they arrive; the review count shown is always the real one, and the editor shows the rating customers see beside their own average. Product cards and pages now show stars whenever a product has a rating. Migration 025 (two columns, one setting, ratings recomputed). 1,823 backend checks in 25 suites, 81 storefront tests |
+| 10 Nov 2026 | **Dialogs rebuilt.** The sign-in, checkout, quick-add, review, pay-for-order, filter and menu windows had a title bar that was pushed down by the window's padding: an empty band above it, the first lines of content hidden under it, and content showing above it while scrolling. Each now has a short fixed title row and a separate scrolling body. **Wishlist:** one "Add to cart" button and a bin icon per item (picture and name open the product); the "View" button is gone. **Admin:** the menu button matches the other header buttons; on wide screens it switches between the full sidebar and a mini sidebar of icons (names on hover, a small menu for icons with several pages), remembered on the browser |
+| 10 Nov 2026 | **Delete an admin** (My account -> Admin team, bin icon): own password needed; never yourself or the last active admin. The activity log keeps the deleted admin's name on their past actions (migration 026 adds `admin_label`). Settings: Support email and "Send admin alerts to" now share a row |
+| 10 Nov 2026 | **Full review of storefront and admin** (code read end to end and every screen looked at on a phone and a laptop, light and dark). Fixed, among about 90 findings: **the owner can no longer be removed by staff** (first admin = Owner; migration 027); the shipping queue could offer "Mark delivered" on a paid order while a tab was loading; a shopper's own unpaid order could block their next checkout ("only 0 available"), it is now released first; changing colour could silently swap the chosen size; the newsletter went to sign-ups whose email was never confirmed; a customer's unsubscribe could be undone from the footer form; alerts kept going to a removed admin named in "Send admin alerts to"; passwords could land in the error log's stack traces; one shared, count-first limit for password re-checks; lists said "nothing here" while a new filter loaded; stock adjustments now report the real figure; an admin's cached screens are cleared when the session ends; forms no longer lose typing when fresh data arrives. Screens: orders and payments stay tables on a laptop (cards only on phones); dark-mode tick boxes, focus rings and dialog backdrops; loading placeholders shaped like the page; delivery fees as cards on phones; the phone purchase bar hides while the page's own Add to Cart is on screen; product cards line up (two-line names, old price under the price); empty cart without a zero summary; WhatsApp messages state the exact amount. |
+| 10 Nov 2026 | **Demo polish.** Admin: a search box in the top bar finds orders, customers and products from any screen; the orders list and shipping queue refresh by themselves every minute; closing a product, category, banner, zone or promo form with unsaved changes asks "Discard your changes?". Storefront: a search that finds nothing says so in its own words with a way on; colours in the filter are named; each size has one name (the editor now offers S, M, L, XL...; migration 028 renames options saved as Small, Medium, Large... where that causes no clash). Checkout already fills in a signed-in customer's saved address. |

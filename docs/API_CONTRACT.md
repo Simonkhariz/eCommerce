@@ -334,6 +334,7 @@ Protected admin endpoint to create a new physical product with variants and imag
   "currency": "NGN",
   "sku": "SKU-HOODIE-VINTAGE",
   "dress_style": "Casual",
+  "rating_start": 4.6,
   "variants": [
     {
       "sku": "SKU-HOODIE-VINTAGE-L-BLK",
@@ -370,6 +371,7 @@ Protected admin endpoint to create a new physical product with variants and imag
 
 ### `PUT /api/v1/admin/products/{id}` & `DELETE /api/v1/admin/products/{id}`
 - `PUT`: Updates product details (`200 OK`).
+- `rating_start` (optional, create and update): the product's starting star rating, 1 to 5 with at most one decimal; `null` or `""` = use the store default (`default_product_rating`); a missing key keeps the stored value; anything else is 422 `error.details.rating_start`. Admin product rows include `rating_start` and `review_avg` (the approved reviews' own average); the public product endpoints do not.
 - `DELETE`: Archives product (`status = 'archived'`) (`200 OK`). Protected behind `AdminAuthMiddleware`.
 
 ---
@@ -506,7 +508,7 @@ Admin Analytics        GET  /api/v1/admin/analytics/overview              Step 1
 | `PUT` | `/api/v1/customer/wishlist` | Customer session + CSRF | Replace the saved wishlist: `{product_ids: number[]}` (published products only). |
 
 Behaviour changes:
-- `GET /api/v1/products/{idOrSlug}` now includes `reviews` (approved only). `rating_avg` / `rating_count` are computed from approved reviews (0 when there are none).
+- `GET /api/v1/products/{idOrSlug}` now includes `reviews` (approved only). `rating_count` is the number of approved reviews. `rating_avg` (since migration 025) is the starting rating (the product's own `rating_start`, else the store's `default_product_rating`) counted as 5 reviews and blended with the approved reviews: `(start × 5 + sum of ratings) / (5 + count)`, 2 decimals. With no starting rating at all it is the approved reviews' average, 0 when there are none (the shop then shows no stars).
 - `GET /api/v1/products` accepts `sort=best_selling` (units on paid orders), `flash_deals=1` and `topSelling=1`; `newArrivals` no longer filters by "featured".
 - Checkout quote/order: `shipping_address.state` must be one of the 36 states or FCT (`Abuja`, `FCT` and `Federal Capital Territory` are equivalent). Unknown states are rejected instead of falling back to the nationwide zone.
 - Checkout orders require the exact `variant_id` (legacy carts may send an exact `size` + `color` pair). `Idempotency-Key` header makes order creation safe to retry.
@@ -518,7 +520,9 @@ Behaviour changes:
 
 All `/api/v1/admin/*` endpoints need the admin session cookie (`shopco_admin`); mutating calls also need the `X-CSRF-Token` header from `/auth/me?scope=admin` or the login response. Every change is written to `admin_audit_logs` with the admin's id.
 
-**Pagination.** These lists accept `?page=` and `?per_page=` (max 100) and return `{items, pagination: {total, page, per_page, total_pages}}`: orders, inventory, inventory logs, customers, payments, refunds, reviews, email outbox, audit logs, newsletter subscribers. Audit logs also return `filters: {actions, entity_types}`; subscribers also return `counts: {active, unsubscribed}`.
+**Pagination.** These lists accept `?page=` and `?per_page=` (max 100) and return `{items, pagination: {total, page, per_page, total_pages}}`: orders, inventory, inventory logs, customers, payments, refunds, reviews, email outbox, audit logs, newsletter subscribers. Audit logs also return `filters: {actions, entity_types}`; subscribers also return `counts: {active, unsubscribed, active_subscribers, active_customers}`.
+
+**Query strings (since 10 Nov 2026).** Every query parameter must be a single value. A list such as `?search[]=x` or `?scope[a]=b` is refused with `400 BAD_REQUEST` before any endpoint runs (it used to be a 500). Only `colors` and `sizes` may be sent as a flat list (`?colors[]=red&colors[]=blue`), which is read as `colors=red,blue`.
 
 | Method | Path | Purpose |
 | :--- | :--- | :--- |
@@ -536,17 +540,22 @@ All `/api/v1/admin/*` endpoints need the admin session cookie (`shopco_admin`); 
 | `DELETE` | `/admin/promotions/{id}` | Deletes an unused code; a code used on orders is deactivated instead (`deleted: false`). |
 | `POST`/`PUT` | `/admin/storefront/banners[/{id}]` | Title and image required; `cta_url` must be a store path (`/…`) or an `https://` URL. |
 | `PATCH` | `/admin/customers/{id}/status` | `{status: active\|suspended}`. Suspending signs the customer out everywhere. |
-| `GET` | `/admin/settings` | `editable` (allowlisted keys with help text) and `readonly` (currency, timezone, gateway modes, mail mode, payment windows). No secrets are returned. |
-| `PUT` | `/admin/settings` | Only `store_name`, `store_contact_email`, `store_contact_phone`, `store_whatsapp_phone`, `store_origin_address`, `store_origin_city`, `store_origin_state`. Unknown keys are refused (422). `store_whatsapp_phone` is the number checkout shows for manual payments. |
+| `GET` | `/admin/settings` | `editable` (allowlisted keys with help text) and `readonly` (currency, timezone, gateway modes, mail mode, payment windows, `admin_alert_recipients`: where admin alerts go right now). No secrets are returned. |
+| `PUT` | `/admin/settings` | Only `store_name`, `store_contact_email`, `admin_alert_email`, `store_contact_phone`, `store_whatsapp_phone`, `store_origin_address`, `store_origin_city`, `store_origin_state`, `storefront_brands`, `default_product_rating`. Unknown keys are refused (422). `store_whatsapp_phone` is the number checkout shows for manual payments. `admin_alert_email`: up to 10 addresses separated by commas (saved lower case, no repeats, `", "` between); when set, new-order, payment-claimed, payment-received and storage alerts go only there; empty sends them to every active admin account (and to `store_contact_email` if there is none). The data clean-up notice always also goes to every active admin account. `default_product_rating`: 1 to 5 with at most one decimal, or empty (no starting rating: stars only from reviews); `GET` shows 4.5 when it was never saved; a change recomputes every product's `rating_avg`. |
 | `GET` | `/admin/system-status` | Database, migrations, uploads folder, gateway configuration, mail mode, outbox pending/failed, orders needing attention, unpaid orders past their window, orders awaiting fulfilment. |
-| `POST` | `/admin/marketing/broadcast` | `{subject, content, confirm_recipients}`. Sent only to active newsletter subscribers, each email with its own unsubscribe link. `confirm_recipients` must equal the current active count (409 `RECIPIENTS_CHANGED` otherwise). |
-| `PUT` | `/admin/account` | Profile and password. Changing the password signs out the admin's other sessions. |
+| `GET` | `/admin/marketing/subscribers?status=active\|unsubscribed\|any&origin=subscriber\|customer` | The newsletter audience, one entry per email: footer subscribers plus every confirmed customer account (active, and either `email_verified_at` is set or the account has an order in `paid`/`processing`/`shipped`/`delivered`/`completed`; signing up alone does not count). Items: `{email, status, origin: subscriber\|customer, has_account, subscribed_at, unsubscribed_at}` (no tokens). An unsubscribed address is never back in the audience because it has an account; suspended or removed customers drop out. |
+| `POST` | `/admin/marketing/broadcast` | `{subject, content, confirm_recipients}`. Sent to every active address in the audience above (subscribers and registered customers), each email with its own unsubscribe link (a customer gets a `newsletter_subscribers` row with `source = registered_customer` and a token the first time). `confirm_recipients` must equal the current active count (409 `RECIPIENTS_CHANGED` otherwise). |
+| `PUT` | `/admin/account` | `{full_name, phone, email?, current_password?, new_password?}`. Changing `email` (the sign-in email, unique, 409 `EMAIL_ALREADY_EXISTS` if taken) or setting `new_password` (10+ characters) needs `current_password` (422 `INVALID_CURRENT_PASSWORD`; 5 wrong in 15 minutes → 429). Changing the password signs out the admin's other sessions. Admin alerts follow the email unless `admin_alert_email` is set. |
+| `GET` | `/admin/admins` | Admin team: `{items: [{id, email, full_name, role, status, created_at, last_seen_at, is_you}], min_password_length}`. |
+| `POST` | `/admin/admins` | `{full_name, email, password?, current_password}` → `201` with the new account. Always role `admin`, active. `current_password` is the signed-in admin's own password (422 `WRONG_PASSWORD`; 5 wrong in 15 minutes → 429, shared with the other password checks). No `password`: one is made up (`xxxx-xxxx-xxxx-xxxx`) and returned once as `generated_password`; otherwise 10+ characters. An email already used by any account → 409 `EMAIL_ALREADY_EXISTS` (a customer is never turned into an admin). At most 10 new admins an hour per admin (429). Audited as `admin.create` (no password in the log). |
+| `PATCH` | `/admin/admins/{id}/status` | `{status: active\|suspended, current_password}`. Switching off signs the admin out everywhere; nothing is deleted. Never your own account (422 `CANNOT_CHANGE_SELF`), never the last active admin (422 `LAST_ADMIN`); only a super admin can change a super admin (403). Audited as `admin.suspend` / `admin.reactivate`. |
+| `POST` | `/admin/admins/{id}/delete` | `{current_password}`. Deletes the admin account for good and signs it out everywhere. Never your own account (422 `CANNOT_CHANGE_SELF`), never the last active admin (422 `LAST_ADMIN`); only a super admin can delete a super admin (403); not an admin account → 404. Their rows in `admin_audit_logs` get `admin_label` = `"Name (deleted admin, email)"`, which the activity-log endpoints return as `admin_name`. Audited as `admin.delete`. |
 
 Public:
 
 | Method | Path | Purpose |
 | :--- | :--- | :--- |
-| `POST` | `/api/v1/newsletter/subscribe` | `{email}`. Re-subscribing clears an earlier unsubscribe. |
+| `POST` | `/api/v1/newsletter/subscribe` | `{email}`. Re-subscribing clears an earlier unsubscribe, except for an address that belongs to a customer account: that needs the customer's own session (same email), otherwise 409 `UNSUBSCRIBED_BEFORE`. |
 | `POST` | `/api/v1/newsletter/unsubscribe` | `{token}` from the unsubscribe link (`/unsubscribe?token=…` on the storefront). |
 
 `GET /api/v1/checkout/payment-methods` now returns `support_phone` from the `store_whatsapp_phone` setting, falling back to `STORE_WHATSAPP_PHONE` in `backend/.env`.
@@ -566,6 +575,10 @@ Public:
 - `range` = `today`, `yesterday`, `7days`, `30days`, `90days`, `year`, `all`, or `start_date` + `end_date` (YYYY-MM-DD, inclusive).
 - Sales are verified payments by `verified_at`; refunds are completed refunds by `completed_at`; `owed_refunds` lists orders paid and later cancelled that still have money to return, and is subtracted from `net_sales`.
 - Also returned: `daily_breakdown` (orders placed, payments received, sales, refunds per day), `category_breakdown`, `top_products`, `gateway_breakdown` (attempts, successful, failed, received) and `formulas`.
+
+`GET /admin/orders?status=to_ship` lists the shipping queue: `paid` and `processing` orders together (the Shipping screen's default).
+
+Roles: the first-run setup account is created as `super_admin` (shown as "Owner"); accounts added in the admin are `admin`. Only a `super_admin` can switch off or delete a `super_admin`. Every password re-check (team actions, account email, dev mode, clean-up) shares one limit: 5 tries in 15 minutes per admin, counted before the comparison (429 after that).
 
 `GET /admin/orders/export` exports all dates by default and accepts the order list's `status` (including `attention`) and `search`.
 
