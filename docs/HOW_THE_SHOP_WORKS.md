@@ -15,7 +15,7 @@ It is written for three uses:
 > **Keep this file current.** Any change to what shoppers or admins see, to a safeguard, a limit
 > or a measured number updates this file in the same commit (changelog at the end).
 
-**Last updated:** 10 November 2026, branch `main`.
+**Last updated:** 11 November 2026, branch `main`.
 
 ---
 
@@ -207,6 +207,13 @@ crossed out on sale items, a "Sold out" badge, and a heart.
 
 ### 4.3 The product page
 
+- **Shared links show a picture.** A product link pasted into WhatsApp, Facebook, X, iMessage or
+  Telegram shows that product's main picture with its name; the shop's own link, and any other
+  page, shows the hero picture (the first banner, or the shop's hero art). The shop keeps pictures
+  as WebP, which some of those apps refuse, so `/share/product/{id}` and `/share/home` send a
+  1200 x 630 JPEG made from the same picture (`lib/share-image.ts`). The picture's address changes
+  when the main picture does, so apps fetch the new one. WhatsApp keeps a preview it has already
+  made for a link for some days.
 - **Gallery:** thumbnails, hover zoom, full-screen view with arrows.
 - **Page trail:** Shop, the category, the product. A product with no category simply has no category
   link.
@@ -316,7 +323,7 @@ crossed out on sale items, a "Sold out" badge, and a heart.
    - If the totals can't be worked out, the window offers **"Try again"**. A product that is no longer
      on sale is described only as *"An item in your cart is no longer available"*, so its name and
      status stay private.
-3. **"Continue to payment"** places the order. The note says *"Your items are reserved for 60
+3. **"Continue to payment"** places the order. The note says *"Your items are reserved for 30
    minutes while you pay."*
 
 **What happens when the order is placed, all in one step that either fully happens or doesn't
@@ -328,8 +335,14 @@ happen at all:**
   people can never buy the last item. The shopper is told the true number: usually *"Only N
   available, M requested"*, or *"Insufficient stock … Available: 0"* if someone else took it in the
   last moment.
-- An order number like `ORD-20261030-A1B2C3` is created, with a payment deadline (60 minutes by
+- An order number like `ORD-20261030-A1B2C3` is created, with a payment deadline (30 minutes by
   default).
+- **At most 2 unpaid orders per customer at a time.** Someone who already has two orders waiting
+  for payment is told *"You already have 2 orders waiting for payment. Pay for one of them from
+  Track order, or wait for it to expire, then place this order."*, with a link to their orders. The
+  customer is recognised by account, email, phone number or device, so changing one of them does
+  not get round it. Paying, cancelling or the payment window closing frees a place. The owner sets
+  the number in Store settings (0 = no limit).
 - **The owner is emailed too** (*"New order … (₦…)"*), once per order: to the addresses in Settings →
   "Send admin alerts to" or, when that is empty, to every active admin account.
 - Guests receive a private **order access key** (only a scrambled copy is stored).
@@ -396,7 +409,7 @@ confirms. The receipt email goes out at the same moment.
 - **The amount sent to the provider always comes from the database**, never from the browser.
 - Each payment try gets its own reference. If the shopper tries twice, both references stay
   valid, so a late payment on the first try is still matched to the order.
-- WhatsApp orders are held for 24 hours instead of 60 minutes, because transfers take longer.
+- WhatsApp orders are held for 6 hours instead of 30 minutes, because transfers take longer.
 - Tapping "I've sent the transfer" **never marks the order paid by itself.** It tells the store:
   all admins get the email *"Customer says order … is paid (₦…)"*, and the reservation is
   extended.
@@ -638,9 +651,13 @@ Protection:
 - **Headline cards:** Net sales, Paid orders, Average order value. Each has a trend line and a %
   change against the previous period. **Net sales is worked out exactly as in Analytics:** money
   received, minus refunds completed, minus refunds owed on cancelled orders.
-- **Sales trend chart:** verified payments per day, counting the money actually received. It can
-  switch to a table and works by keyboard.
-- **More figures:** Refunded, **Refunds owed** (when above ₦0), Orders placed and New customers.
+- **Sales trend chart:** verified payments per day, counting the money actually received. **Refunds
+  show on the chart:** the part of a day's bar that was refunded that day is red (a day with only a
+  refund is a red bar), the day's label reads *"7 Nov : ₦76,000 · ₦30,400 refunded"*, and the table
+  view has a Refunded column. A refund counts on the day it is marked **completed**. It can switch
+  to a table and works by keyboard.
+- **More figures:** Refunded, **Refunds pending** (recorded but not yet completed, when above ₦0),
+  **Refunds owed** (when above ₦0), Orders placed and New customers.
 - **Latest updates feed:** new orders, payments not yet confirmed after 30 minutes, failed
   payments, sold-out and low-stock items, orders needing attention. It can be filtered to All,
   Orders, Payments or Stock.
@@ -927,8 +944,9 @@ past its deadline (section 6.2).
 
 - **Date ranges:** Today, Yesterday, 7, 30 or 90 days, This year, All time (really all time, matching
   the download), or custom dates.
-- **Headline cards:** Net sales, average order value, units sold (with repeat-customer %), and
-  the share of placed orders that were paid.
+- **Headline cards:** Net sales, **Refunded** (how many refunds were completed in the range, and
+  how much is still pending), average order value, units sold (with repeat-customer %), and the
+  share of placed orders that were paid.
 - **Tables:**
   - refunds owed;
   - daily breakdown;
@@ -1006,6 +1024,7 @@ past its deadline (section 6.2).
 
 ### 5.14 Store settings, system status and account
 
+- **Unpaid orders one customer can hold:** 2 unless changed, 0 to 20, 0 = no limit (section 6.2).
 - **"Pay now" gateway:** Monnify or Kora, plus on/off switches for each method.
 - **Dark mode:** the sun/moon button in the admin header; remembered on that browser (it starts
   from the device's own light or dark setting). The storefront is not affected.
@@ -1115,7 +1134,7 @@ sequenceDiagram
     participant Shop as Shop (storefront + API)
     participant G as Kora / Monnify
     S->>Shop: Place order
-    Shop->>Shop: Re-price, reserve stock, set 60-min deadline
+    Shop->>Shop: Re-price, reserve stock, set 30-min deadline
     S->>Shop: Pay with Kora / Monnify
     Shop->>G: Start payment (amount from the database)
     Shop-->>S: Redirect to the secure payment page
@@ -1154,7 +1173,18 @@ That gate:
 
 - Stock is taken **when the order is placed**, not when it is paid, so a customer who is paying
   can't lose their item to someone else.
-- It is held for the payment window: 60 minutes for card or transfer, 24 hours for WhatsApp.
+- It is held for the payment window: 30 minutes for card or transfer, 6 hours for WhatsApp
+  (`ORDER_PAYMENT_WINDOW_MINUTES` and `ORDER_MANUAL_PAYMENT_WINDOW_HOURS` in the API's `.env` change
+  them; they were 60 minutes and 24 hours until 11 Nov 2026).
+- **One customer cannot hold stock with orders they never pay for.** A new order is refused while
+  the same customer has 2 unpaid orders still inside their payment window (store setting
+  `max_unpaid_orders`, 0 to 20, 0 = no limit). "The same customer" means the same account, email,
+  delivery phone number or device. The device is a random id the browser makes once and sends only
+  when placing an order (`X-Device-Id`); the shop keeps a SHA-256 hash of it, never the id
+  (`orders.device_hash`, with `orders.contact_phone`, migration 029). A browser that sends no id is
+  counted by email and phone alone. With the limits already there (10 orders per connection in 10
+  minutes, 20 units per line, 30 lines per order) the most one person can keep off sale is two
+  orders, for 30 minutes or 6 hours.
 - If unpaid by the deadline, the order is cancelled and **the stock and promo use are returned
   exactly once**, however many processes try at the same time.
 - Expired orders are released by the scheduled job every 10 minutes, which **asks Kora and
@@ -1175,7 +1205,7 @@ That gate:
   and the others carry on.
 - **Starting the payment again can't hold stock forever:** each new attempt extends the deadline,
   but never past the order's placing time plus the transfer window and one card-payment window
-  (25 hours by default).
+  (6 and a half hours by default).
 - Payment attempts and status changes record the "units sold" figures after their database step
   is saved, so two payments for the same product at the same moment can't block each other.
 
@@ -1458,6 +1488,7 @@ wait.
 | Newsletter sign-ups | 10 an hour; unsubscribes 30 an hour |
 | Wrong admin passwords (clean-up, dev mode) | 5 in 15 minutes, per admin |
 | Clean-up codes | 5 an hour, per admin |
+| Unpaid orders held at once | 2 per customer (account, email, phone or device). The owner can change it in Store settings; 0 = no limit |
 | Payment notices with a wrong signature | 30, shared by Kora and Monnify. Each leaves only a short record, never its contents, with any reference cut to 100 characters, so unsigned requests can't fill the database. Correctly signed notices never count |
 
 **Limits on what can be entered.** The server checks these and answers with a clear message, usually
@@ -1878,3 +1909,4 @@ When something changes, update the matching section in the same commit:
 | 10 Nov 2026 | **Delete an admin** (My account -> Admin team, bin icon): own password needed; never yourself or the last active admin. The activity log keeps the deleted admin's name on their past actions (migration 026 adds `admin_label`). Settings: Support email and "Send admin alerts to" now share a row |
 | 10 Nov 2026 | **Full review of storefront and admin** (code read end to end and every screen looked at on a phone and a laptop, light and dark). Fixed, among about 90 findings: **the owner can no longer be removed by staff** (first admin = Owner; migration 027); the shipping queue could offer "Mark delivered" on a paid order while a tab was loading; a shopper's own unpaid order could block their next checkout ("only 0 available"), it is now released first; changing colour could silently swap the chosen size; the newsletter went to sign-ups whose email was never confirmed; a customer's unsubscribe could be undone from the footer form; alerts kept going to a removed admin named in "Send admin alerts to"; passwords could land in the error log's stack traces; one shared, count-first limit for password re-checks; lists said "nothing here" while a new filter loaded; stock adjustments now report the real figure; an admin's cached screens are cleared when the session ends; forms no longer lose typing when fresh data arrives. Screens: orders and payments stay tables on a laptop (cards only on phones); dark-mode tick boxes, focus rings and dialog backdrops; loading placeholders shaped like the page; delivery fees as cards on phones; the phone purchase bar hides while the page's own Add to Cart is on screen; product cards line up (two-line names, old price under the price); empty cart without a zero summary; WhatsApp messages state the exact amount. |
 | 10 Nov 2026 | **Demo polish.** Admin: a search box in the top bar finds orders, customers and products from any screen; the orders list and shipping queue refresh by themselves every minute; closing a product, category, banner, zone or promo form with unsaved changes asks "Discard your changes?". Storefront: a search that finds nothing says so in its own words with a way on; colours in the filter are named; each size has one name (the editor now offers S, M, L, XL...; migration 028 renames options saved as Small, Medium, Large... where that causes no clash). Checkout already fills in a signed-in customer's saved address. |
+| 11 Nov 2026 | **Stock can't be held by orders nobody pays for:** at most 2 unpaid orders per customer at a time, counted by account, email, phone and device (store setting, migration 029), and shorter payment windows: 30 minutes for card or transfer, 6 hours for WhatsApp (were 60 minutes and 24 hours). **Refunds show on the sales chart** (red part of the day's bar, a Refunded column in its table) and as their own Analytics card; refunds recorded but not completed are listed as pending. **Shared links carry a picture:** a product link shows the product, the shop's link shows the hero picture, as a JPEG that WhatsApp accepts. 1,887 backend checks |
