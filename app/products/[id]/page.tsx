@@ -3,6 +3,7 @@ import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import { ProductDetailClient } from '@/components/product/ProductDetailClient';
 import type { ApiProductDetail } from '@/lib/api-client';
+import { SHARE_HEIGHT, SHARE_WIDTH, pictureVersion } from '@/lib/share-image';
 
 const BACKEND_ORIGIN = (process.env.BACKEND_ORIGIN || 'http://127.0.0.1:8000').replace(/\/$/, '');
 
@@ -55,18 +56,27 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     product.images?.[0]?.image_url ??
     product.primary_image ??
     null;
-  // Relative image paths need a metadataBase to become absolute; only share absolute https images.
-  const ogImage = primary && /^https:\/\//i.test(primary) ? primary : null;
+  // A shared product link shows the product's own picture: /share/product/{id} sends it as a
+  // JPEG of the size chat apps expect (lib/share-image.ts). The tag on the end changes with the
+  // picture, so a new main picture replaces the one an app has kept. With no picture at all,
+  // the link shows the shop's hero picture like any other page.
+  const sharePicture = primary
+    ? `/share/product/${encodeURIComponent(String(product.id))}?v=${pictureVersion(primary)}`
+    : '/share/home';
+  const title = `${product.name} | SHOP.CO`;
 
   return {
-    title: `${product.name} | SHOP.CO`,
+    title,
     description,
     openGraph: {
       title: product.name,
       description,
       type: 'website',
-      ...(ogImage ? { images: [{ url: ogImage, alt: product.name }] } : {}),
+      siteName: 'SHOP.CO',
+      url: `/products/${encodeURIComponent(id)}`,
+      images: [{ url: sharePicture, width: SHARE_WIDTH, height: SHARE_HEIGHT, type: 'image/jpeg', alt: product.name }],
     },
+    twitter: { card: 'summary_large_image', title: product.name, description, images: [sharePicture] },
   };
 }
 

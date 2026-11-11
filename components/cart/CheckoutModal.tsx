@@ -223,6 +223,9 @@ function CheckoutSession({
   const [step, setStep] = useState<'details' | 'payment'>('details');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // The shop refused the order because this customer already holds its limit of unpaid orders:
+  // the message then comes with a link to those orders.
+  const [atUnpaidLimit, setAtUnpaidLimit] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<CheckoutFieldErrors>({});
   const submitErrorRef = useRef<HTMLDivElement>(null);
   // Whether this cart's unpaid order still has to be looked at. Until it has been, a new order
@@ -447,6 +450,7 @@ function CheckoutSession({
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
+    setAtUnpaidLimit(false);
     if (resumeState !== 'idle') return;
 
     if (items.length === 0) {
@@ -528,6 +532,7 @@ function CheckoutSession({
       // A 422 can say which detail the server refused: shown on that field, and at the top.
       const details = err instanceof ApiError && err.statusCode === 422 ? err.details : undefined;
       setFieldErrors(checkoutFieldErrorsFrom(details));
+      setAtUnpaidLimit(err instanceof ApiError && err.errorCode === 'TOO_MANY_UNPAID_ORDERS');
       setSubmitError(firstValidationMessage(details) ?? errorMessage(err, 'We could not place your order. Please review your details and try again.'));
     } finally {
       setIsSubmitting(false);
@@ -716,7 +721,17 @@ function CheckoutSession({
             {submitError && (
               <div ref={submitErrorRef} tabIndex={-1} role="alert" className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2 text-sm text-red-800 outline-none">
                 <HugeiconsIcon icon={AlertCircleIcon} size={16} className="shrink-0 mt-0.5 text-red-600" aria-hidden="true" />
-                <span>{submitError}</span>
+                <span>
+                  {submitError}
+                  {atUnpaidLimit && (
+                    <>
+                      {' '}
+                      <Link href={user ? '/orders' : '/track-order'} onClick={onClose} className="font-semibold underline">
+                        {user ? 'See my orders' : 'Track an order'}
+                      </Link>
+                    </>
+                  )}
+                </span>
               </div>
             )}
 

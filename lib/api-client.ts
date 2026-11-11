@@ -1286,11 +1286,38 @@ export async function apiCreateCheckoutOrder(data: {
   coupon_code?: string;
   notes?: string;
 }, idempotencyKey?: string): Promise<CheckoutOrderResponse> {
+  const headers: Record<string, string> = {};
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+  // Lets the shop count this browser's unpaid orders (it keeps only a hash of the id).
+  const device = deviceId();
+  if (device) headers['X-Device-Id'] = device;
   return fetchFromApi<CheckoutOrderResponse>('/checkout/orders', {
     method: 'POST',
-    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+    headers,
     body: JSON.stringify(data),
   });
+}
+
+const DEVICE_ID_KEY = 'shopco_device';
+
+/**
+ * A random id for this browser, made once and kept in its storage. Sent only when placing an
+ * order, so the shop can limit how many unpaid orders one device holds. Empty when storage is
+ * blocked (the order is then counted by email and phone alone).
+ */
+function deviceId(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    const saved = window.localStorage.getItem(DEVICE_ID_KEY);
+    if (saved && /^[A-Za-z0-9_-]{16,64}$/.test(saved)) return saved;
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    const fresh = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    window.localStorage.setItem(DEVICE_ID_KEY, fresh);
+    return fresh;
+  } catch {
+    return '';
+  }
 }
 
 /**

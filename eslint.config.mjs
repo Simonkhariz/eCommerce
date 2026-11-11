@@ -16,5 +16,6 @@ export default defineConfig([
   },
   // kravio-dashboard.vercel.app: a downloaded copy of another site's built bundle, kept locally
   // for reference and git-ignored; it is not this project's code.
-  globalIgnores(['.next/**', 'out/**', 'build/**', 'next-env.d.ts', 'backend/**', 'public/**', 'design/**', 'docs/**', 'kravio-dashboard.vercel.app/**']),
+  // guide: the client pages, a separate plain-HTML site with its own small script.
+  globalIgnores(['.next/**', 'out/**', 'build/**', 'next-env.d.ts', 'backend/**', 'public/**', 'design/**', 'docs/**', 'guide/**', 'kravio-dashboard.vercel.app/**']),
 ]);

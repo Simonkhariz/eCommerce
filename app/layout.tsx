@@ -9,6 +9,7 @@ import { StoreDataProvider, type StoreSeed } from '@/components/layout/StoreData
 import { QueryProvider } from '@/components/layout/QueryProvider';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { serverApiGet } from '@/lib/server-api';
+import { SHARE_HEIGHT, SHARE_WIDTH, siteOrigin } from '@/lib/share-image';
 
 // Fonts are served with the site (no requests to outside font services, nothing blocks the
 // first paint); the fallback font is sized to match, so text does not jump when they arrive.
@@ -40,11 +41,31 @@ const spaceGrotesk = localFont({
 // already open follow changes through StoreLiveUpdates (components/layout/StoreShell.tsx).
 export const dynamic = 'force-dynamic';
 
-export const metadata: Metadata = {
-  title: 'SHOP.CO | Find Clothes That Match Your Style',
-  description:
-    'Browse through our diverse range of meticulously crafted garments, designed to bring out your individuality and cater to your sense of style.',
-};
+const SITE_TITLE = 'SHOP.CO | Find Clothes That Match Your Style';
+const SITE_DESCRIPTION =
+  'Browse through our diverse range of meticulously crafted garments, designed to bring out your individuality and cater to your sense of style.';
+
+/**
+ * A shared link to the shop shows the hero picture (WhatsApp, Facebook, X and the rest read
+ * these tags). The picture's address must be a full one, hence the shop's own address as the
+ * base. A product page replaces the picture with the product's (app/products/[id]/page.tsx).
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const picture = { url: '/share/home', width: SHARE_WIDTH, height: SHARE_HEIGHT, type: 'image/jpeg', alt: 'SHOP.CO' };
+  return {
+    metadataBase: new URL(await siteOrigin()),
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    openGraph: {
+      type: 'website',
+      siteName: 'SHOP.CO',
+      title: SITE_TITLE,
+      description: SITE_DESCRIPTION,
+      images: [picture],
+    },
+    twitter: { card: 'summary_large_image', title: SITE_TITLE, description: SITE_DESCRIPTION, images: [picture.url] },
+  };
+}
 
 export default async function RootLayout({
   children,

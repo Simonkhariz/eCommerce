@@ -196,6 +196,9 @@ export interface DashboardOverview {
     total_refunded: number;
     /** Paid in the period, then cancelled, not yet refunded: already taken off net sales. */
     owed_refunds: number;
+    /** Recorded but not yet completed: no money has gone back yet. */
+    pending_refunds?: number;
+    pending_refund_count?: number;
     paid_orders: number;
     aov: number;
     total_orders: number;
@@ -209,7 +212,8 @@ export interface DashboardOverview {
   };
   /** Percentage change vs the previous period; null when there is no baseline. */
   deltas: Record<'gross_sales' | 'net_sales' | 'paid_orders' | 'aov' | 'total_orders' | 'new_customers', number | null>;
-  trend: Array<{ date: string; sales: number; paid_orders: number; total_orders: number }>;
+  /** One entry per day: money received, and money refunded on that day (completed refunds). */
+  trend: Array<{ date: string; sales: number; refunds: number; paid_orders: number; total_orders: number }>;
   recent_orders: Array<{
     id: number;
     order_number: string;
@@ -243,6 +247,9 @@ export interface AnalyticsReport {
     refund_count: number;
     /** Paid then cancelled, not yet refunded: money the store owes back. */
     owed_refunds: number;
+    /** Recorded but not yet completed: no money has gone back yet. */
+    pending_refunds?: number;
+    pending_refund_count?: number;
     owed_refund_count: number;
     net_sales: number;
     paid_orders: number;

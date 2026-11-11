@@ -193,11 +193,20 @@ function Report({ report }: { report: AnalyticsReport }) {
         {formatDate(report.filters.start_date)} – {formatDate(report.filters.end_date)}
       </p>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Stat
           label="Net sales"
           value={formatPrice(num(s.net_sales))}
           sub={`${formatPrice(num(s.gross_sales))} received − ${formatPrice(num(s.total_refunded))} refunded${num(s.owed_refunds) > 0 ? ` − ${formatPrice(num(s.owed_refunds))} owed` : ''}`}
+        />
+        <Stat
+          label="Refunded"
+          value={formatPrice(num(s.total_refunded))}
+          sub={
+            num(s.pending_refunds) > 0
+              ? `${count(num(s.refund_count), 'refund')} completed · ${formatPrice(num(s.pending_refunds))} still pending`
+              : `${count(num(s.refund_count), 'refund')} completed in this period`
+          }
         />
         <Stat label="Average order value" value={formatPrice(num(s.aov))} sub={`From ${count(num(s.paid_orders), 'paid order')}`} />
         <Stat

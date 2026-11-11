@@ -43,6 +43,7 @@ const LABELS: Record<string, string> = {
   store_origin_state: 'Dispatch state',
   storefront_brands: 'Homepage brand strip',
   default_product_rating: 'Starting star rating for products',
+  max_unpaid_orders: 'Unpaid orders one customer can hold',
 };
 
 const INPUT_TYPES: Record<string, string> = {
@@ -57,6 +58,7 @@ const WIDE_KEYS = new Set(['store_name', 'store_origin_address', 'storefront_bra
 const PLACEHOLDERS: Record<string, string> = {
   admin_alert_email: 'e.g. owner@example.com, orders@example.com',
   default_product_rating: 'e.g. 4.5 (empty = reviews only)',
+  max_unpaid_orders: 'e.g. 2 (0 = no limit)',
 };
 
 function gatewayMode(mode: string) {

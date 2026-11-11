@@ -390,14 +390,20 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
   const [showTable, setShowTable] = useState(false);
 
   const values = points.map((p) => num(p.sales));
+  // Money refunded on each day (completed refunds). Drawn as the red top of that day's bar.
+  const refunds = points.map((p) => num(p.refunds));
+  const refundTotal = refunds.reduce((s, v) => s + v, 0);
+  // A bar is as tall as the larger of the two, so a refund on a day with no sales still shows.
+  const heights = points.map((_, i) => Math.max(values[i], refunds[i]));
   const total = values.reduce((s, v) => s + v, 0);
-  const top = niceMax(Math.max(0, ...values));
+  const top = niceMax(Math.max(0, ...heights));
   const ticks = [top, (top * 3) / 4, top / 2, top / 4, 0];
   const bestIndex = total > 0 ? values.indexOf(Math.max(...values)) : null;
   const active = hover ?? picked ?? bestIndex;
   const activePoint = active !== null ? points[active] : null;
   const activeValue = active !== null ? values[active] : 0;
-  const activeHeight = (activeValue / top) * 100;
+  const activeRefund = active !== null ? refunds[active] : 0;
+  const activeHeight = ((active !== null ? heights[active] : 0) / top) * 100;
   const labelEvery = Math.max(1, Math.ceil(points.length / 7));
   const thin = points.length > 31;
   const center = active !== null ? ((active + 0.5) / points.length) * 100 : 0;
@@ -438,20 +444,32 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
           </div>
           <dl className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
             <MiniStat label="Refunded" value={formatPrice(num(data.kpis.total_refunded))} />
+            {num(data.kpis.pending_refunds) > 0 && <MiniStat label="Refunds pending" value={formatPrice(num(data.kpis.pending_refunds))} />}
             {num(data.kpis.owed_refunds) > 0 && <MiniStat label="Refunds owed" value={formatPrice(num(data.kpis.owed_refunds))} />}
             <MiniStat label="Orders placed" value={num(data.kpis.total_orders).toLocaleString()} delta={data.deltas.total_orders} />
             <MiniStat label="New customers" value={num(data.kpis.new_customers).toLocaleString()} delta={data.deltas.new_customers} />
           </dl>
         </div>
-        <p className="text-xs text-[#6b7280]">Payments verified each day, before refunds.</p>
+        <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#6b7280]">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2.5 rounded-sm bg-[#d1d5db]" aria-hidden="true" />
+            Payments verified each day
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2.5 rounded-sm bg-[#ef4444]" aria-hidden="true" />
+            Refunded that day
+          </span>
+          {num(data.kpis.pending_refunds) > 0 && <span>A pending refund shows here once you mark it completed.</span>}
+        </p>
 
         {showTable ? (
           <div className="max-h-[300px] overflow-auto rounded-lg border-[0.8px] border-[#e5e7eb]">
-            <table className="w-full min-w-[420px] border-collapse text-left text-[13px]">
+            <table className="w-full min-w-[500px] border-collapse text-left text-[13px]">
               <thead className="sticky top-0 bg-[#f9fafb] text-xs text-[#4b5563]">
                 <tr>
                   <th scope="col" className="px-3 py-2 font-medium">Date</th>
                   <th scope="col" className="px-3 py-2 text-right font-medium">Sales</th>
+                  <th scope="col" className="px-3 py-2 text-right font-medium">Refunded</th>
                   <th scope="col" className="px-3 py-2 text-right font-medium">Paid orders</th>
                   <th scope="col" className="px-3 py-2 text-right font-medium">Orders placed</th>
                 </tr>
@@ -461,6 +479,7 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
                   <tr key={p.date} className="border-t border-[#f3f4f6]">
                     <td className="px-3 py-2">{formatDate(p.date)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatPrice(num(p.sales))}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{num(p.refunds) > 0 ? `−${formatPrice(num(p.refunds))}` : '—'}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{num(p.paid_orders)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{num(p.total_orders)}</td>
                   </tr>
@@ -472,7 +491,7 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
           <figure className="flex w-full items-start gap-3">
             <figcaption className="sr-only">
               {total > 0
-                ? `Daily verified sales over the last ${days} days, ${formatPrice(total)} in total. Use the left and right arrow keys to read each day.`
+                ? `Daily verified sales over the last ${days} days, ${formatPrice(total)} in total${refundTotal > 0 ? `, with ${formatPrice(refundTotal)} refunded` : ''}. Use the left and right arrow keys to read each day.`
                 : `No verified sales in the last ${days} days.`}
             </figcaption>
             <div className="flex min-w-0 flex-1 flex-col gap-3">
@@ -498,7 +517,8 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
                 {/* Bars */}
                 <div className="absolute inset-0 flex items-end">
                   {points.map((p, i) => {
-                    const v = values[i];
+                    const v = heights[i];
+                    const refunded = refunds[i];
                     const isActive = i === active;
                     const height = v > 0 ? Math.max(1.5, (v / top) * 100) : 0;
                     return (
@@ -521,6 +541,13 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
                               isActive ? 'opacity-100' : 'opacity-0'
                             } bg-[linear-gradient(180deg,#37475d_0%,#1f2937_64.7%)]`}
                           />
+                          {/* The part of the day's money that was refunded (the whole bar when only a refund happened). */}
+                          {refunded > 0 && (
+                            <div
+                              className={`absolute inset-x-0 top-0 bg-[#ef4444] ${thin ? 'rounded-t-[3px]' : 'rounded-t-[8px]'}`}
+                              style={{ height: `${Math.max(6, Math.min(100, (refunded / v) * 100))}%` }}
+                            />
+                          )}
                         </div>
                       </div>
                     );
@@ -528,7 +555,7 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
                 </div>
 
                 {/* Active day marker */}
-                {activePoint && activeValue > 0 && (
+                {activePoint && (activeValue > 0 || activeRefund > 0) && (
                   <>
                     <span
                       aria-hidden="true"
@@ -541,6 +568,7 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
                       style={{ left: `${center}%`, bottom: `calc(${activeHeight}% + 8px)`, transform: `translateX(${tooltipShift})` }}
                     >
                       {shortDay(activePoint.date, 30)} : {formatPrice(activeValue)}
+                      {activeRefund > 0 && <span className="text-[#fca5a5]"> · {formatPrice(activeRefund)} refunded</span>}
                     </span>
                   </>
                 )}
@@ -563,7 +591,9 @@ function SalesTrend({ data }: { data: DashboardOverview }) {
                 ))}
               </div>
               <p className="sr-only" aria-live="polite">
-                {activePoint ? `${formatDate(activePoint.date)}: ${formatPrice(activeValue)}, ${num(activePoint.paid_orders)} paid of ${num(activePoint.total_orders)} placed` : ''}
+                {activePoint
+                  ? `${formatDate(activePoint.date)}: ${formatPrice(activeValue)}${activeRefund > 0 ? `, ${formatPrice(activeRefund)} refunded` : ''}, ${num(activePoint.paid_orders)} paid of ${num(activePoint.total_orders)} placed`
+                  : ''}
               </p>
             </div>
 
