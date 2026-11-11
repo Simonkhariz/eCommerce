@@ -128,6 +128,14 @@ if ($run([$php, BASE_PATH . '/migrations/migrate.php'], false) !== 0 || $run([$p
     exit(2);
 }
 
+// The unpaid-order cap is off for the suites (several place many unpaid orders for one buyer);
+// CheckoutCapTest turns it on for its own checks.
+$capDb = @new mysqli((string) Env::get('DB_HOST', '127.0.0.1'), (string) Env::get('DB_USERNAME', 'root'), (string) Env::get('DB_PASSWORD', ''), $testDb, Env::int('DB_PORT', 3306));
+if (!$capDb->connect_errno) {
+    $capDb->query("INSERT INTO `store_settings` (`key_name`, `value`) VALUES ('max_unpaid_orders', '0') ON DUPLICATE KEY UPDATE `value` = '0'");
+    $capDb->close();
+}
+
 // 3. Stand-in storefront refresh endpoint, then the API server on the test database.
 $stub = proc_open(
     [$php, '-S', "127.0.0.1:{$stubPort}", __DIR__ . '/support/revalidate_stub.php'],

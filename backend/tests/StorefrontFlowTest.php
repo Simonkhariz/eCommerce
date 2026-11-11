@@ -161,8 +161,9 @@ $t->check('after 20 wrong emails the address is paused, even for the right email
 $t->check('and the pause covers the order lookup too', 429, $t->http('GET', "/checkout/orders/{$onum}", ['headers' => array_merge($guesser, ["X-Order-Email: {$email}"])])['status']);
 $wa = $t->http('POST', "/checkout/orders/{$onum}/initialize-payment", ['headers' => ["X-Guest-Access-Token: {$token}"], 'json' => ['gateway' => 'whatsapp']]);
 $t->check('WhatsApp payment attempt opens', 'whatsapp', TestKit::get($wa, 'data.provider'));
-$hours = (int) $t->scalar("SELECT TIMESTAMPDIFF(HOUR, NOW(), `expires_at`) FROM `orders` WHERE `order_number` = ?", 's', [$onum]);
-$t->ok('WhatsApp attempt reserves the order for about a day', $hours >= 23, "hours={$hours}");
+$heldMinutes = (int) $t->scalar("SELECT TIMESTAMPDIFF(MINUTE, NOW(), `expires_at`) FROM `orders` WHERE `order_number` = ?", 's', [$onum]);
+$manualWindow = \App\Services\PaymentAttempts::manualWindowMinutes();
+$t->ok('WhatsApp attempt reserves the order for the transfer window (6 hours unless the server says otherwise)', $heldMinutes >= $manualWindow - 2 && $heldMinutes <= $manualWindow, "minutes={$heldMinutes}, window={$manualWindow}");
 $t->check('on another device, the checkout email starts a payment (the order emails link to tracking)', 'whatsapp', TestKit::get($t->http('POST', "/checkout/orders/{$onum}/initialize-payment", ['headers' => ["X-Order-Email: " . strtoupper($email)], 'json' => ['gateway' => 'whatsapp']]), 'data.provider'));
 $t->check('a wrong email cannot', 404, $t->http('POST', "/checkout/orders/{$onum}/initialize-payment", ['headers' => ['X-Order-Email: someone@example.test'], 'json' => ['gateway' => 'whatsapp']])['status']);
 $numEmail = $t->uniq('t-store-numbers') . '@example.test';

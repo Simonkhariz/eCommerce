@@ -114,7 +114,72 @@ class CheckoutService
      * @param int|null $userId Authenticated user ID (or null for guest)
      * @return array Created order details including public order number and guest token
      */
-    public function createOrder(array $input, ?int $userId = null, ?string $idempotencyKey = null): array
+    /** Store setting: how many unpaid orders one customer can hold at once (0 = no cap). */
+    public const UNPAID_CAP_SETTING = 'max_unpaid_orders';
+    public const UNPAID_CAP_DEFAULT = 2;
+    public const UNPAID_CAP_MAX = 20;
+
+    /** The cap in force: the owner's setting, or the default when it was never saved. */
+    public function unpaidOrderCap(): int
+    {
+        $row = $this->db->fetchOne("SELECT `value` FROM `store_settings` WHERE `key_name` = ? LIMIT 1", 's', [self::UNPAID_CAP_SETTING]);
+        $value = $row === null ? null : Input::wholeNumber($row['value'], 0, self::UNPAID_CAP_MAX);
+        return $value ?? self::UNPAID_CAP_DEFAULT;
+    }
+
+    /**
+     * Stop one customer holding stock with order after order they do not pay for. Counts their
+     * orders still awaiting payment (and still inside their payment window) by account, email,
+     * phone or device, and refuses a new one at the cap. Paying for an order, cancelling it, or
+     * its window closing frees a place.
+     */
+    private function assertUnderUnpaidCap(?int $userId, string $email, string $phone, ?string $deviceHash): void
+    {
+        $cap = $this->unpaidOrderCap();
+        if ($cap <= 0) {
+            return;
+        }
+        $who = ['o.`guest_email` = ?'];
+        $types = 's';
+        $params = [$email];
+        if ($userId !== null) {
+            $who[] = 'o.`user_id` = ?';
+            $types .= 'i';
+            $params[] = $userId;
+        }
+        if ($phone !== '') {
+            $who[] = 'o.`contact_phone` = ?';
+            $types .= 's';
+            $params[] = $phone;
+        }
+        if ($deviceHash !== null) {
+            $who[] = 'o.`device_hash` = ?';
+            $types .= 's';
+            $params[] = $deviceHash;
+        }
+        $held = (int) ($this->db->fetchOne(
+            "SELECT COUNT(*) AS c FROM `orders` o
+             WHERE o.`order_status` = 'pending_payment' AND (o.`expires_at` IS NULL OR o.`expires_at` > NOW())
+               AND (" . implode(' OR ', $who) . ")",
+            $types,
+            $params
+        )['c'] ?? 0);
+        if ($held >= $cap) {
+            throw new RuntimeException(
+                "You already have {$held} " . ($held === 1 ? 'order' : 'orders') . ' waiting for payment. Pay for '
+                . ($held === 1 ? 'it' : 'one of them') . ' from Track order, or wait for it to expire, then place this order.'
+            );
+        }
+    }
+
+    /** SHA-256 of the browser's device id (X-Device-Id), or null when it is missing or malformed. */
+    public static function deviceHash(?string $deviceId): ?string
+    {
+        $deviceId = trim((string) $deviceId);
+        return preg_match('/^[A-Za-z0-9_\-]{16,64}$/', $deviceId) === 1 ? hash('sha256', $deviceId) : null;
+    }
+
+    public function createOrder(array $input, ?int $userId = null, ?string $idempotencyKey = null, ?string $deviceId = null): array
     {
         // Release stock held by abandoned orders before reserving more (cheap, bounded).
         try {
@@ -157,6 +222,11 @@ class CheckoutService
             throw new ValidationFailed($message, ['notes' => $message]);
         }
 
+        // A customer who already holds the allowed number of unpaid orders pays for one first.
+        $contactPhone = PhoneNumber::stored(Input::text($shippingAddress['phone'] ?? null));
+        $deviceHash = self::deviceHash($deviceId);
+        $this->assertUnderUnpaidCap($userId, $email, $contactPhone, $deviceHash);
+
         // 3. Resolve and revalidate destination shipping zone
         $requestedZoneId = isset($input['shipping_zone_id']) ? (int) $input['shipping_zone_id'] : null;
         // The fee grows with the number of items (each line is checked again inside the
@@ -179,7 +249,9 @@ class CheckoutService
                 $shippingAddress,
                 $selectedZone,
                 $shippingFee,
-                $idempotencyKey
+                $idempotencyKey,
+                $contactPhone,
+                $deviceHash
             ): array {
                 // A. Re-verify items and load lock-safe current pricing
                 $verifiedItems = $this->verifyAndPriceItems($items);
@@ -291,16 +363,18 @@ class CheckoutService
                 // H. Insert Order (stock stays reserved until expires_at unless the order is paid)
                 $orderId = (int) $db->insert(
                     "INSERT INTO `orders` (
-                        `order_number`, `user_id`, `guest_email`, `guest_access_token_hash`,
+                        `order_number`, `user_id`, `guest_email`, `contact_phone`, `device_hash`, `guest_access_token_hash`,
                         `shipping_zone_id`, `shipping_zone_snapshot`, `shipping_address_snapshot`,
                         `order_status`, `payment_status`, `currency`, `subtotal`, `discount_amount`,
                         `shipping_fee`, `grand_total`, `applied_promo_code`, `notes`, `expires_at`, `idempotency_key`
-                     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', 'NGN', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), ?)",
-                    'sississddddssis',
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', 'NGN', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), ?)",
+                    'sissssissddddssis',
                     [
                         $orderNumber,
                         $userId,
                         $email,
+                        $contactPhone !== '' ? $contactPhone : null,
+                        $deviceHash,
                         $guestAccessTokenHash,
                         (int) $selectedZone['id'],
                         json_encode($zoneSnapshot),

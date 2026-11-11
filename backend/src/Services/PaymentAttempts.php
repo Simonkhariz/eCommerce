@@ -29,7 +29,7 @@ class PaymentAttempts
      */
     public static function gatewayWindowMinutes(): int
     {
-        return max(15, Env::int('ORDER_PAYMENT_WINDOW_MINUTES', 60));
+        return max(15, Env::int('ORDER_PAYMENT_WINDOW_MINUTES', 30));
     }
 
     /**
@@ -43,7 +43,7 @@ class PaymentAttempts
 
     public static function manualWindowMinutes(): int
     {
-        return max(60, Env::int('ORDER_MANUAL_PAYMENT_WINDOW_HOURS', 24) * 60);
+        return max(60, Env::int('ORDER_MANUAL_PAYMENT_WINDOW_HOURS', 6) * 60);
     }
 
     /**

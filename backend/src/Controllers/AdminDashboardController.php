@@ -90,16 +90,27 @@ class AdminDashboardController
             [$currentStart]
         ), 'orders', 'd');
 
+        // Refunds are shown on the day the money went back, like the report's daily breakdown.
+        $refundsByDay = array_column($this->db->fetchAll(
+            "SELECT DATE(COALESCE(r.completed_at, r.updated_at)) AS d, SUM(r.amount) AS refunded FROM `refunds` r" . self::REFUND_OF_A_SALE . "
+             WHERE r.status = 'completed' AND COALESCE(r.completed_at, r.updated_at) >= ?
+             GROUP BY DATE(COALESCE(r.completed_at, r.updated_at))",
+            's',
+            [$currentStart]
+        ), 'refunded', 'd');
+
         $trend = [];
         for ($i = $period - 1; $i >= 0; $i--) {
             $d = date('Y-m-d', strtotime("-{$i} days"));
             $trend[] = [
                 'date' => $d,
                 'sales' => (float) ($salesByDay[$d]['sales'] ?? 0),
+                'refunds' => round((float) ($refundsByDay[$d] ?? 0), 2),
                 'paid_orders' => (int) ($salesByDay[$d]['paid_orders'] ?? 0),
                 'total_orders' => (int) ($ordersByDay[$d] ?? 0),
             ];
         }
+        $pendingRefunds = $this->pendingRefunds();
 
         $recentOrders = $this->db->fetchAll("
             SELECT o.id, o.order_number,
@@ -179,6 +190,8 @@ class AdminDashboardController
                 'net_sales' => $current['net'],
                 'total_refunded' => $current['refunded'],
                 'owed_refunds' => $current['owed'],
+                'pending_refunds' => $pendingRefunds['total'],
+                'pending_refund_count' => $pendingRefunds['count'],
                 'paid_orders' => $current['paid_orders'],
                 'aov' => $current['aov'],
                 'total_orders' => $current['orders_placed'],
@@ -205,6 +218,21 @@ class AdminDashboardController
             'top_products' => $topProducts,
             'payment_alerts' => $paymentAlerts,
         ], 'Admin overview retrieved.');
+    }
+
+    /**
+     * Refunds recorded but not yet marked completed (the money has not gone back yet). They are in
+     * no sales figure until completed, so the screens show them as their own line; whatever the
+     * period, because a waiting refund is a task for today.
+     *
+     * @return array{total: float, count: int}
+     */
+    private function pendingRefunds(): array
+    {
+        $row = $this->db->fetchOne(
+            "SELECT COALESCE(SUM(r.amount), 0) AS total, COUNT(*) AS cnt FROM `refunds` r" . self::REFUND_OF_A_SALE . " WHERE r.status = 'pending'"
+        );
+        return ['total' => round((float) ($row['total'] ?? 0), 2), 'count' => (int) ($row['cnt'] ?? 0)];
     }
 
     /**
@@ -479,6 +507,7 @@ class AdminDashboardController
             ];
         }
         usort($gateways, static fn ($x, $y) => $y['total_volume'] <=> $x['total_volume']);
+        $pendingRefunds = $this->pendingRefunds();
 
         return [
             'summary' => [
@@ -488,6 +517,8 @@ class AdminDashboardController
                 'refund_count' => (int) $refunds['cnt'],
                 'owed_refunds' => round($owedTotal, 2),
                 'owed_refund_count' => count($owed),
+                'pending_refunds' => $pendingRefunds['total'],
+                'pending_refund_count' => $pendingRefunds['count'],
                 'net_sales' => round(max(0, $gross - $refunded - $owedTotal), 2),
                 'paid_orders' => $paidOrders,
                 'aov' => $paidOrders > 0 ? round($gross / $paidOrders, 2) : 0.0,
@@ -508,6 +539,7 @@ class AdminDashboardController
                 'total_refunded' => 'Sum of refunds marked completed in the period, by completion time. Underpaid money sent back is left out, as it never counted as a sale.',
                 'owed_refunds' => 'Orders paid in the period and later cancelled, minus anything already refunded: money the store still has to return.',
                 'net_sales' => 'Gross sales − refunds completed − refunds owed on cancelled orders.',
+                'pending_refunds' => 'Refunds recorded but not yet marked completed. They come off net sales on the day they are completed.',
                 'aov' => 'Gross sales ÷ paid orders.',
                 'conversion_rate' => 'Orders placed in the period that were paid ÷ orders placed in the period.',
                 'repeat_customer_rate' => 'Customers with 2+ paid orders in the period ÷ customers who paid in the period.',

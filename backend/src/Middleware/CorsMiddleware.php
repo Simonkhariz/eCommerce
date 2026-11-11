@@ -40,7 +40,7 @@ class CorsMiddleware
             header("Access-Control-Allow-Origin: {$origin}");
             header('Access-Control-Allow-Credentials: true');
             header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-            header('Access-Control-Allow-Headers: Content-Type, Accept, X-Requested-With, X-CSRF-Token, X-Guest-Access-Token, X-Order-Email, X-Payment-Reference, Idempotency-Key');
+            header('Access-Control-Allow-Headers: Content-Type, Accept, X-Requested-With, X-CSRF-Token, X-Guest-Access-Token, X-Order-Email, X-Payment-Reference, X-Device-Id, Idempotency-Key');
             header('Access-Control-Max-Age: 86400');
             header('Vary: Origin');
         }

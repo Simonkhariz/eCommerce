@@ -152,7 +152,8 @@ class CheckoutController
 
         try {
             $idempotencyKey = (string) ($_SERVER['HTTP_IDEMPOTENCY_KEY'] ?? ($body['idempotency_key'] ?? ''));
-            $order = $this->checkoutService->createOrder($body, $userId, $idempotencyKey !== '' ? $idempotencyKey : null);
+            $deviceId = is_string($_SERVER['HTTP_X_DEVICE_ID'] ?? null) ? $_SERVER['HTTP_X_DEVICE_ID'] : null;
+            $order = $this->checkoutService->createOrder($body, $userId, $idempotencyKey !== '' ? $idempotencyKey : null, $deviceId);
             Response::success($order, 'Order placed successfully. Inventory has been reserved.', 201);
         } catch (InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422, 'VALIDATION_ERROR', $e instanceof ValidationFailed ? $e->details : []);
@@ -167,7 +168,9 @@ class CheckoutController
                 Response::error('We could not place your order right now. Please try again.', 500, 'INTERNAL_SERVER_ERROR');
             }
             // Inventory or promotion conflict raised deliberately by CheckoutService
-            $code = str_contains($e->getMessage(), 'Insufficient stock') ? 'INSUFFICIENT_STOCK' : 'ORDER_CREATION_FAILED';
+            $code = str_contains($e->getMessage(), 'Insufficient stock')
+                ? 'INSUFFICIENT_STOCK'
+                : (str_contains($e->getMessage(), 'waiting for payment') ? 'TOO_MANY_UNPAID_ORDERS' : 'ORDER_CREATION_FAILED');
             Response::error($e->getMessage(), 409, $code);
         } catch (Throwable $e) {
             error_log('[Order Creation Failure] ' . $e->getMessage());

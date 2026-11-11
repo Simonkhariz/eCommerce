@@ -48,6 +48,7 @@ class AdminOperationsController
         'store_origin_city' => 'City parcels ship from (shown on receipts)',
         'store_origin_state' => 'State parcels ship from',
         'storefront_brands' => 'Brands in the scrolling strip under the homepage banner, separated by commas (only brands you sell). Leave empty to hide the strip.',
+        'max_unpaid_orders' => 'How many unpaid orders one customer can hold at once (counted by account, email, phone and device). Their items are reserved, so this stops stock being held by orders nobody pays for. 0 means no limit.',
         'default_product_rating' => 'Star rating a product starts with when you leave its own starting rating empty, from 1 to 5 (e.g. 4.5). It counts like 5 reviews, so customer reviews take over as they come in. Leave empty to show stars only from customer reviews.',
     ];
 
@@ -930,7 +931,11 @@ class AdminOperationsController
 
         $editable = [];
         foreach (self::EDITABLE_SETTINGS as $key => $help) {
-            $value = $stored[$key] ?? ($key === ProductRatings::SETTING ? (string) ProductRatings::DEFAULT : '');
+            $value = $stored[$key] ?? match ($key) {
+                ProductRatings::SETTING => (string) ProductRatings::DEFAULT,
+                \App\Services\CheckoutService::UNPAID_CAP_SETTING => (string) \App\Services\CheckoutService::UNPAID_CAP_DEFAULT,
+                default => '',
+            };
             $editable[] = ['key' => $key, 'value' => $value, 'help' => $help];
         }
 
@@ -988,6 +993,13 @@ class AdminOperationsController
             } elseif ($key === 'store_whatsapp_phone' && $value !== '') {
                 // Saved as +234... so wa.me links work whether the admin typed 080..., 070... or 090...
                 $changes[$key] = PhoneNumber::toInternational($value);
+            } elseif ($key === \App\Services\CheckoutService::UNPAID_CAP_SETTING) {
+                $cap = Input::wholeNumber($value, 0, \App\Services\CheckoutService::UNPAID_CAP_MAX);
+                if ($cap === null) {
+                    $errors[$key] = 'Enter a whole number from 0 to ' . \App\Services\CheckoutService::UNPAID_CAP_MAX . ' (0 means no limit).';
+                } else {
+                    $changes[$key] = (string) $cap;
+                }
             } elseif ($key === ProductRatings::SETTING) {
                 $rating = ProductRatings::parse($value);
                 if ($rating === false) {

@@ -167,9 +167,13 @@ Re-running the command only applies new files. (On a database created before the
 migrations 001–008 are recorded as already applied the first time.)
 
 ### Releasing stock from unpaid orders
-Placing an order reserves its stock until `orders.expires_at` (60 minutes after the order or the
-latest gateway checkout attempt; 24 hours when the customer pays by WhatsApp/manual transfer).
+Placing an order reserves its stock until `orders.expires_at` (30 minutes after the order or the
+latest gateway checkout attempt; 6 hours when the customer pays by WhatsApp/manual transfer).
 Overdue orders are cancelled and their stock and promo use released exactly once.
+
+One customer can hold only so many unpaid orders at once: store setting `max_unpaid_orders` (2 by
+default, 0 = no cap; Admin, Store settings), counted by account, email, delivery phone and device
+(migration 029). A further order is refused with 409 `TOO_MANY_UNPAID_ORDERS`.
 
 The API does a small sweep whenever an order is placed or the admin order list or dashboard is opened. Schedule
 the full job so stock is released even when the store is quiet; it asks Kora/Monnify for the final
@@ -183,8 +187,8 @@ Windows Task Scheduler (every 10 minutes):
 schtasks /Create /SC MINUTE /MO 10 /TN "ShopCo Expire Orders" /TR "C:\xampp\php\php.exe C:\path\to\E-commerce\backend\scripts\expire_pending_orders.php"
 ```
 
-Optional `.env` settings: `ORDER_PAYMENT_WINDOW_MINUTES` (default 60) and
-`ORDER_MANUAL_PAYMENT_WINDOW_HOURS` (default 24).
+Optional `.env` settings: `ORDER_PAYMENT_WINDOW_MINUTES` (default 30, never under 15) and
+`ORDER_MANUAL_PAYMENT_WINDOW_HOURS` (default 6, never under 1).
 
 ### Sending email (outbox)
 Every email is written to `email_outbox` first. Order emails (received, paid, shipped, cancelled,

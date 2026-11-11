@@ -105,6 +105,27 @@ $t->check('the overview subtracts refunds owed too', round((float) $report30['ne
 $t->check('and shows how much is owed', round((float) $report30['owed_refunds'], 2), round((float) ($overviewKpis['owed_refunds'] ?? -1), 2));
 
 // -----------------------------------------------------------------------------
+$t->section('Refunds show on the sales chart, and waiting ones are listed apart');
+$trend = (array) TestKit::get($A('GET', '/admin/dashboard/overview?period=30'), 'data.trend');
+$t->ok('every day of the chart carries a refunds figure', $trend !== [] && !in_array(false, array_map(static fn (array $day): bool => array_key_exists('refunds', $day), $trend), true));
+$t->ok('the chart\'s refunds add up to the refunded total', abs(array_sum(array_map('floatval', array_column($trend, 'refunds'))) - (float) ($overviewKpis['total_refunded'] ?? -1)) < 0.01);
+$t->ok('today\'s bar shows the refund completed today', (float) (end($trend)['refunds'] ?? 0) > 0);
+$pendingBefore = (float) ($overviewKpis['pending_refunds'] ?? -1);
+if ($paidNum !== null) {
+    $waiting = $A('POST', '/admin/refunds', ['json' => ['order_number' => $paidNum, 'amount' => 50, 'reason' => 'Waiting refund', 'status' => 'pending', 'restock' => false]]);
+    $t->check('a refund recorded as pending', 201, $waiting['status']);
+    $after = (array) TestKit::get($A('GET', '/admin/dashboard/overview?period=30'), 'data.kpis');
+    $t->check('is shown as pending on the overview', round($pendingBefore + 50, 2), round((float) ($after['pending_refunds'] ?? -1), 2));
+    $t->check('and does not come off sales until it is completed', [$overviewKpis['net_sales'], $overviewKpis['total_refunded']], [$after['net_sales'], $after['total_refunded']]);
+    $t->check('the report shows the same pending amount', round((float) $after['pending_refunds'], 2), round((float) TestKit::get($A('GET', '/admin/analytics/report?range=30days'), 'data.summary.pending_refunds'), 2));
+    $done = $A('PATCH', '/admin/refunds/' . (int) TestKit::get($waiting, 'data.id'), ['json' => ['status' => 'completed']]);
+    $t->check('once completed', 200, $done['status']);
+    $final = (array) TestKit::get($A('GET', '/admin/dashboard/overview?period=30'), 'data');
+    $t->check('it leaves pending and joins refunded', [round($pendingBefore, 2), round((float) $overviewKpis['total_refunded'] + 50, 2)], [round((float) $final['kpis']['pending_refunds'], 2), round((float) $final['kpis']['total_refunded'], 2)]);
+    $t->ok('and the chart shows it on its day', abs(array_sum(array_map('floatval', array_column($final['trend'], 'refunds'))) - (float) $final['kpis']['total_refunded']) < 0.01);
+}
+
+// -----------------------------------------------------------------------------
 $t->section('Product and category sales leave out cancelled and refunded orders');
 if ($cancelled !== null) {
     $paidLines = "FROM `order_items` oi JOIN `orders` o ON o.id = oi.order_id
