@@ -12,7 +12,7 @@ import { apiGetOrder, apiVerifyPayment, type PaymentVerificationResponse } from 
  */
 export const paymentKeys = {
   status: (orderNumber: string, token: string | null, reference: string | null) => ['payment-status', orderNumber, token, reference] as const,
-  order: (orderNumber: string, token: string | null, stage: 'open' | 'paid') => ['payment-order', orderNumber, token, stage] as const,
+  order: (orderNumber: string, token: string | null, stage: 'open' | 'paid', reference?: string | null) => ['payment-order', orderNumber, token, stage, reference ?? null] as const,
 };
 
 /** Poll delays (ms) while a payment is still settling: about two minutes in total. */
@@ -44,10 +44,27 @@ export const paymentStatusQuery = (orderNumber: string, token: string | null, re
  * The order for the receipt. Asked once while the payment is open and once more when it is
  * paid. Without the access key or sign-in the server refuses it: the status still shows.
  */
-export const paymentOrderQuery = (orderNumber: string, token: string | null, stage: 'open' | 'paid', email: string | null = null) =>
+export const paymentOrderQuery = (
+  orderNumber: string,
+  token: string | null,
+  stage: 'open' | 'paid',
+  email: string | null = null,
+  reference: string | null = null
+) =>
   queryOptions({
-    queryKey: paymentKeys.order(orderNumber, token, stage),
-    queryFn: ({ signal }) => apiGetOrder(orderNumber, token ? { token } : email ? { email } : undefined, signal),
+    queryKey: paymentKeys.order(orderNumber, token, stage, reference),
+    queryFn: ({ signal }) =>
+      apiGetOrder(
+        orderNumber,
+        token
+          ? { token, reference: reference ?? undefined }
+          : email
+            ? { email, reference: reference ?? undefined }
+            : reference
+              ? { reference }
+              : undefined,
+        signal
+      ),
     staleTime: 5 * 60_000,
     retry: false,
   });

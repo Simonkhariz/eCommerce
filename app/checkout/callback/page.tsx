@@ -18,7 +18,7 @@ import { LIVE_VERIFY_DELAYS, MAX_RECONNECTS, RECONNECT_MS, isNewerState, openPay
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptUrl, formatSupportPhone, whatsAppOrderFrom } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useCart } from '@/context/CartContext';
-import { clearPendingOrder, markInvoiceSent, saveGuestToken } from '@/lib/pending-order';
+import { clearPendingOrder, markInvoiceSent, readPendingOrder, saveGuestToken } from '@/lib/pending-order';
 import { useGuestToken, useInvoiceSent, useLookupEmail } from '@/lib/use-order-data';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { PaymentMethodsNotice } from '@/components/cart/PaymentMethodsNotice';
@@ -27,22 +27,70 @@ type ViewState = 'checking' | PaymentView | 'error';
 
 const noSubscribe = () => () => {};
 
-function readParam(searchParams: URLSearchParams, keys: string[]): string {
+function readParam(params: URLSearchParams, keys: string[]): string {
   for (const key of keys) {
-    const value = searchParams.get(key);
+    const value = params.get(key);
     if (value) return value.split('?')[0];
   }
   return '';
 }
 
+function getCallbackParams(searchParams: URLSearchParams): { orderNumber: string; reference: string } {
+  let params = searchParams;
+  if (typeof window !== 'undefined' && window.location.search) {
+    const raw = window.location.search;
+    if (raw.indexOf('?', 1) !== -1) {
+      // Gateways like Monnify and Kora concatenate '?paymentReference=' to a URL that already had '?'
+      const normalized = raw.replace(/\?/g, (m, offset) => (offset === 0 ? '?' : '&'));
+      params = new URLSearchParams(normalized);
+    }
+  }
+
+  const reference = readParam(params, ['reference', 'paymentReference', 'trxref', 'transactionReference']);
+  let orderNumber = readParam(params, ['order', 'order_number']);
+
+  if (orderNumber && orderNumber.includes('?')) {
+    orderNumber = orderNumber.split('?')[0];
+  }
+
+  if (!orderNumber && reference) {
+    // References are generated as PAY-ORD-xxx-suffix or MNFY-ORD-xxx-suffix
+    const m = reference.match(/^(?:PAY|MNFY)-(ORD-[A-Za-z0-9\-]+?)-[A-Fa-f0-9]+$/i)
+      || reference.match(/^(?:PAY|MNFY)-(.+)-[A-Fa-f0-9]{6,16}$/i);
+    if (m) {
+      orderNumber = m[1];
+    } else if (/^(?:PAY|MNFY)-/.test(reference)) {
+      const lastDash = reference.lastIndexOf('-');
+      if (lastDash > 4) {
+        orderNumber = reference.slice(reference.indexOf('-') + 1, lastDash);
+      }
+    }
+  }
+
+  if (!orderNumber && typeof window !== 'undefined') {
+    try {
+      const pending = readPendingOrder();
+      if (pending?.orderNumber) {
+        orderNumber = pending.orderNumber;
+      }
+      if (!orderNumber) {
+        orderNumber = localStorage.getItem('shopco_latest_order_number') || '';
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!orderNumber && reference) {
+    orderNumber = reference;
+  }
+
+  return { orderNumber, reference };
+}
+
 function CheckoutCallbackContent() {
   const searchParams = useSearchParams();
-  const reference = readParam(searchParams, ['reference', 'paymentReference', 'trxref', 'transactionReference']);
-  let orderNumber = readParam(searchParams, ['order', 'order_number']);
-  if (!orderNumber && /^(PAY|MNFY)-ORD-/.test(reference)) {
-    const parts = reference.split('-');
-    orderNumber = parts.length >= 4 ? `ORD-${parts[2]}-${parts[3]}` : '';
-  }
+  const { orderNumber, reference } = getCallbackParams(searchParams);
 
   const { completePaidOrder } = useCart();
   const { supportPhone, payNowGateway, whatsappEnabled, livePaymentStatus, loaded: paymentMethodsLoaded, retry: retryPaymentMethods } = useStoreSupport();
@@ -64,6 +112,16 @@ function CheckoutCallbackContent() {
   const [awaitingFlash, setAwaitingFlash] = useState(false);
   const celebrated = useRef(false);
   const settled = useRef(false);
+
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && window.top && window.self !== window.top) {
+        window.top.location.href = window.location.href;
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Payment status (lib/payment-queries.ts). While it is pending the page checks again on the
   // back-off schedule, only while the tab is visible, and once more when the shopper comes
@@ -125,10 +183,17 @@ function CheckoutCallbackContent() {
           : errorMessage(status.error, 'We could not check the payment right now.')
         : null;
 
+  const effectiveOrderNumber = result?.order_number || orderNumber;
+
+  // Guest access key and email resolved against the verified order number (or initial lookup).
+  const effectiveToken = useGuestToken(effectiveOrderNumber) ?? token;
+  const effectiveLookupEmail = useLookupEmail(effectiveOrderNumber) ?? lookupEmail;
+  const effectiveInvoiceSent = useInvoiceSent(effectiveOrderNumber) || invoiceSent;
+
   // Receipt details: asked once while the payment is open, and again once it is paid.
   const orderDetails = useQuery({
-    ...paymentOrderQuery(orderNumber, token ?? null, view === 'paid' ? 'paid' : 'open', token ? null : (lookupEmail ?? null)),
-    enabled: hydrated && !!orderNumber && (view === 'paid' || view === 'pending' || view === 'failed'),
+    ...paymentOrderQuery(effectiveOrderNumber, effectiveToken ?? null, view === 'paid' ? 'paid' : 'open', effectiveToken ? null : (effectiveLookupEmail ?? null), reference || null),
+    enabled: hydrated && !!effectiveOrderNumber && (view === 'paid' || view === 'pending' || view === 'failed'),
   });
   const order = orderDetails.data ?? null;
   const paidOrderSettled = view === 'paid' && (orderDetails.isSuccess || orderDetails.isError);
@@ -142,17 +207,17 @@ function CheckoutCallbackContent() {
     settled.current = true;
     // Opened from "Track order" with only the order number and email: this device may not be the
     // one the order was placed from, so its cart is left as it is.
-    if (!token && lookupEmail) return;
+    if (!effectiveToken && effectiveLookupEmail) return;
     const paidOrder = orderDetails.data ?? null;
     const paidAtMs = parseShopTime(result?.verified_at || paidOrder?.payment?.verified_at).getTime();
     const recent = Number.isFinite(paidAtMs) && Date.now() - paidAtMs < 2 * 24 * 60 * 60 * 1000;
     completePaidOrder(
-      orderNumber,
+      effectiveOrderNumber,
       recent && paidOrder && Array.isArray(paidOrder.items)
         ? paidOrder.items.map((it) => ({ variant_id: it.variant_id ? Number(it.variant_id) : null, quantity: Number(it.quantity) }))
         : undefined
     );
-  }, [paidOrderSettled, orderDetails.data, result?.verified_at, orderNumber, completePaidOrder, token, lookupEmail]);
+  }, [paidOrderSettled, orderDetails.data, result?.verified_at, effectiveOrderNumber, completePaidOrder, effectiveToken, effectiveLookupEmail]);
 
   useEffect(() => {
     if (view !== 'paid' || celebrated.current) return;
@@ -166,8 +231,8 @@ function CheckoutCallbackContent() {
 
   // Closed without payment: checkout should start a new order, not resume this one.
   useEffect(() => {
-    if (view === 'cancelled') clearPendingOrder(orderNumber);
-  }, [view, orderNumber]);
+    if (view === 'cancelled') clearPendingOrder(effectiveOrderNumber);
+  }, [view, effectiveOrderNumber]);
 
   // The live status stream, while the payment is pending. Each newer state makes the page ask
   // verify-payment once; a dropped stream reconnects up to MAX_RECONNECTS times, and a refused,
@@ -175,7 +240,7 @@ function CheckoutCallbackContent() {
   const isPending = view === 'pending';
   const liveFailed = live === 'failed';
   useEffect(() => {
-    if (!livePaymentStatus || liveFailed || !hydrated || !orderNumber || !isPending) return;
+    if (!livePaymentStatus || liveFailed || !hydrated || !effectiveOrderNumber || !isPending) return;
     const keepWatching = awaitingConfirmation;
     const controller = new AbortController();
     const key = paymentKeys.status(orderNumber, token ?? null, reference || null);
@@ -194,7 +259,7 @@ function CheckoutCallbackContent() {
     void (async () => {
       setLive('open');
       for (let drops = 0; ; drops++) {
-        const outcome = await openPaymentStream({ baseUrl: API_BASE_URL, orderNumber, token, reference: reference || null, signal: controller.signal, onState });
+        const outcome = await openPaymentStream({ baseUrl: API_BASE_URL, orderNumber: effectiveOrderNumber, token: effectiveToken, reference: reference || null, signal: controller.signal, onState });
         if (outcome === 'aborted' || controller.signal.aborted) return;
         if (outcome === 'time_limit' && keepWatching) {
           drops = -1; // a planned end, not a drop: open the next stream
@@ -213,7 +278,7 @@ function CheckoutCallbackContent() {
       }
     })();
     return () => controller.abort();
-  }, [livePaymentStatus, liveFailed, hydrated, orderNumber, isPending, awaitingConfirmation, token, reference, streamRun, queryClient]);
+  }, [livePaymentStatus, liveFailed, hydrated, effectiveOrderNumber, isPending, awaitingConfirmation, effectiveToken, reference, streamRun, queryClient, orderNumber, token]);
 
   const checkAgain = async () => {
     if (!orderNumber) return null;
@@ -231,6 +296,19 @@ function CheckoutCallbackContent() {
     window.history.replaceState(null, '', `/checkout/callback?order=${encodeURIComponent(orderNumber)}${reference ? `&reference=${encodeURIComponent(reference)}` : ''}`);
   }, [orderNumber, reference, searchParams]);
 
+  // Keep address bar canonical once the order number is confirmed
+  useEffect(() => {
+    if (!hydrated || !result?.order_number || !reference) return;
+    const currentOrder = searchParams.get('order');
+    if (!currentOrder || currentOrder !== result.order_number) {
+      window.history.replaceState(
+        null,
+        '',
+        `/checkout/callback?order=${encodeURIComponent(result.order_number)}&reference=${encodeURIComponent(reference)}`
+      );
+    }
+  }, [hydrated, result?.order_number, reference, searchParams]);
+
   // Back from the gateway with the page restored as it was left: the button is free again.
   useEffect(() => {
     const onPageShow = (e: PageTransitionEvent) => {
@@ -241,27 +319,32 @@ function CheckoutCallbackContent() {
   }, []);
 
   const handleRetryPayment = async (retryMethod: string) => {
-    if (!orderNumber) return;
+    const targetOrderNumber = effectiveOrderNumber || orderNumber;
+    if (!targetOrderNumber) return;
     setRetrying(retryMethod);
     setRetryError(null);
     const whatsappTab = retryMethod === 'whatsapp' ? window.open('about:blank', '_blank') : null;
     try {
+      const isGateway = retryMethod === 'monnify' || retryMethod === 'kora';
+      const redirectUrl = isGateway
+        ? `${window.location.origin}/checkout/callback`
+        : `${window.location.origin}/checkout/callback?order=${encodeURIComponent(targetOrderNumber)}`;
       const res = await apiInitializePayment(
-        orderNumber,
+        targetOrderNumber,
         token,
-        `${window.location.origin}/checkout/callback?order=${encodeURIComponent(orderNumber)}`,
+        redirectUrl,
         retryMethod,
         token ? undefined : lookupEmail
       );
       if (retryMethod === 'whatsapp') {
         const url = buildWhatsAppInvoiceUrl(
-          order ? whatsAppOrderFrom(order) : { order_number: orderNumber, grand_total: Number(res.amount) },
+          order ? whatsAppOrderFrom(order) : { order_number: targetOrderNumber, grand_total: Number(res.amount) },
           supportPhone
         );
         if (!url) throw new Error('The store has no WhatsApp number at the moment. Please choose another way to pay, or contact the store.');
         if (whatsappTab) whatsappTab.location.href = url;
         else window.location.href = url;
-        markInvoiceSent(orderNumber);
+        markInvoiceSent(targetOrderNumber);
         setIsRetrying(false);
         return;
       }
@@ -305,7 +388,7 @@ function CheckoutCallbackContent() {
     try {
       const dataUrl = await toJpeg(node, { quality: 0.95, backgroundColor: '#FFFFFF', pixelRatio: 2 });
       const link = document.createElement('a');
-      link.download = `SHOPCO-Receipt-${orderNumber}.jpeg`;
+      link.download = `SHOPCO-Receipt-${effectiveOrderNumber || orderNumber}.jpeg`;
       link.href = dataUrl;
       link.click();
     } catch {
@@ -347,7 +430,7 @@ function CheckoutCallbackContent() {
           {isRetrying === payNowGateway ? 'Opening payment…' : 'Pay now'}
         </button>
       )}
-      {whatsappEnabled && (invoiceSent ? (
+      {whatsappEnabled && (effectiveInvoiceSent ? (
         <>
           <button
             type="button"
@@ -420,7 +503,7 @@ function CheckoutCallbackContent() {
               <button type="button" onClick={() => void checkAgain()} className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm">
                 Try again
               </button>
-              <Link href={`/track-order${orderNumber ? `?order=${encodeURIComponent(orderNumber)}` : ''}`} className="w-full bg-neutral-100 hover:bg-neutral-200 font-semibold py-3 rounded-full text-sm">
+              <Link href={`/track-order${effectiveOrderNumber || orderNumber ? `?order=${encodeURIComponent(effectiveOrderNumber || orderNumber)}` : ''}`} className="w-full bg-neutral-100 hover:bg-neutral-200 font-semibold py-3 rounded-full text-sm">
                 Track order with email
               </Link>
             </div>
@@ -444,7 +527,7 @@ function CheckoutCallbackContent() {
               <div>
                 <h1 className="text-2xl font-extrabold text-black">Payment confirmed</h1>
                 <p className="text-sm text-neutral-700 mt-0.5">
-                  Order <strong className="font-mono text-black">{orderNumber}</strong>
+                  Order <strong className="font-mono text-black">{effectiveOrderNumber}</strong>
                 </p>
               </div>
 
@@ -511,7 +594,7 @@ function CheckoutCallbackContent() {
 
             <div className="space-y-3">
               <Link
-                href={`/track-order?order=${encodeURIComponent(orderNumber)}`}
+                href={`/track-order?order=${encodeURIComponent(effectiveOrderNumber || orderNumber)}`}
                 className="w-full bg-black text-white hover:bg-neutral-800 font-bold py-3.5 rounded-full text-sm shadow-md flex items-center justify-center gap-2"
               >
                 <span>Track your order</span>
@@ -529,7 +612,7 @@ function CheckoutCallbackContent() {
                   <a
                     href={buildWhatsAppReceiptUrl(
                       {
-                        ...(order ? whatsAppOrderFrom(order) : { order_number: orderNumber }),
+                        ...(order ? whatsAppOrderFrom(order) : { order_number: effectiveOrderNumber || orderNumber }),
                         grand_total: Number(result?.amount ?? order?.grand_total ?? 0),
                       },
                       supportPhone
@@ -673,7 +756,7 @@ function CheckoutCallbackContent() {
             </p>
             {awaitingWhatsApp && (hasWhatsApp ? (
               <a
-                href={buildWhatsAppMessageUrl(`Hello! Order ${orderNumber} was cancelled, but I sent the transfer. Here is my bank receipt.`, supportPhone)}
+                href={buildWhatsAppMessageUrl(`Hello! Order ${effectiveOrderNumber || orderNumber} was cancelled, but I sent the transfer. Here is my bank receipt.`, supportPhone)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full bg-white text-black border border-black/15 hover:bg-neutral-50 font-semibold py-3 px-5 rounded-full text-sm flex items-center justify-center gap-2.5"
@@ -684,7 +767,7 @@ function CheckoutCallbackContent() {
             ) : contactStoreLink)}
             <Link
               href="/cart"
-              onClick={() => clearPendingOrder(orderNumber)}
+              onClick={() => clearPendingOrder(effectiveOrderNumber || orderNumber)}
               className="block w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm"
             >
               Go to cart
