@@ -24,7 +24,7 @@ beforeEach(() => {
   set('sessionStorage', fakeStorage());
 });
 
-const { getCallbackParams, readParam, paymentKeys, paymentOrderQuery, paymentStatusQuery } = await import('../lib/payment-queries.ts');
+const { getCallbackParams } = await import('../lib/payment-queries.ts');
 const { savePendingOrder } = await import('../lib/pending-order.ts');
 const api = await import('../lib/api-client.ts');
 
