@@ -1,5 +1,65 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiGetOrder, apiVerifyPayment, type PaymentVerificationResponse } from '@/lib/api-client';
+import { readPendingOrder } from '@/lib/pending-order';
+
+export function readParam(params: URLSearchParams, keys: string[]): string {
+  for (const key of keys) {
+    const value = params.get(key);
+    if (value) return value.split('?')[0];
+  }
+  return '';
+}
+
+export function getCallbackParams(searchParams: URLSearchParams, rawSearch?: string): { orderNumber: string; reference: string } {
+  let params = searchParams;
+  const searchStr = rawSearch ?? (typeof window !== 'undefined' ? window.location.search : '');
+  if (searchStr && searchStr.indexOf('?', 1) !== -1) {
+    // Gateways like Monnify and Kora concatenate '?paymentReference=' to a URL that already had '?'
+    const normalized = searchStr.replace(/\?/g, (m, offset) => (offset === 0 ? '?' : '&'));
+    params = new URLSearchParams(normalized);
+  }
+
+  const reference = readParam(params, ['reference', 'paymentReference', 'trxref', 'transactionReference']);
+  let orderNumber = readParam(params, ['order', 'order_number']);
+
+  if (orderNumber && orderNumber.includes('?')) {
+    orderNumber = orderNumber.split('?')[0];
+  }
+
+  if (!orderNumber && reference) {
+    // References are generated as PAY-ORD-xxx-suffix or MNFY-ORD-xxx-suffix
+    const m = reference.match(/^(?:PAY|MNFY)-(ORD-[A-Za-z0-9\-]+?)-[A-Fa-f0-9]+$/i)
+      || reference.match(/^(?:PAY|MNFY)-(.+)-[A-Fa-f0-9]{6,16}$/i);
+    if (m) {
+      orderNumber = m[1];
+    } else if (/^(?:PAY|MNFY)-/.test(reference)) {
+      const lastDash = reference.lastIndexOf('-');
+      if (lastDash > 4) {
+        orderNumber = reference.slice(reference.indexOf('-') + 1, lastDash);
+      }
+    }
+  }
+
+  if (!orderNumber) {
+    try {
+      const pending = readPendingOrder();
+      if (pending?.orderNumber) {
+        orderNumber = pending.orderNumber;
+      }
+      if (!orderNumber && typeof localStorage !== 'undefined') {
+        orderNumber = localStorage.getItem('shopco_latest_order_number') || '';
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!orderNumber && reference) {
+    orderNumber = reference;
+  }
+
+  return { orderNumber, reference };
+}
 
 /**
  * TanStack Query options for the payment return page (app/checkout/callback). Read-only:

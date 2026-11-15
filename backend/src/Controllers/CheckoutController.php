@@ -415,6 +415,7 @@ class CheckoutController
         if ($order === null) {
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
+        $orderNumber = (string) $order['order_number'];
 
         RateLimiter::attempt('payment_init', RequestContext::clientIp(), 20, 600);
         $body = JsonBodyMiddleware::getBody();
@@ -524,6 +525,7 @@ class CheckoutController
             Response::error('Order number is required.', 422, 'VALIDATION_ERROR');
         }
 
+        $rawOrderParam = $orderNumber;
         $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$orderNumber]);
         if ($order === null && $orderNumber !== '') {
             $paymentByRef = $this->findPaymentAttempt($orderNumber);
@@ -534,12 +536,13 @@ class CheckoutController
         if ($order === null) {
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
+        $orderNumber = (string) $order['order_number'];
 
         RateLimiter::attempt('payment_verify', RequestContext::clientIp(), 240, 600);
 
         $customRef = $this->returnReference();
         if ($customRef === '' && isset($paymentByRef) && $paymentByRef !== null) {
-            $customRef = $orderNumber;
+            $customRef = $rawOrderParam;
         }
         $this->guardEmailGuesses();
         if (!$this->canSeePaymentStatus($order, $customRef)) {
@@ -715,9 +718,16 @@ class CheckoutController
     {
         $orderNumber = trim(rawurldecode($params['orderNumber'] ?? ''));
         $order = $orderNumber === '' ? null : $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$orderNumber]);
+        if ($order === null && $orderNumber !== '') {
+            $paymentByRef = $this->findPaymentAttempt($orderNumber);
+            if ($paymentByRef !== null) {
+                $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `id` = ?", 'i', [(int) $paymentByRef['order_id']]);
+            }
+        }
         if ($order === null) {
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
+        $orderNumber = (string) $order['order_number'];
 
         RateLimiter::attempt('order_release', RequestContext::clientIp(), 30, 600);
         $body = JsonBodyMiddleware::getBody();
@@ -736,9 +746,16 @@ class CheckoutController
     {
         $orderNumber = trim(rawurldecode($params['orderNumber'] ?? ''));
         $order = $orderNumber === '' ? null : $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$orderNumber]);
+        if ($order === null && $orderNumber !== '') {
+            $paymentByRef = $this->findPaymentAttempt($orderNumber);
+            if ($paymentByRef !== null) {
+                $order = $this->db->fetchOne("SELECT * FROM `orders` WHERE `id` = ?", 'i', [(int) $paymentByRef['order_id']]);
+            }
+        }
         if ($order === null) {
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
+        $orderNumber = (string) $order['order_number'];
 
         RateLimiter::attempt('payment_claim', RequestContext::clientIp(), 30, 600);
         $body = JsonBodyMiddleware::getBody();
@@ -847,6 +864,7 @@ class CheckoutController
         }
         RateLimiter::attempt('sse_open', RequestContext::clientIp(), 20, 600);
         $orderNumber = trim(rawurldecode($params['orderNumber'] ?? ''));
+        $rawOrderParam = $orderNumber;
         $order = $orderNumber === '' ? null : $this->db->fetchOne("SELECT * FROM `orders` WHERE `order_number` = ?", 's', [$orderNumber]);
         if ($order === null && $orderNumber !== '') {
             $paymentByRef = $this->findPaymentAttempt($orderNumber);
@@ -857,12 +875,13 @@ class CheckoutController
         $this->guardEmailGuesses();
         $customRef = $this->returnReference();
         if ($customRef === '' && isset($paymentByRef) && $paymentByRef !== null) {
-            $customRef = $orderNumber;
+            $customRef = $rawOrderParam;
         }
         if ($order === null || !$this->canSeePaymentStatus($order, $customRef)) {
             $this->countEmailGuess();
             Response::error('Order not found.', 404, 'ORDER_NOT_FOUND');
         }
+        $orderNumber = (string) $order['order_number'];
 
         $live = new LiveStatus($this->db);
         $slot = $live->claimSlot((int) $order['id'], RequestContext::clientIp());
@@ -1015,22 +1034,18 @@ class CheckoutController
         }
 
         // 2. Exact match inside provider_payload_redacted for gateway transaction reference
-        if (str_contains($ref, '|') || str_starts_with($ref, 'MNFY|') || str_starts_with($ref, 'MNFY-') || str_starts_with($ref, 'PAY-')) {
-            return $this->db->fetchOne(
-                "SELECT * FROM `payments`
-                 WHERE `provider_payload_redacted` IS NOT NULL
-                   AND (
-                     JSON_UNQUOTE(JSON_EXTRACT(`provider_payload_redacted`, '$.transactionReference')) = ?
-                     OR JSON_UNQUOTE(JSON_EXTRACT(`provider_payload_redacted`, '$.transaction_reference')) = ?
-                     OR JSON_UNQUOTE(JSON_EXTRACT(`provider_payload_redacted`, '$.paymentReference')) = ?
-                     OR JSON_UNQUOTE(JSON_EXTRACT(`provider_payload_redacted`, '$.reference')) = ?
-                   ){$orderClause}
-                 LIMIT 1",
-                'ssss',
-                [$ref, $ref, $ref, $ref]
-            );
-        }
-
-        return null;
+        return $this->db->fetchOne(
+            "SELECT * FROM `payments`
+             WHERE `provider_payload_redacted` IS NOT NULL
+               AND (
+                 JSON_UNQUOTE(JSON_EXTRACT(`provider_payload_redacted`, '$.transactionReference')) = ?
+                 OR JSON_UNQUOTE(JSON_EXTRACT(`provider_payload_redacted`, '$.transaction_reference')) = ?
+                 OR JSON_UNQUOTE(JSON_EXTRACT(`provider_payload_redacted`, '$.paymentReference')) = ?
+                 OR JSON_UNQUOTE(JSON_EXTRACT(`provider_payload_redacted`, '$.reference')) = ?
+               ){$orderClause}
+             LIMIT 1",
+            'ssss',
+            [$ref, $ref, $ref, $ref]
+        );
     }
 }

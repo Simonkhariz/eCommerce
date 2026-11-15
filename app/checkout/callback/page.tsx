@@ -13,12 +13,12 @@ import { formatPrice } from '@/lib/currency';
 import { API_BASE_URL, ApiError, apiInitializePayment, apiMarkPaymentSent, errorMessage } from '@/lib/api-client';
 import { shouldRetryQuery } from '@/lib/query-client';
 import { parseShopTime } from '@/lib/shop-time';
-import { POLL_DELAYS, paymentKeys, paymentOrderQuery, paymentStatusQuery, paymentViewFor, type PaymentView } from '@/lib/payment-queries';
+import { POLL_DELAYS, getCallbackParams, paymentKeys, paymentOrderQuery, paymentStatusQuery, paymentViewFor, type PaymentView } from '@/lib/payment-queries';
 import { LIVE_VERIFY_DELAYS, MAX_RECONNECTS, RECONNECT_MS, isNewerState, openPaymentStream, type LiveState } from '@/lib/live-payment';
 import { buildWhatsAppInvoiceUrl, buildWhatsAppMessageUrl, buildWhatsAppReceiptUrl, formatSupportPhone, whatsAppOrderFrom } from '@/lib/whatsapp';
 import { useStoreSupport } from '@/lib/use-store-support';
 import { useCart } from '@/context/CartContext';
-import { clearPendingOrder, markInvoiceSent, readPendingOrder, saveGuestToken } from '@/lib/pending-order';
+import { clearPendingOrder, markInvoiceSent, saveGuestToken } from '@/lib/pending-order';
 import { useGuestToken, useInvoiceSent, useLookupEmail } from '@/lib/use-order-data';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { PaymentMethodsNotice } from '@/components/cart/PaymentMethodsNotice';
@@ -26,67 +26,6 @@ import { PaymentMethodsNotice } from '@/components/cart/PaymentMethodsNotice';
 type ViewState = 'checking' | PaymentView | 'error';
 
 const noSubscribe = () => () => {};
-
-function readParam(params: URLSearchParams, keys: string[]): string {
-  for (const key of keys) {
-    const value = params.get(key);
-    if (value) return value.split('?')[0];
-  }
-  return '';
-}
-
-function getCallbackParams(searchParams: URLSearchParams): { orderNumber: string; reference: string } {
-  let params = searchParams;
-  if (typeof window !== 'undefined' && window.location.search) {
-    const raw = window.location.search;
-    if (raw.indexOf('?', 1) !== -1) {
-      // Gateways like Monnify and Kora concatenate '?paymentReference=' to a URL that already had '?'
-      const normalized = raw.replace(/\?/g, (m, offset) => (offset === 0 ? '?' : '&'));
-      params = new URLSearchParams(normalized);
-    }
-  }
-
-  const reference = readParam(params, ['reference', 'paymentReference', 'trxref', 'transactionReference']);
-  let orderNumber = readParam(params, ['order', 'order_number']);
-
-  if (orderNumber && orderNumber.includes('?')) {
-    orderNumber = orderNumber.split('?')[0];
-  }
-
-  if (!orderNumber && reference) {
-    // References are generated as PAY-ORD-xxx-suffix or MNFY-ORD-xxx-suffix
-    const m = reference.match(/^(?:PAY|MNFY)-(ORD-[A-Za-z0-9\-]+?)-[A-Fa-f0-9]+$/i)
-      || reference.match(/^(?:PAY|MNFY)-(.+)-[A-Fa-f0-9]{6,16}$/i);
-    if (m) {
-      orderNumber = m[1];
-    } else if (/^(?:PAY|MNFY)-/.test(reference)) {
-      const lastDash = reference.lastIndexOf('-');
-      if (lastDash > 4) {
-        orderNumber = reference.slice(reference.indexOf('-') + 1, lastDash);
-      }
-    }
-  }
-
-  if (!orderNumber && typeof window !== 'undefined') {
-    try {
-      const pending = readPendingOrder();
-      if (pending?.orderNumber) {
-        orderNumber = pending.orderNumber;
-      }
-      if (!orderNumber) {
-        orderNumber = localStorage.getItem('shopco_latest_order_number') || '';
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  if (!orderNumber && reference) {
-    orderNumber = reference;
-  }
-
-  return { orderNumber, reference };
-}
 
 function CheckoutCallbackContent() {
   const searchParams = useSearchParams();
@@ -331,10 +270,10 @@ function CheckoutCallbackContent() {
         : `${window.location.origin}/checkout/callback?order=${encodeURIComponent(targetOrderNumber)}`;
       const res = await apiInitializePayment(
         targetOrderNumber,
-        token,
+        effectiveToken || undefined,
         redirectUrl,
         retryMethod,
-        token ? undefined : lookupEmail
+        effectiveToken ? undefined : (effectiveLookupEmail || undefined)
       );
       if (retryMethod === 'whatsapp') {
         const url = buildWhatsAppInvoiceUrl(
@@ -370,7 +309,11 @@ function CheckoutCallbackContent() {
       // was sent (it emails the admins). The page then shows "Awaiting confirmation" and opens the
       // receipt once the store confirms.
       try {
-        await apiMarkPaymentSent(orderNumber, token, token ? undefined : lookupEmail);
+        await apiMarkPaymentSent(
+          effectiveOrderNumber || orderNumber,
+          effectiveToken || undefined,
+          effectiveToken ? undefined : (effectiveLookupEmail || undefined)
+        );
         void checkAgain();
         return;
       } catch (err) {
@@ -484,6 +427,9 @@ function CheckoutCallbackContent() {
                   e.preventDefault();
                   if (!keyInput) return;
                   saveGuestToken(orderNumber, keyInput); // the saved key becomes `token`, which starts a new check
+                  if (effectiveOrderNumber && effectiveOrderNumber !== orderNumber) {
+                    saveGuestToken(effectiveOrderNumber, keyInput);
+                  }
                 }}
               >
                 <label htmlFor="access-key" className="sr-only">Order access key</label>
