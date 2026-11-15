@@ -5,11 +5,11 @@
 (function () {
   'use strict';
 
-  // How clients reach you. Add a WhatsApp number (digits only, with the country code, for
-  // example '2348012345678') and a WhatsApp button appears on every page.
+  // How clients reach you. WhatsApp number format: digits with country code (e.g. '2348022899964').
   var CONTACT = {
     email: 'khariz.digital@gmail.com',
-    whatsapp: '',
+    whatsapp: '2348022899964',
+    phoneDisplay: '+234 802 289 9964',
   };
 
   var root = document.documentElement;
@@ -69,6 +69,7 @@
     link.setAttribute('href', 'https://wa.me/' + CONTACT.whatsapp + '?text=' + encodeURIComponent(text));
     link.setAttribute('target', '_blank');
     link.setAttribute('rel', 'noopener');
+    if (link.hasAttribute('data-show-phone')) link.textContent = CONTACT.phoneDisplay;
     link.hidden = false;
   });
 })();
