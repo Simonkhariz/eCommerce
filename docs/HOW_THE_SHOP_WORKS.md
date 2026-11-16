@@ -1028,8 +1028,8 @@ past its deadline (section 6.2).
 - **"Pay now" gateway:** Monnify or Kora, plus on/off switches for each method.
 - **Dark mode:** the sun/moon button in the admin header; remembered on that browser (it starts
   from the device's own light or dark setting). The storefront is not affected.
-- **Contact developer:** a card in Settings links to KharizDigital (https://khariz.vercel.app);
-  the storefront footer says "Developed with ♥ by KharizDigital", linking to the same page.
+- **Contact developer:** a card in Settings links to WhatsApp (09066707079) and KharizDigital (https://kharizdigital.com.ng);
+  the storefront footer says "Built by [Logo] KharizDigital", linking to the website.
 - **Order page:** the customer's delivery pin, when shared, opens in Google Maps.
 
 - **Store settings:**

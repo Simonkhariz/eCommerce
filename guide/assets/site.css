@@ -205,6 +205,9 @@ tr:last-child th, tr:last-child td { border-bottom: 0; }
 
 footer { padding-block: 40px 56px; color: var(--muted); font-size: var(--step--1); }
 footer .wrap { display: grid; gap: 8px; }
+.dev-link { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.dev-logo { width: 16px; height: 16px; object-fit: contain; vertical-align: middle; }
+:root[data-theme="dark"] .dev-logo { filter: brightness(0) invert(1); }
 [hidden] { display: none !important; }
 
 @media (max-width: 900px) {
