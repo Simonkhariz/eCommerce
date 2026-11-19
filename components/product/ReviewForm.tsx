@@ -139,7 +139,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
   };
 
   const fieldClass = (invalid: boolean) =>
-    `w-full rounded-xl border px-4 py-3 text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-black ${
+    `w-full rounded-xl border px-4 py-3 text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-accent ${
       invalid ? 'border-red-500' : 'border-neutral-300'
     }`;
   const errorId = (field: string) => `${ids}-${field}-error`;
@@ -182,7 +182,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
             type="button"
             onClick={onClose}
             data-autofocus
-            className="bg-black text-white hover:bg-neutral-800 font-semibold px-8 py-3 rounded-full text-sm"
+            className="bg-accent text-accent-ink hover:bg-accent-hover font-semibold px-8 py-3 rounded-full text-sm"
           >
             Done
           </button>
@@ -214,7 +214,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
                     tabIndex={isChecked || (rating === 0 && value === 1) ? 0 : -1}
                     onClick={() => pickRating(value)}
                     onKeyDown={(e) => onRatingKey(e, value)}
-                    className={`p-1 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-black ${filled ? 'text-[#FFC633]' : 'text-neutral-500'}`}
+                    className={`p-1 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${filled ? 'text-[#FFC633]' : 'text-neutral-500'}`}
                   >
                     <HugeiconsIcon icon={StarIcon} size={28} className={filled ? 'fill-current' : ''} />
                   </button>
@@ -331,7 +331,7 @@ export function ReviewForm({ open, onClose, productSlug, productName }: ReviewFo
           <button
             type="submit"
             disabled={submitting}
-            className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3.5 rounded-full text-sm disabled:opacity-60"
+            className="w-full bg-accent text-accent-ink hover:bg-accent-hover font-semibold py-3.5 rounded-full text-sm disabled:opacity-60"
           >
             {submitting ? 'Sending…' : 'Submit review'}
           </button>

@@ -24,6 +24,7 @@ import {
   paymentStatus,
 } from '@/lib/admin-format';
 import { canRecordLatePayment } from '@/lib/admin-logic';
+import { optionsText } from '@/lib/shop';
 import {
   Button,
   DetailList,
@@ -88,6 +89,9 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
   const ps = paymentStatus(order.payment_status);
   const addr = order.shipping_address_snapshot ?? {};
   const zone = order.shipping_zone_snapshot;
+  // Large or heavy items the delivery fee counted when the order was placed (0 in most shops).
+  const heavyItems = num(zone?.heavy_items);
+  const heavyItemFee = num(zone?.heavy_item_fee);
   const transitions = order.allowed_transitions ?? [];
   const canRefund = order.payment_status === 'successful' || order.payment_status === 'partially_refunded';
   // Underpaid money stays on a payment that never became successful, and can still be sent back.
@@ -257,12 +261,15 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
                 <tbody>
                   {items.map((it) => {
                     const opts = it.variant_options ?? {};
-                    const variant = [opts.size, opts.color ?? opts.color_name].filter(Boolean).join(' / ');
+                    // Leaves out an option the product does not use (its stored "none" value).
+                    const variant = optionsText(opts.size, opts.color ?? opts.color_name);
+                    const warranty = typeof opts.warranty === 'string' ? opts.warranty.trim() : '';
                     return (
                       <tr key={it.id}>
                         <td>
                           <span className="block font-medium text-[#111827]">{it.item_name}</span>
                           {variant && <span className="block text-xs text-[#6b7280]">{variant}</span>}
+                          {warranty && <span className="block text-xs text-[#6b7280]">Warranty: {warranty}</span>}
                         </td>
                         <td className="text-xs text-[#4b5563]">{it.sku || '—'}</td>
                         <td className="whitespace-nowrap text-right tabular-nums">{formatPrice(num(it.unit_price))}</td>
@@ -437,8 +444,19 @@ export function AdminOrderDetail({ orderNumber }: { orderNumber: string }) {
                   : []),
                 { label: 'Delivery zone', value: zone?.name ? `${zone.name}${zone.estimated_days ? ` · ${zone.estimated_days}` : ''}` : '—' },
                 { label: 'Delivery fee', value: formatPrice(num(order.shipping_fee)) },
+                ...(heavyItems > 0
+                  ? [
+                      {
+                        label: 'Large or heavy items',
+                        value: heavyItemFee > 0 ? `${heavyItems} × ${formatPrice(heavyItemFee)} (part of the delivery fee)` : String(heavyItems),
+                      },
+                    ]
+                  : []),
               ]}
             />
+            {order.age_confirmed_at && (
+              <p className="mt-3 text-xs text-[#6b7280]">Age confirmed at checkout: {formatDateTime(order.age_confirmed_at)}</p>
+            )}
             {order.notes && (
               <div className="mt-3 rounded-lg bg-[#f9fafb] px-3 py-2 text-[13px] text-[#374151]">
                 <p className="text-xs font-semibold text-[#6b7280]">Customer note</p>

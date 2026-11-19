@@ -12,11 +12,13 @@ import { useCart, MAX_QUANTITY_PER_LINE } from '@/context/CartContext';
 import { Dialog } from '@/components/ui/Dialog';
 import { VariantSelector } from '@/components/product/VariantSelector';
 import { formatPrice } from '@/lib/currency';
-import { colorStockFor, findVariant, firstChoice, sizeAfterColorChange, sizeStatesFor, stockMessageFor } from '@/lib/variants';
+import { colorStockFor, findVariant, firstChoice, sizeAfterColorChange, sizeStatesFor, soldOutColorName, stockMessageFor } from '@/lib/variants';
 
 /**
- * Choose a colour and size and add to the cart without leaving the list (a bottom sheet on
- * phones). Opened by a product card when the product comes in more than one option.
+ * Choose the options (colour and size in the template) and add to the cart without leaving the
+ * list (a bottom sheet on phones). Opened by a product card when the product comes in more than
+ * one option; a product with none has a single variant and goes straight into the cart
+ * (lib/use-quick-add.ts).
  */
 export function QuickAddDialog({ product, onClose }: { product: Product; onClose: () => void }) {
   const router = useRouter();
@@ -56,7 +58,7 @@ export function QuickAddDialog({ product, onClose }: { product: Product; onClose
           >
             <HugeiconsIcon icon={Cancel01Icon} size={18} aria-hidden="true" />
           </button>
-          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[#F0EEED]">
+          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-card">
             {product.images[0] && <Image src={product.images[0]} alt="" fill sizes="56px" className="object-cover" />}
           </div>
           <div className="min-w-0">
@@ -94,7 +96,7 @@ export function QuickAddDialog({ product, onClose }: { product: Product; onClose
           maxQuantity={Math.max(1, Math.min(MAX_QUANTITY_PER_LINE, stock))}
           onQuantityChange={setQuantity}
           canPurchase={canPurchase}
-          stockMessage={stockMessageFor(selectedVariant, variants.length)}
+          stockMessage={stockMessageFor(selectedVariant, variants.length, soldOutColorName(variants, selectedColor))}
           onAddToCart={add}
           onBuyNow={() => {
             if (add()) router.push('/cart');

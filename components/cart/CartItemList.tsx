@@ -7,6 +7,7 @@ import { useCart, MAX_QUANTITY_PER_LINE } from '@/context/CartContext';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Delete02Icon, MinusSignIcon, PlusSignIcon } from '@hugeicons/core-free-icons';
 import { formatPrice } from '@/lib/currency';
+import { SHOP, hasOption1, hasOption2, nameWithOptions, optionsText } from '@/lib/shop';
 
 export const CartItemList: React.FC = () => {
   const { items, updateQuantity, removeFromCart, cartNotices, dismissCartNotices } = useCart();
@@ -35,10 +36,10 @@ export const CartItemList: React.FC = () => {
         {notices}
         <div className="border border-neutral-200 rounded-3xl p-12 text-center bg-white">
           <h2 className="font-bold text-xl text-black mb-2">Your cart is empty</h2>
-          <p className="text-sm text-neutral-600 mb-6 max-w-sm mx-auto">Explore our latest collections and find clothes that match your style.</p>
+          <p className="text-sm text-neutral-600 mb-6 max-w-sm mx-auto">{SHOP.wording.emptyCart}</p>
           <Link
             href="/category"
-            className="inline-block bg-black text-white px-8 py-3.5 rounded-full text-sm font-semibold hover:bg-neutral-800 transition-colors shadow-md"
+            className="inline-block bg-accent text-accent-ink px-8 py-3.5 rounded-full text-sm font-semibold hover:bg-accent-hover transition-colors shadow-md"
           >
             Start shopping
           </Link>
@@ -61,7 +62,7 @@ export const CartItemList: React.FC = () => {
                 href={`/products/${item.slug}`}
                 tabIndex={-1}
                 aria-hidden="true"
-                className="relative w-24 h-24 sm:w-32 sm:h-32 bg-[#F0EEED] rounded-2xl overflow-hidden shrink-0"
+                className="relative w-24 h-24 sm:w-32 sm:h-32 bg-card rounded-2xl overflow-hidden shrink-0"
               >
                 <Image src={item.image} alt="" fill sizes="128px" className="object-cover hover:scale-105 transition-transform" />
               </Link>
@@ -75,19 +76,24 @@ export const CartItemList: React.FC = () => {
                     >
                       {item.name}
                     </Link>
-                    <p className="text-sm text-neutral-600 mt-0.5">
-                      <span className="text-black font-medium">Size:</span> {item.size}
-                    </p>
-                    <p className="text-sm text-neutral-600">
-                      <span className="text-black font-medium">Colour:</span> {item.color.name}
-                    </p>
+                    {/* Only the options this product uses: a line for the "none" value would read as a choice. */}
+                    {hasOption1(item.size) && (
+                      <p className="text-sm text-neutral-600 mt-0.5">
+                        <span className="text-black font-medium">{SHOP.option1.label}:</span> {item.size}
+                      </p>
+                    )}
+                    {hasOption2(item.color?.name) && (
+                      <p className={`text-sm text-neutral-600 ${hasOption1(item.size) ? '' : 'mt-0.5'}`}>
+                        <span className="text-black font-medium">{SHOP.option2.label}:</span> {item.color.name}
+                      </p>
+                    )}
                   </div>
 
                   <button
                     type="button"
                     onClick={() => removeFromCart(item.id)}
                     className="-m-1.5 shrink-0 rounded-full p-2.5 text-red-600 transition-colors hover:bg-red-50 hover:text-red-800"
-                    aria-label={`Remove ${item.name} (${item.size}, ${item.color.name}) from cart`}
+                    aria-label={`Remove ${nameWithOptions(item.name, optionsText(item.size, item.color?.name, ', '))} from cart`}
                   >
                     <HugeiconsIcon icon={Delete02Icon} size={20} aria-hidden="true" />
                   </button>
@@ -105,7 +111,7 @@ export const CartItemList: React.FC = () => {
                     <div
                       role="group"
                       aria-label={`Quantity of ${item.name}`}
-                      className="flex items-center bg-[#F0F0F0] rounded-full p-1 gap-1 sm:gap-2"
+                      className="flex items-center bg-surface rounded-full p-1 gap-1 sm:gap-2"
                     >
                       <button
                         type="button"

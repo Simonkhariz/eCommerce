@@ -68,6 +68,9 @@ $overrides = [
     'STORE_WHATSAPP_PHONE' => '+2348000000001',
     // Dev mode pages are tested by their own suites; DevModeTest turns it off to test the refusal.
     'DEV_MODE_DEFAULT' => 'true',
+    // .env may give this shop its own admin cookie name; the suites expect the usual one
+    // (ShopKindsTest checks that another name is honoured).
+    'ADMIN_COOKIE_NAME' => 'shopco_admin',
 ];
 $lines = file_exists(BASE_PATH . '/.env') ? file(BASE_PATH . '/.env', FILE_IGNORE_NEW_LINES) : [];
 $lines = array_values(array_filter($lines, static function (string $line) use ($overrides): bool {
@@ -95,11 +98,24 @@ $emptyTestUploads = static function () use ($testUploads): void {
 $emptyTestUploads();
 @mkdir($testUploads, 0755, true);
 
+// Every shop copy has its own config/shop.json (a perfume shop, an electricals shop...), but all of
+// them run these same suites against the same fixtures. So the test API and the suites see the
+// fixture shop (tests/fixtures/shop.json, the clothing shop the fixtures were written for) laid
+// over the copy's file: App\Config\Shop reads SHOP_CONFIG_OVERRIDES only while APP_ENV is
+// "testing". A suite that needs another kind of shop starts its own API with more values on top
+// (TestKit::startApi), or changes them in its own process (Shop::overrideForTests).
+$fixtureShop = json_decode((string) file_get_contents(__DIR__ . '/fixtures/shop.json'), true);
+if (!is_array($fixtureShop)) {
+    fwrite(STDERR, "tests/fixtures/shop.json is not valid JSON.\n");
+    exit(2);
+}
+
 $env = array_merge(getenv(), [
     'SHOPCO_ENV_FILE' => $envFile,
     'API_URL' => "http://127.0.0.1:{$port}/api/v1",
     'REVALIDATE_STUB_LOG' => $stubLog,
     'REVALIDATE_STUB_SECRET' => $stubSecret,
+    'SHOP_CONFIG_OVERRIDES' => json_encode($fixtureShop, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
 ]);
 $php = PHP_BINARY;
 
@@ -123,7 +139,7 @@ $mysqli->query("DROP DATABASE IF EXISTS `{$testDb}`");
 $mysqli->close();
 
 echo "Preparing {$testDb}...\n";
-if ($run([$php, BASE_PATH . '/migrations/migrate.php'], false) !== 0 || $run([$php, BASE_PATH . '/seeds/seed.php'], false) !== 0) {
+if ($run([$php, BASE_PATH . '/migrations/migrate.php'], false) !== 0 || $run([$php, BASE_PATH . '/seeds/seed.php', __DIR__ . '/fixtures/seeds'], false) !== 0) {
     fwrite(STDERR, "Could not prepare the test database.\n");
     exit(2);
 }

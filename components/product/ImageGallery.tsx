@@ -70,8 +70,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, productName 
                 onClick={() => setSelectedIndex(idx)}
                 aria-label={`Show photo ${idx + 1} of ${count}`}
                 aria-current={isSelected ? 'true' : undefined}
-                className={`relative aspect-square w-[30%] min-w-[90px] max-w-[120px] sm:w-28 sm:min-w-0 sm:max-w-none lg:w-full lg:h-[160px] xl:lg:h-[167px] bg-[#F0EEED] rounded-2xl overflow-hidden shrink-0 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 ${
-                  isSelected ? 'ring-2 ring-black ring-offset-2 shadow-sm' : 'hover:opacity-80 opacity-90'
+                className={`relative aspect-square w-[30%] min-w-[90px] max-w-[120px] sm:w-28 sm:min-w-0 sm:max-w-none lg:w-full lg:h-[160px] xl:lg:h-[167px] bg-card rounded-2xl overflow-hidden shrink-0 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
+                  isSelected ? 'ring-2 ring-accent ring-offset-2 shadow-sm' : 'hover:opacity-80 opacity-90'
                 }`}
               >
                 {/* The first thumbnail is the main photo again: load it with the page like the main one. */}
@@ -92,7 +92,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, productName 
         onMouseMove={handleMouseMove}
         onClick={() => setIsZoomModalOpen(true)}
         aria-label={`Open full-screen view of ${altFor(selectedIndex)}`}
-        className="relative flex-1 min-w-0 w-full aspect-square lg:aspect-auto lg:h-[500px] xl:lg:h-[530px] bg-[#F0EEED] rounded-3xl overflow-hidden shadow-sm cursor-zoom-in group focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2"
+        className="relative flex-1 min-w-0 w-full aspect-square lg:aspect-auto lg:h-[500px] xl:lg:h-[530px] bg-card rounded-3xl overflow-hidden shadow-sm cursor-zoom-in group focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
       >
         <Image
           src={current}

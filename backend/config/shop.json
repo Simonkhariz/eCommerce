@@ -1,0 +1,80 @@
+{
+  "key": "shopco",
+  "name": "SHOP.CO",
+  "kind": "online clothing store",
+  "title": "SHOP.CO | Find Clothes That Match Your Style",
+  "description": "Browse through our diverse range of meticulously crafted garments, designed to bring out your individuality and cater to your sense of style.",
+  "tagline": "Clothes that suit your style and that you're proud to wear, delivered across Nigeria.",
+  "hero": {
+    "title": "FIND CLOTHES THAT MATCH YOUR STYLE",
+    "subtitle": "Browse through our diverse range of meticulously crafted garments, designed to bring out your individuality and cater to your sense of style.",
+    "cta": "Shop Now",
+    "image": "/images/hero/african_models_hero.webp",
+    "cutout": true
+  },
+  "theme": {
+    "accent": "#000000",
+    "accentHover": "#262626",
+    "accentInk": "#ffffff",
+    "surface": "#F0F0F0",
+    "card": "#F0EEED",
+    "hero": "#F2F0F1"
+  },
+  "option1": {
+    "label": "Size",
+    "plural": "Sizes",
+    "none": "Standard",
+    "choices": ["XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "28", "30", "32", "34", "36", "38", "40", "One Size"],
+    "help": "",
+    "helpByCategory": {}
+  },
+  "option2": {
+    "label": "Colour",
+    "plural": "Colours",
+    "none": "Default",
+    "swatch": true,
+    "placeholder": "e.g. Navy"
+  },
+  "style": {
+    "enabled": true,
+    "label": "Dress style",
+    "plural": "Dress styles",
+    "short": "Style",
+    "heading": "{value} style",
+    "browseTitle": "BROWSE BY DRESS STYLE",
+    "values": ["Casual", "Formal", "Party", "Gym"],
+    "images": {
+      "casual": "/images/styles/casual-look.webp",
+      "formal": "/images/styles/formal-look.webp",
+      "party": "/images/styles/party-look.webp",
+      "gym": "/images/styles/gym-look.webp"
+    }
+  },
+  "specs": {
+    "label": "Specifications",
+    "suggested": []
+  },
+  "features": {
+    "warranty": false,
+    "heavyDelivery": false,
+    "ageCheck": false
+  },
+  "ageCheck": {
+    "minAge": 18,
+    "categories": []
+  },
+  "wording": {
+    "featured": "FEATURED",
+    "newArrivals": "NEW ARRIVALS",
+    "topSelling": "TOP SELLING",
+    "categoriesEyebrow": "Curated Collections",
+    "categoriesTitle": "EXPLORE BY CATEGORY",
+    "categoriesCta": "Browse All Collections",
+    "emptyCart": "Explore our latest collections and find clothes that match your style.",
+    "contactIntro": "Questions about an order, sizing or a return? Reach us using the details below.",
+    "searchExampleShort": "shirt",
+    "searchExampleLong": "blue cotton shirt",
+    "descriptionHint": "Fabric, fit, care instructions…",
+    "categoryHint": "/category?cat=t-shirts"
+  }
+}

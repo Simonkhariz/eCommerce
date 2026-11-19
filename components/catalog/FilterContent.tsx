@@ -5,6 +5,7 @@ import { FilterState } from '@/types';
 import { CatalogFacets } from '@/lib/api-client';
 import { priceFilterFrom } from '@/lib/catalog-query';
 import { formatPrice } from '@/lib/currency';
+import { SHOP, hasOption1, hasOption2 } from '@/lib/shop';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ArrowRight01Icon, ArrowUp01Icon, Tick02Icon, SlidersHorizontalIcon } from '@hugeicons/core-free-icons';
 
@@ -43,7 +44,9 @@ const isLight = (hex: string) => ['#ffffff', '#fff', '#fafafa', '#f5f5f5', '#fff
 
 /**
  * Catalogue filters. Every option comes from /catalog/facets, so only categories, colours,
- * sizes and styles that exist in the published catalogue are offered.
+ * sizes and styles that exist in the published catalogue are offered. The names of the two
+ * options and of the style filter are the shop's own (lib/shop.ts); in the code they stay
+ * `colors`, `sizes` and `dress_styles`.
  */
 export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterChange, onReset, onDone, isMobile = false, facets }) => {
   const [minInput, setMinInput] = useState(filters.minPrice?.toString() ?? '');
@@ -83,9 +86,15 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
   };
 
   const categories = facets?.categories ?? [];
-  const colors = facets?.colors ?? [];
-  const sizes = facets?.sizes ?? [];
-  const styles = facets?.dress_styles ?? [];
+  // The "none" value of an option a product does not use is never offered as a choice (the server
+  // leaves it out too), and a shop with the style filter switched off has no style section.
+  const colors = (facets?.colors ?? []).filter((col) => hasOption2(col.name));
+  const sizes = (facets?.sizes ?? []).filter((size) => hasOption1(size));
+  const styles = SHOP.style.enabled ? (facets?.dress_styles ?? []) : [];
+  const chipClass = (isSelected: boolean) =>
+    `px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+      isSelected ? 'bg-accent text-accent-ink' : 'bg-surface text-neutral-700 hover:bg-neutral-200'
+    }`;
 
   return (
     <div className="space-y-6 text-black">
@@ -151,7 +160,7 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                   setFocusedPrice(null);
                   applyPrice();
                 }}
-                className="w-full rounded-xl bg-[#F0F0F0] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                className="w-full rounded-xl bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
             </div>
             <div>
@@ -171,7 +180,7 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                   setFocusedPrice(null);
                   applyPrice();
                 }}
-                className="w-full rounded-xl bg-[#F0F0F0] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                className="w-full rounded-xl bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
             </div>
           </div>
@@ -184,12 +193,27 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
       </Section>
 
       {colors.length > 0 && (
-        <Section title="Colors">
+        <Section title={SHOP.option2.plural}>
           <fieldset className="flex flex-wrap gap-2">
-            <legend className="sr-only">Colours</legend>
+            <legend className="sr-only">{SHOP.option2.plural}</legend>
             {colors.map((col) => {
               const isSelected = filters.selectedColors.some((c) => c.toLowerCase() === col.name.toLowerCase());
               const hex = col.hex || '#cccccc';
+              // Not a colour in this shop (a scent, a flavour): a text chip like option 1, no dot.
+              if (!SHOP.option2.swatch) {
+                return (
+                  <button
+                    key={col.name}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => onFilterChange({ selectedColors: toggleIn(filters.selectedColors, col.name) })}
+                    className={chipClass(isSelected)}
+                    aria-label={`${col.name} (${col.product_count})`}
+                  >
+                    {col.name}
+                  </button>
+                );
+              }
               return (
                 <button
                   key={col.name}
@@ -197,7 +221,7 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                   aria-pressed={isSelected}
                   onClick={() => onFilterChange({ selectedColors: toggleIn(filters.selectedColors, col.name) })}
                   className={`inline-flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3 text-sm font-medium transition-colors ${
-                    isSelected ? 'border-black bg-black text-white' : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-400'
+                    isSelected ? 'border-accent bg-accent text-accent-ink' : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-400'
                   }`}
                   aria-label={`${col.name} (${col.product_count})`}
                 >
@@ -217,9 +241,9 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
       )}
 
       {sizes.length > 0 && (
-        <Section title="Size">
+        <Section title={SHOP.option1.label}>
           <fieldset className="flex flex-wrap gap-2">
-            <legend className="sr-only">Sizes</legend>
+            <legend className="sr-only">{SHOP.option1.plural}</legend>
             {sizes.map((size) => {
               const isSelected = filters.selectedSizes.some((s) => s.toLowerCase() === size.toLowerCase());
               return (
@@ -228,9 +252,7 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
                   type="button"
                   aria-pressed={isSelected}
                   onClick={() => onFilterChange({ selectedSizes: toggleIn(filters.selectedSizes, size) })}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                    isSelected ? 'bg-black text-white' : 'bg-[#F0F0F0] text-neutral-700 hover:bg-neutral-200'
-                  }`}
+                  className={chipClass(isSelected)}
                 >
                   {size}
                 </button>
@@ -241,9 +263,9 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
       )}
 
       {styles.length > 0 && (
-        <Section title="Dress Style">
+        <Section title={SHOP.style.label}>
           <fieldset className="space-y-1">
-            <legend className="sr-only">Dress style</legend>
+            <legend className="sr-only">{SHOP.style.label}</legend>
             {styles.map((style) => {
               const isActive = filters.dressStyle?.toLowerCase() === style.toLowerCase();
               return (
@@ -268,11 +290,11 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
       <fieldset className="space-y-2">
         <legend className="text-sm font-bold text-black mb-1">Offers</legend>
         <label className="flex items-center gap-2 text-sm text-neutral-800">
-          <input type="checkbox" className="size-4 accent-black" checked={filters.onSale} onChange={(e) => onFilterChange({ onSale: e.target.checked })} />
+          <input type="checkbox" className="size-4 accent-accent" checked={filters.onSale} onChange={(e) => onFilterChange({ onSale: e.target.checked })} />
           On sale
         </label>
         <label className="flex items-center gap-2 text-sm text-neutral-800">
-          <input type="checkbox" className="size-4 accent-black" checked={filters.flashDeals} onChange={(e) => onFilterChange({ flashDeals: e.target.checked })} />
+          <input type="checkbox" className="size-4 accent-accent" checked={filters.flashDeals} onChange={(e) => onFilterChange({ flashDeals: e.target.checked })} />
           Flash deals
         </label>
       </fieldset>
@@ -281,7 +303,7 @@ export const FilterContent: React.FC<FilterContentProps> = ({ filters, onFilterC
         <button
           type="button"
           onClick={onDone}
-          className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3.5 rounded-full transition-colors shadow-md text-sm"
+          className="w-full bg-accent text-accent-ink hover:bg-accent-hover font-semibold py-3.5 rounded-full transition-colors shadow-md text-sm"
         >
           Show results
         </button>

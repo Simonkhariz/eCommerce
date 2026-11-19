@@ -46,6 +46,9 @@ import {
 import { formatShopDeadline } from '@/lib/shop-time';
 import {
   CHECKOUT_FIELD_ORDER,
+  ageConfirmErrorFrom,
+  ageConfirmLabel,
+  ageConfirmMissingMessage,
   checkoutFieldErrorsFrom,
   cleanPhone,
   firstValidationMessage,
@@ -55,6 +58,7 @@ import {
 } from '@/lib/checkout-validation';
 import { useInvoiceSent } from '@/lib/use-order-data';
 import { NIGERIAN_STATES } from '@/lib/nigeria';
+import { SHOP, option1Word, option2Word, optionsText } from '@/lib/shop';
 import { Dialog } from '@/components/ui/Dialog';
 import { PaymentMethodsNotice } from '@/components/cart/PaymentMethodsNotice';
 
@@ -76,6 +80,7 @@ interface PayableOrder {
   grand_total: number;
   expires_at?: string | null;
   shipping_address: { full_name?: string; phone?: string; address_line1?: string; city?: string; state?: string };
+  /** `size` holds the line's options as people read them ("M · Navy"), or nothing for a product with none. */
   items: Array<{ name: string; quantity: number; size?: string; line_total?: number; price?: number }>;
 }
 
@@ -89,7 +94,7 @@ function newIdempotencyKey(): string {
 }
 
 const fieldClass =
-  'w-full bg-[#F0F0F0] rounded-xl px-3.5 py-2.5 text-sm text-black placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-black';
+  'w-full bg-surface rounded-xl px-3.5 py-2.5 text-sm text-black placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-accent';
 const labelClass = 'text-xs font-semibold text-neutral-700 block mb-1';
 
 interface CheckoutForm {
@@ -227,6 +232,12 @@ function CheckoutSession({
   // the message then comes with a link to those orders.
   const [atUnpaidLimit, setAtUnpaidLimit] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<CheckoutFieldErrors>({});
+  // The age tick box (shown when the cart holds an item for adults only). Asked again at each
+  // checkout: it is never kept with the delivery details.
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [ageError, setAgeError] = useState<string | null>(null);
+  // The server refused an order for the missing confirmation although the quote had not asked for it.
+  const [ageAskedByServer, setAgeAskedByServer] = useState(false);
   const submitErrorRef = useRef<HTMLDivElement>(null);
   // Whether this cart's unpaid order still has to be looked at. Until it has been, a new order
   // could duplicate it, so "Continue" waits; 'failed' offers another try.
@@ -439,6 +450,13 @@ function CheckoutSession({
   const quoteForOtherState =
     isQuoting && !!quoteAnswer && (JSON.parse(quoteAnswer.request) as { shipping_address?: { state?: string } }).shipping_address?.state !== formData.state;
 
+  // An item for adults only is in the cart: the buyer confirms their age before ordering.
+  const ageCheckRequired = quote?.age_check_required === true || ageAskedByServer;
+  const minimumAge = Number(quote?.minimum_age) > 0 ? Number(quote?.minimum_age) : SHOP.ageCheck.minAge;
+  // Large items the delivery fee counted, and what they added to it (a shop with heavy delivery on).
+  const heavyItems = SHOP.features.heavyDelivery ? Number(quote?.heavy_items) || 0 : 0;
+  const heavyItemsFee = heavyItems * (Number(quote?.shipping_zone?.heavy_item_fee) || 0);
+
   const setField = (field: CheckoutField, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     setFieldErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
@@ -458,7 +476,7 @@ function CheckoutSession({
       return;
     }
     if (items.some((i) => typeof i.variantId !== 'number')) {
-      setSubmitError('Some items need their size and colour chosen again. Please review your cart.');
+      setSubmitError(`Some items need their ${option1Word} and ${option2Word} chosen again. Please review your cart.`);
       return;
     }
     if (!quote?.shipping_zone) {
@@ -467,9 +485,15 @@ function CheckoutSession({
     }
     const problems = validateCheckoutDetails(formData);
     setFieldErrors(problems);
+    setAgeError(null);
     const firstProblem = CHECKOUT_FIELD_ORDER.find((field) => problems[field]);
     if (firstProblem) {
       document.getElementById(FIELD_INPUT_IDS[firstProblem])?.focus();
+      return;
+    }
+    if (ageCheckRequired && !ageConfirmed) {
+      setAgeError(ageConfirmMissingMessage(minimumAge));
+      document.getElementById('co-age')?.focus();
       return;
     }
 
@@ -489,6 +513,8 @@ function CheckoutSession({
       shipping_zone_id: quote.shipping_zone.id,
       coupon_code: appliedPromo?.code,
       notes: formData.notes.trim() || undefined,
+      // Only sent when it was asked for and ticked (checked just above).
+      ...(ageCheckRequired ? { age_confirmed: true } : {}),
     };
     const payloadSignature = JSON.stringify(orderPayload);
     if (!idempotencyKeyRef.current || idempotencySignatureRef.current !== payloadSignature) {
@@ -523,7 +549,9 @@ function CheckoutSession({
         items: (placed.items || []).map((it) => ({
           name: it.name,
           quantity: Number(it.quantity),
-          size: it.variant_options?.size,
+          // Both options ("M · Navy"), as whatsAppItems gives them for a resumed order: two lines of
+          // one product can differ only in the second. Never the "none" value of an unused option.
+          size: optionsText(it.variant_options?.size, it.variant_options?.color, ' · ') || undefined,
           line_total: Number(it.line_total),
         })),
       });
@@ -532,6 +560,14 @@ function CheckoutSession({
       // A 422 can say which detail the server refused: shown on that field, and at the top.
       const details = err instanceof ApiError && err.statusCode === 422 ? err.details : undefined;
       setFieldErrors(checkoutFieldErrorsFrom(details));
+      // The server asks for the age confirmation: its message goes under the tick box, which is
+      // shown from now on even if the quote on screen had not asked for it.
+      const ageProblem = ageConfirmErrorFrom(details);
+      setAgeError(ageProblem);
+      if (ageProblem) {
+        setAgeAskedByServer(true);
+        setAgeConfirmed(false);
+      }
       setAtUnpaidLimit(err instanceof ApiError && err.errorCode === 'TOO_MANY_UNPAID_ORDERS');
       setSubmitError(firstValidationMessage(details) ?? errorMessage(err, 'We could not place your order. Please review your details and try again.'));
     } finally {
@@ -862,12 +898,12 @@ function CheckoutSession({
                   <fieldset className="space-y-1.5">
                     <legend className={labelClass}>Delivery option</legend>
                     {zones.map((z) => (
-                      <label key={z.id} className="flex items-center justify-between gap-2 rounded-xl border border-neutral-200 px-3 py-2 text-sm cursor-pointer has-[:checked]:border-black">
+                      <label key={z.id} className="flex items-center justify-between gap-2 rounded-xl border border-neutral-200 px-3 py-2 text-sm cursor-pointer has-[:checked]:border-accent">
                         <span className="flex items-center gap-2">
                           <input
                             type="radio"
                             name="zone"
-                            className="accent-black"
+                            className="accent-accent"
                             checked={(formData.selectedZoneId ?? quote?.shipping_zone?.id) === z.id}
                             onChange={() => setFormData((prev) => ({ ...prev, selectedZoneId: z.id }))}
                           />
@@ -898,6 +934,29 @@ function CheckoutSession({
                 </div>
               )}
 
+              {/* Age check: only when an item in the cart is for adults only (the quote says so). */}
+              {ageCheckRequired && (
+                <div>
+                  <label htmlFor="co-age" className="flex items-start gap-2 text-sm text-neutral-800 cursor-pointer">
+                    <input
+                      id="co-age"
+                      type="checkbox"
+                      required
+                      checked={ageConfirmed}
+                      aria-invalid={ageError ? true : undefined}
+                      aria-describedby={ageError ? 'co-age-error' : undefined}
+                      onChange={(e) => {
+                        setAgeConfirmed(e.target.checked);
+                        setAgeError(null);
+                      }}
+                      className="mt-0.5 size-4 shrink-0 accent-accent"
+                    />
+                    <span>{ageConfirmLabel(minimumAge)}</span>
+                  </label>
+                  <FieldError id="co-age-error" message={ageError ?? undefined} />
+                </div>
+              )}
+
               <div className="pt-2.5 border-t border-neutral-100 space-y-1.5 text-sm text-neutral-700">
                 <div className="flex justify-between">
                   <span>Subtotal ({itemCount} {itemCount === 1 ? 'item' : 'items'})</span>
@@ -917,6 +976,12 @@ function CheckoutSession({
                     {quote?.shipping_zone && !quoteForOtherState ? formatPrice(quote.shipping_fee) : '—'}
                   </span>
                 </div>
+                {/* Part of the delivery fee above, said so the buyer knows why it is higher. */}
+                {heavyItemsFee > 0 && quote?.shipping_zone && !quoteForOtherState && (
+                  <p className="text-xs text-neutral-600">
+                    Delivery includes {formatPrice(heavyItemsFee)} for {heavyItems} large {heavyItems === 1 ? 'item' : 'items'}.
+                  </p>
+                )}
                 <div className="flex justify-between items-center pt-2 border-t border-neutral-200">
                   <span className="font-bold text-black">Total</span>
                   <span className="font-black text-lg sm:text-xl text-black">
@@ -928,7 +993,7 @@ function CheckoutSession({
                   type="submit"
                   disabled={isSubmitting || isQuoting || !quote?.shipping_zone || resumeState !== 'idle'}
                   aria-describedby={!quote?.shipping_zone ? 'co-delivery-status' : undefined}
-                  className="w-full bg-black text-white hover:bg-neutral-800 disabled:opacity-50 font-bold py-3.5 rounded-full text-sm transition-all shadow-md mt-2 flex items-center justify-center gap-2"
+                  className="w-full bg-accent text-accent-ink hover:bg-accent-hover disabled:opacity-50 font-bold py-3.5 rounded-full text-sm transition-all shadow-md mt-2 flex items-center justify-center gap-2"
                 >
                   {isSubmitting ? (
                     <span>Placing order…</span>
@@ -1024,7 +1089,7 @@ function CheckoutSession({
                   type="button"
                   onClick={() => void handlePayOrder(payNowGateway)}
                   disabled={busy || isCheckingPaid}
-                  className="w-full bg-black text-white hover:bg-neutral-800 font-bold py-3.5 rounded-full text-sm transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60"
+                  className="w-full bg-accent text-accent-ink hover:bg-accent-hover font-bold py-3.5 rounded-full text-sm transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60"
                 >
                   {isInitializingPayment === payNowGateway ? (
                     <span>Opening secure payment…</span>

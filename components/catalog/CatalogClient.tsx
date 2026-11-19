@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { FilterState, Product } from '@/types';
 import { CatalogFacets, errorMessage, getCatalogFacets, getProducts, mapApiProductToStorefront, ProductListResponse } from '@/lib/api-client';
 import { buildCatalogUrl, catalogApiParams, EMPTY_FILTERS, parseCatalogParams } from '@/lib/catalog-query';
+import { shopFilters, styleHeadingParts, styleName } from '@/lib/shop';
 import { FilterSidebar } from '@/components/catalog/FilterSidebar';
 import { FilterDrawer } from '@/components/catalog/FilterDrawer';
 import { ProductGrid } from '@/components/catalog/ProductGrid';
@@ -35,8 +36,9 @@ export function CatalogClient({ seed }: { seed: CatalogSeed }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryKey = searchParams.toString();
-  // The URL is the single source of truth for every filter, the sort and the page.
-  const filters = useMemo(() => parseCatalogParams(new URLSearchParams(queryKey)), [queryKey]);
+  // The URL is the single source of truth for every filter, the sort and the page (read the
+  // same way as the server does in app/category/page.tsx, or its results would not be used).
+  const filters = useMemo(() => shopFilters(parseCatalogParams(new URLSearchParams(queryKey))), [queryKey]);
   const canonicalKey = buildCatalogUrl(filters);
   // Filter and page changes are server navigations (the server sends the next results);
   // while one is on its way the grid shows its loading state.
@@ -132,14 +134,19 @@ export function CatalogClient({ seed }: { seed: CatalogSeed }) {
   const handleRetry = () => setRetry((r) => ({ key: queryKey, count: (r.key === queryKey ? r.count : 0) + 1 }));
 
   const activeCategory = facets?.categories.find((c) => c.slug.toLowerCase() === filters.category?.toLowerCase());
-  const activeTitle = activeCategory
+  // The address carries the style in lower case; people read it as the shop wrote it ("LG").
+  const activeStyle = filters.dressStyle ? styleName(filters.dressStyle, facets?.dress_styles ?? []) : null;
+  const [styleBefore, styleAfter] = styleHeadingParts();
+  const activeTitle: React.ReactNode = activeCategory
     ? activeCategory.name
     : filters.category
       ? filters.category.replace(/-/g, ' ')
       : filters.searchQuery.trim()
         ? `Results for “${filters.searchQuery.trim()}”`
-        : filters.dressStyle
-          ? `${filters.dressStyle} style`
+        : activeStyle
+          ? // The shop's own heading for a style ("{value} style"), as one piece of text, so the page
+            // title (all capitals) and the page trail (capital first letters) each show it whole.
+            `${styleBefore}${activeStyle}${styleAfter}`
           : filters.flashDeals
             ? 'Flash deals'
             : filters.featured
@@ -177,6 +184,7 @@ export function CatalogClient({ seed }: { seed: CatalogSeed }) {
           products={products}
           totalCount={totalCount}
           categoryTitle={activeTitle}
+          styleLabel={activeStyle}
           filters={filters}
           onFilterChange={handleFilterChange}
           onReset={handleReset}

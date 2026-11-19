@@ -1,3 +1,4 @@
+import { SHOP } from '@/lib/shop';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ContentPage } from '@/components/content/ContentPage';
@@ -6,7 +7,7 @@ import { serverApiGet } from '@/lib/server-api';
 import { faqContent, paymentWindowsFrom } from '@/lib/site-content';
 
 export const metadata: Metadata = {
-  title: 'FAQ | SHOP.CO',
+  title: `FAQ | ${SHOP.name}`,
   description: 'Answers about payment, payment windows, delivery fees, order tracking, accounts and returns.',
 };
 

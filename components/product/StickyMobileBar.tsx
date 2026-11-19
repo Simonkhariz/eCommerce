@@ -11,7 +11,7 @@ interface StickyMobileBarProps {
   product: Product;
   /** Price of the selected variant. */
   price: number;
-  /** e.g. "Large • Black", or a prompt to choose options. */
+  /** e.g. "Large • Black", or a prompt to choose options. '' for a product with no options. */
   selectionLabel: string;
   canPurchase: boolean;
   onAddToCart: () => void;
@@ -51,7 +51,7 @@ export const StickyMobileBar: React.FC<StickyMobileBarProps> = ({
       }`}
     >
       <div className="flex flex-col min-w-0">
-        <span className="text-xs text-neutral-600 font-medium truncate max-w-[140px]">{selectionLabel}</span>
+        {selectionLabel && <span className="text-xs text-neutral-600 font-medium truncate max-w-[140px]">{selectionLabel}</span>}
         <div className="flex items-baseline gap-1.5">
           <span className="font-bold text-lg text-black">{formatPrice(price)}</span>
           {product.originalPrice && product.originalPrice > price && (
@@ -68,7 +68,7 @@ export const StickyMobileBar: React.FC<StickyMobileBarProps> = ({
           type="button"
           onClick={onAddToCart}
           disabled={!canPurchase || !ready}
-          className="flex-1 bg-black text-white active:bg-neutral-800 text-xs font-bold py-3 rounded-full flex items-center justify-center gap-1.5 shadow-md disabled:bg-neutral-300 disabled:text-neutral-700 disabled:shadow-none"
+          className="flex-1 bg-accent text-accent-ink active:bg-accent-hover text-xs font-bold py-3 rounded-full flex items-center justify-center gap-1.5 shadow-md disabled:bg-neutral-300 disabled:text-neutral-700 disabled:shadow-none"
         >
           <HugeiconsIcon icon={ShoppingBag01Icon} size={14} aria-hidden="true" />
           <span>{canPurchase ? 'Add to Cart' : 'Unavailable'}</span>
@@ -77,7 +77,7 @@ export const StickyMobileBar: React.FC<StickyMobileBarProps> = ({
           type="button"
           onClick={onBuyNow}
           disabled={!canPurchase || !ready}
-          className="bg-[#F0F0F0] active:bg-neutral-200 text-black text-xs font-bold p-3 rounded-full flex items-center justify-center shadow-sm disabled:opacity-50"
+          className="bg-surface active:bg-neutral-200 text-black text-xs font-bold p-3 rounded-full flex items-center justify-center shadow-sm disabled:opacity-50"
           title="Buy now"
           aria-label={canPurchase ? `Buy ${product.name} now` : 'Buy now (unavailable)'}
         >

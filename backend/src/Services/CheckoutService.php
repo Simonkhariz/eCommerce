@@ -8,6 +8,7 @@ use App\Support\Input;
 use App\Support\PhoneNumber;
 use App\Support\ValidationFailed;
 use App\Config\Env;
+use App\Config\Shop;
 use App\Database\Database;
 use RuntimeException;
 use InvalidArgumentException;
@@ -61,10 +62,12 @@ class CheckoutService
         $shippingResolution = null;
         $shippingFee = 0.0;
 
+        $heavyItems = self::heavyQuantity($verifiedItems);
         if (is_array($shippingAddress) && !empty($shippingAddress['state'])) {
             $shippingResolution = $this->priceZones(
                 $this->resolveShippingZone($shippingAddress, $requestedZoneId),
-                (int) array_sum(array_column($verifiedItems, 'quantity'))
+                (int) array_sum(array_column($verifiedItems, 'quantity')),
+                $heavyItems
             );
             $shippingFee = (float) $shippingResolution['selected_zone']['fee'];
         }
@@ -102,7 +105,45 @@ class CheckoutService
             'shipping_zone' => $shippingResolution ? $shippingResolution['selected_zone'] : null,
             'eligible_zones' => $shippingResolution ? $shippingResolution['eligible_zones'] : [],
             'origin' => $origin,
+            // How many of the items are heavy ones that add to the delivery fee (0 unless the shop
+            // charges for them), and whether the buyer must confirm their age to place this order.
+            'heavy_items' => $heavyItems,
+            'age_check_required' => self::needsAgeCheck($verifiedItems),
+            'minimum_age' => Shop::minimumAge(),
         ];
+    }
+
+    /**
+     * The total quantity of the heavy items among these verified lines. Always 0 in a shop that
+     * does not charge for them (config/shop.json, features.heavyDelivery).
+     *
+     * @param array<int, array<string, mixed>> $verifiedItems
+     */
+    private static function heavyQuantity(array $verifiedItems): int
+    {
+        if (!Shop::feature('heavyDelivery')) {
+            return 0;
+        }
+        $heavy = 0;
+        foreach ($verifiedItems as $item) {
+            $heavy += !empty($item['is_heavy']) ? (int) $item['quantity'] : 0;
+        }
+        return $heavy;
+    }
+
+    /**
+     * True when one of these verified lines is from a category only adults may buy from.
+     *
+     * @param array<int, array<string, mixed>> $verifiedItems
+     */
+    private static function needsAgeCheck(array $verifiedItems): bool
+    {
+        foreach ($verifiedItems as $item) {
+            if (!empty($item['age_restricted'])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -227,17 +268,11 @@ class CheckoutService
         $deviceHash = self::deviceHash($deviceId);
         $this->assertUnderUnpaidCap($userId, $email, $contactPhone, $deviceHash);
 
-        // 3. Resolve and revalidate destination shipping zone
+        // 3. Resolve and revalidate destination shipping zone. Its fee is worked out inside the
+        // transaction, from the lines as the database knows them (how many items, and how many
+        // of them are heavy), never from what the request says about them.
         $requestedZoneId = isset($input['shipping_zone_id']) ? (int) $input['shipping_zone_id'] : null;
-        // The fee grows with the number of items (each line is checked again inside the
-        // transaction; a quantity the stock can't cover fails the order there).
-        $totalQuantity = 0;
-        foreach ($items as $line) {
-            $totalQuantity += is_array($line) ? max(0, (int) ($line['quantity'] ?? 0)) : 0;
-        }
-        $shippingResolution = $this->priceZones($this->resolveShippingZone($shippingAddress, $requestedZoneId), $totalQuantity);
-        $selectedZone = $shippingResolution['selected_zone'];
-        $shippingFee = (float) $selectedZone['fee'];
+        $zoneResolution = $this->resolveShippingZone($shippingAddress, $requestedZoneId);
 
         // 4. Execute transactional order creation with atomic inventory decrement
         try {
@@ -247,14 +282,33 @@ class CheckoutService
                 $email,
                 $items,
                 $shippingAddress,
-                $selectedZone,
-                $shippingFee,
+                $zoneResolution,
                 $idempotencyKey,
                 $contactPhone,
                 $deviceHash
             ): array {
                 // A. Re-verify items and load lock-safe current pricing
                 $verifiedItems = $this->verifyAndPriceItems($items);
+
+                // Items only adults may buy: the buyer has to say they are old enough, on every order.
+                // When they did is kept on the order (age_confirmed_at), as the owner's record.
+                $ageConfirmedAt = null;
+                if (self::needsAgeCheck($verifiedItems)) {
+                    if (($input['age_confirmed'] ?? null) !== true) {
+                        $message = 'Please confirm that you are ' . Shop::minimumAge() . ' or older to order these items.';
+                        throw new ValidationFailed($message, ['age_confirmed' => $message]);
+                    }
+                    $ageConfirmedAt = date('Y-m-d H:i:s');
+                }
+
+                // The fee grows with the number of items, and with each heavy one where the shop charges for those.
+                $heavyItems = self::heavyQuantity($verifiedItems);
+                $selectedZone = $this->priceZones(
+                    $zoneResolution,
+                    (int) array_sum(array_column($verifiedItems, 'quantity')),
+                    $heavyItems
+                )['selected_zone'];
+                $shippingFee = (float) $selectedZone['fee'];
 
                 $subtotal = 0.0;
                 foreach ($verifiedItems as $item) {
@@ -337,6 +391,8 @@ class CheckoutService
                     'base_fee' => (float) $selectedZone['base_fee'],
                     'items_included' => (int) $selectedZone['items_included'],
                     'extra_item_fee' => (float) $selectedZone['extra_item_fee'],
+                    'heavy_item_fee' => (float) $selectedZone['heavy_item_fee'],
+                    'heavy_items' => $heavyItems,
                     'estimated_days' => $selectedZone['estimated_days'],
                     'origin' => $origin,
                 ];
@@ -366,9 +422,9 @@ class CheckoutService
                         `order_number`, `user_id`, `guest_email`, `contact_phone`, `device_hash`, `guest_access_token_hash`,
                         `shipping_zone_id`, `shipping_zone_snapshot`, `shipping_address_snapshot`,
                         `order_status`, `payment_status`, `currency`, `subtotal`, `discount_amount`,
-                        `shipping_fee`, `grand_total`, `applied_promo_code`, `notes`, `expires_at`, `idempotency_key`
-                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', 'NGN', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), ?)",
-                    'sissssissddddssis',
+                        `shipping_fee`, `grand_total`, `applied_promo_code`, `notes`, `expires_at`, `idempotency_key`, `age_confirmed_at`
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', 'NGN', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), ?, ?)",
+                    'sissssissddddssiss',
                     [
                         $orderNumber,
                         $userId,
@@ -387,6 +443,7 @@ class CheckoutService
                         $notes,
                         PaymentAttempts::gatewayWindowMinutes(),
                         $idempotencyKey,
+                        $ageConfirmedAt,
                     ]
                 );
 
@@ -556,8 +613,9 @@ class CheckoutService
 
             // 1. Fetch product from database
             $product = $this->db->fetchOne(
-                "SELECT `id`, `name`, `slug`, `status`, `product_type`, `base_price`, `currency`, `sku`
-                 FROM `products` WHERE `id` = ?",
+                "SELECT p.`id`, p.`name`, p.`slug`, p.`status`, p.`product_type`, p.`base_price`, p.`currency`, p.`sku`,
+                        p.`warranty`, p.`is_heavy`, p.`is_age_restricted`, c.`slug` AS `category_slug`
+                 FROM `products` p LEFT JOIN `categories` c ON c.`id` = p.`category_id` WHERE p.`id` = ?",
                 'i',
                 [$productId]
             );
@@ -578,23 +636,23 @@ class CheckoutService
                     [$variantId, $productId]
                 );
                 if ($variant === null) {
-                    throw new InvalidArgumentException("The selected option for '{$product['name']}' is no longer available. Please choose another size or colour.");
+                    throw new InvalidArgumentException("The selected option for '{$product['name']}' is no longer available. Please choose another " . Shop::option1Word() . ' or ' . Shop::option2Word() . '.');
                 }
             } else {
                 // Legacy carts without a variant_id: accept only an exact size + colour match, or a
-                // product that has a single option.
-                $size = isset($item['size']) ? trim((string) $item['size']) : '';
-                $color = isset($item['color']) ? (is_array($item['color']) ? trim((string) ($item['color']['name'] ?? '')) : trim((string) $item['color'])) : '';
+                // product that has a single option. An option the line leaves out is one the product
+                // does not use, stored as the shop's "none" word: {size: "50ml"} alone finds the
+                // 50ml variant of a product that has no second option.
+                $size = Input::text($item['size'] ?? null);
+                $color = is_array($item['color'] ?? null) ? Input::text($item['color']['name'] ?? null) : Input::text($item['color'] ?? null);
 
-                if ($size !== '' && $color !== '') {
-                    $variant = $this->db->fetchOne(
-                        "SELECT {$variantColumns} FROM `product_variants`
-                         WHERE `product_id` = ? AND `is_active` = 1 AND LOWER(`size`) = LOWER(?) AND LOWER(`color_name`) = LOWER(?)
-                         LIMIT 1",
-                        'iss',
-                        [$productId, $size, $color]
-                    );
-                }
+                $variant = $this->db->fetchOne(
+                    "SELECT {$variantColumns} FROM `product_variants`
+                     WHERE `product_id` = ? AND `is_active` = 1 AND LOWER(`size`) = LOWER(?) AND LOWER(`color_name`) = LOWER(?)
+                     LIMIT 1",
+                    'iss',
+                    [$productId, $size !== '' ? $size : Shop::option1None(), $color !== '' ? $color : Shop::option2None()]
+                );
 
                 if ($variant === null) {
                     $activeVariants = $this->db->fetchAll(
@@ -608,9 +666,10 @@ class CheckoutService
                 }
 
                 if ($variant === null) {
-                    $chosen = trim($size . ' / ' . $color, ' /');
+                    // What the buyer chose, without the "none" words.
+                    $chosen = Shop::optionsText($size, $color);
                     throw new InvalidArgumentException(
-                        "Please choose an available size and colour for '{$product['name']}'"
+                        'Please choose an available ' . Shop::option1Word() . ' and ' . Shop::option2Word() . " for '{$product['name']}'"
                         . ($chosen !== '' ? " ('{$chosen}' is not offered)." : '.')
                     );
                 }
@@ -627,21 +686,32 @@ class CheckoutService
             $unitPrice = $hasOverride ? (float) $variant['price_override'] : (float) $product['base_price'];
             $lineTotal = round($unitPrice * $quantity, 2);
 
+            $variantOptions = [
+                'size' => $variant['size'],
+                'color' => $variant['color_name'],
+                'color_hex' => $variant['color_hex'],
+            ];
+            // The warranty the item is sold with stays on the order line, so a later change to the
+            // product never rewrites what this customer was promised.
+            $warranty = Input::text($product['warranty'] ?? null);
+            if ($warranty !== '' && Shop::feature('warranty')) {
+                $variantOptions['warranty'] = $warranty;
+            }
+
             $verified[] = [
                 'product_id' => (int) $product['id'],
                 'variant_id' => (int) $variant['id'],
                 'name' => $product['name'],
                 'slug' => $product['slug'],
                 'sku' => $variant['sku'],
-                'variant_options' => [
-                    'size' => $variant['size'],
-                    'color' => $variant['color_name'],
-                    'color_hex' => $variant['color_hex'],
-                ],
+                'variant_options' => $variantOptions,
                 'unit_price' => $unitPrice,
                 'quantity' => $quantity,
                 'line_total' => $lineTotal,
                 'stock_available' => $availableStock,
+                'is_heavy' => (bool) ($product['is_heavy'] ?? false),
+                // For adults only: by its category, or because the product itself is marked.
+                'age_restricted' => Shop::isAgeRestricted($product['category_slug'] ?? null, (int) ($product['is_age_restricted'] ?? 0) === 1),
             ];
         }
 
@@ -679,16 +749,20 @@ class CheckoutService
 
     /**
      * Delivery fee for this many items: the zone's fee covers the first `items_included` items,
-     * and each item after that adds `extra_item_fee`.
+     * and each item after that adds `extra_item_fee`. In a shop that charges for heavy items
+     * (config/shop.json, features.heavyDelivery) each of those adds `heavy_item_fee` on top.
      *
      * @param array<string, mixed> $zone
      */
-    public static function deliveryFee(array $zone, int $quantity): float
+    public static function deliveryFee(array $zone, int $quantity, int $heavyQuantity = 0): float
     {
         $base = (float) ($zone['base_fee'] ?? $zone['fee'] ?? 0);
         $included = max(1, (int) ($zone['items_included'] ?? 1));
         $extra = max(0.0, (float) ($zone['extra_item_fee'] ?? 0));
-        return round($base + max(0, $quantity - $included) * $extra, 2);
+        $heavy = Shop::feature('heavyDelivery')
+            ? max(0, $heavyQuantity) * max(0.0, (float) ($zone['heavy_item_fee'] ?? 0))
+            : 0.0;
+        return round($base + max(0, $quantity - $included) * $extra + $heavy, 2);
     }
 
     /**
@@ -697,13 +771,14 @@ class CheckoutService
      *
      * @param array{selected_zone: array, eligible_zones: array} $resolution
      */
-    private function priceZones(array $resolution, int $quantity): array
+    private function priceZones(array $resolution, int $quantity, int $heavyQuantity = 0): array
     {
-        $price = static function (array $zone) use ($quantity): array {
+        $price = static function (array $zone) use ($quantity, $heavyQuantity): array {
             $zone['base_fee'] = (float) ($zone['base_fee'] ?? $zone['fee']);
             $zone['items_included'] = max(1, (int) ($zone['items_included'] ?? 1));
             $zone['extra_item_fee'] = (float) ($zone['extra_item_fee'] ?? 0);
-            $zone['fee'] = self::deliveryFee($zone, $quantity);
+            $zone['heavy_item_fee'] = (float) ($zone['heavy_item_fee'] ?? 0);
+            $zone['fee'] = self::deliveryFee($zone, $quantity, $heavyQuantity);
             return $zone;
         };
         $resolution['selected_zone'] = $price($resolution['selected_zone']);
@@ -984,7 +1059,7 @@ class CheckoutService
         ), 'value', 'key_name');
 
         return [
-            'store_name' => ($settings['store_name'] ?? '') !== '' ? $settings['store_name'] : 'SHOP.CO',
+            'store_name' => ($settings['store_name'] ?? '') !== '' ? $settings['store_name'] : Shop::name(),
             'origin_city' => $settings['store_origin_city'] ?? '',
             'origin_state' => $settings['store_origin_state'] ?? '',
             'origin_address' => $settings['store_origin_address'] ?? '',

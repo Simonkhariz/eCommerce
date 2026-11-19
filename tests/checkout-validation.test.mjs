@@ -1,7 +1,15 @@
 // Delivery details at checkout (lib/checkout-validation.ts). Run with: npm run test:web
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkoutFieldErrorsFrom, cleanPhone, firstValidationMessage, validateCheckoutDetails } from '../lib/checkout-validation.ts';
+import {
+  ageConfirmErrorFrom,
+  ageConfirmLabel,
+  ageConfirmMissingMessage,
+  checkoutFieldErrorsFrom,
+  cleanPhone,
+  firstValidationMessage,
+  validateCheckoutDetails,
+} from '../lib/checkout-validation.ts';
 
 const good = { fullName: 'Ada Obi', phone: '08031234567', address: '12 Okpara Avenue', city: 'Enugu' };
 
@@ -59,4 +67,21 @@ test('a 422 answer lands on the checkout fields', () => {
   );
   assert.deepEqual(checkoutFieldErrorsFrom({ shipping_address: { city: 'City?' } }), { city: 'City?' });
   assert.deepEqual(checkoutFieldErrorsFrom(undefined), {});
+});
+
+test('the age tick box uses the age the server gave', () => {
+  assert.equal(ageConfirmLabel(18), 'I confirm that I am 18 or older.');
+  assert.equal(ageConfirmLabel(21), 'I confirm that I am 21 or older.');
+  assert.equal(ageConfirmMissingMessage(18), 'Please confirm that you are 18 or older to order these items.');
+});
+
+test("the server's refusal for a missing age confirmation is found, and nothing else is taken for it", () => {
+  const message = 'Please confirm that you are 18 or older to order these items.';
+  assert.equal(ageConfirmErrorFrom({ age_confirmed: message }), message);
+  assert.equal(ageConfirmErrorFrom({ age_confirmed: [message] }), message);
+  assert.equal(ageConfirmErrorFrom({ phone: 'Phone?' }), null);
+  assert.equal(ageConfirmErrorFrom(undefined), null);
+  assert.equal(ageConfirmErrorFrom('age_confirmed'), null);
+  // It is not one of the delivery fields.
+  assert.deepEqual(checkoutFieldErrorsFrom({ age_confirmed: message }), {});
 });

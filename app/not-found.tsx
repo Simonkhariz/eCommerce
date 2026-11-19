@@ -1,8 +1,9 @@
+import { SHOP } from '@/lib/shop';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
 export const metadata: Metadata = {
-  title: 'Page not found | SHOP.CO',
+  title: `Page not found | ${SHOP.name}`,
   robots: { index: false, follow: false },
 };
 
@@ -19,7 +20,7 @@ export default function NotFound() {
       <nav aria-label="Helpful links" className="flex flex-col sm:flex-row items-center gap-3">
         <Link
           href="/"
-          className="bg-black text-white hover:bg-neutral-800 font-semibold px-8 py-3.5 rounded-full text-sm transition-colors shadow-md"
+          className="bg-accent text-accent-ink hover:bg-accent-hover font-semibold px-8 py-3.5 rounded-full text-sm transition-colors shadow-md"
         >
           Go to the homepage
         </Link>

@@ -1,5 +1,6 @@
 'use client';
 
+import { SHOP } from '@/lib/shop';
 import React, { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -340,7 +341,7 @@ function AdminSidebar({ pathname, onClose, closeLabel }: { pathname: string; onC
           {/* logo.svg is 34×37 (it includes a drop shadow), so 24 wide is 26 tall. */}
           <Image src="/admin/logo.svg" alt="" width={24} height={26} unoptimized />
           <span className="flex flex-col">
-            <span className="text-[15px] font-bold leading-none tracking-tight text-[#1f2937]">SHOP.CO</span>
+            <span className="text-[15px] font-bold leading-none tracking-tight text-[#1f2937]">{SHOP.name}</span>
             <span className="mt-0.5 text-xs leading-tight text-[#6b7280]">Store admin</span>
           </span>
         </Link>
@@ -519,7 +520,7 @@ function AdminMiniSidebar({ pathname }: { pathname: string }) {
   return (
     <aside ref={railRef} className="flex h-full w-full flex-col border-r border-[#e5e7eb] bg-[#f8f8f8]" aria-label="Admin">
       <div className="flex justify-center border-b border-[#e5e7eb]/60 py-3.5">
-        <Link href="/admin" aria-label="SHOP.CO admin overview" title="Overview" className={`rounded-md ${RAIL_FOCUS}`}>
+        <Link href="/admin" aria-label={`${SHOP.name} admin overview`} title="Overview" className={`rounded-md ${RAIL_FOCUS}`}>
           <Image src="/admin/logo.svg" alt="" width={24} height={26} unoptimized />
         </Link>
       </div>

@@ -49,7 +49,7 @@ export const CustomerReviews: React.FC<CustomerReviewsProps> = ({ reviews = [] }
               <button
                 type="button"
                 onClick={() => handleScroll('left')}
-                className="p-2.5 rounded-full border border-neutral-200 hover:bg-neutral-100 text-black transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-black"
+                className="p-2.5 rounded-full border border-neutral-200 hover:bg-neutral-100 text-black transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                 aria-label="Scroll to previous reviews"
               >
                 <HugeiconsIcon icon={ArrowLeft01Icon} size={20} aria-hidden="true" />
@@ -57,7 +57,7 @@ export const CustomerReviews: React.FC<CustomerReviewsProps> = ({ reviews = [] }
               <button
                 type="button"
                 onClick={() => handleScroll('right')}
-                className="p-2.5 rounded-full border border-neutral-200 hover:bg-neutral-100 text-black transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-black"
+                className="p-2.5 rounded-full border border-neutral-200 hover:bg-neutral-100 text-black transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                 aria-label="Scroll to next reviews"
               >
                 <HugeiconsIcon icon={ArrowRight01Icon} size={20} aria-hidden="true" />

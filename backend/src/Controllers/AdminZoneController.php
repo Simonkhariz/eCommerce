@@ -58,10 +58,10 @@ class AdminZoneController
         }
 
         $id = (int) $this->db->insert(
-            "INSERT INTO `shipping_zones` (`name`, `code`, `description`, `states_covered`, `fee`, `items_included`, `extra_item_fee`, `estimated_days`, `is_active`)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            'ssssdidsi',
-            [$in['name'], $in['code'], $in['description'], json_encode($in['states_covered']), $in['fee'], $in['items_included'], $in['extra_item_fee'], $in['estimated_days'], $in['is_active']]
+            "INSERT INTO `shipping_zones` (`name`, `code`, `description`, `states_covered`, `fee`, `items_included`, `extra_item_fee`, `heavy_item_fee`, `estimated_days`, `is_active`)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            'ssssdiddsi',
+            [$in['name'], $in['code'], $in['description'], json_encode($in['states_covered']), $in['fee'], $in['items_included'], $in['extra_item_fee'], $in['heavy_item_fee'], $in['estimated_days'], $in['is_active']]
         );
 
         $created = $this->present($this->find($id));
@@ -84,10 +84,10 @@ class AdminZoneController
 
         $this->db->execute(
             "UPDATE `shipping_zones`
-             SET `name` = ?, `code` = ?, `description` = ?, `states_covered` = ?, `fee` = ?, `items_included` = ?, `extra_item_fee` = ?, `estimated_days` = ?, `is_active` = ?
+             SET `name` = ?, `code` = ?, `description` = ?, `states_covered` = ?, `fee` = ?, `items_included` = ?, `extra_item_fee` = ?, `heavy_item_fee` = ?, `estimated_days` = ?, `is_active` = ?
              WHERE `id` = ?",
-            'ssssdidsii',
-            [$in['name'], $in['code'], $in['description'], json_encode($in['states_covered']), $in['fee'], $in['items_included'], $in['extra_item_fee'], $in['estimated_days'], $in['is_active'], $id]
+            'ssssdiddsii',
+            [$in['name'], $in['code'], $in['description'], json_encode($in['states_covered']), $in['fee'], $in['items_included'], $in['extra_item_fee'], $in['heavy_item_fee'], $in['estimated_days'], $in['is_active'], $id]
         );
 
         $updated = $this->present($this->find($id));
@@ -129,6 +129,7 @@ class AdminZoneController
         $zone['fee'] = (float) $zone['fee'];
         $zone['items_included'] = max(1, (int) ($zone['items_included'] ?? 1));
         $zone['extra_item_fee'] = (float) ($zone['extra_item_fee'] ?? 0);
+        $zone['heavy_item_fee'] = (float) ($zone['heavy_item_fee'] ?? 0);
         $zone['is_active'] = (bool) $zone['is_active'];
         return $zone;
     }
@@ -136,7 +137,7 @@ class AdminZoneController
     /**
      * Validate zone input; on update, missing fields keep their current values.
      *
-     * @return array{name: string, code: string, description: string, states_covered: list<string>, fee: float, estimated_days: string, is_active: int}
+     * @return array{name: string, code: string, description: string, states_covered: list<string>, fee: float, items_included: int, extra_item_fee: float, heavy_item_fee: float, estimated_days: string, is_active: int}
      */
     private function input(array $body, ?array $current = null): array
     {
@@ -151,6 +152,8 @@ class AdminZoneController
         $feeRaw = array_key_exists('fee', $body) ? $body['fee'] : ($current['fee'] ?? null);
         $includedRaw = array_key_exists('items_included', $body) ? $body['items_included'] : ($current['items_included'] ?? 1);
         $extraRaw = array_key_exists('extra_item_fee', $body) ? $body['extra_item_fee'] : ($current['extra_item_fee'] ?? 0);
+        // Charged for each heavy item, in shops that deliver them (config/shop.json, features.heavyDelivery).
+        $heavyRaw = array_key_exists('heavy_item_fee', $body) ? $body['heavy_item_fee'] : ($current['heavy_item_fee'] ?? 0);
         $statesRaw = array_key_exists('states_covered', $body) ? $body['states_covered'] : ($current['states_covered'] ?? []);
         $isActive = array_key_exists('is_active', $body) ? (int) (bool) $body['is_active'] : (int) ($current['is_active'] ?? 1);
 
@@ -171,6 +174,9 @@ class AdminZoneController
         }
         if (!is_numeric($extraRaw) || (float) $extraRaw < 0 || (float) $extraRaw > 1000000) {
             $errors['extra_item_fee'] = 'Enter ₦0 to ₦1,000,000 for each extra item.';
+        }
+        if (!is_numeric($heavyRaw) || (float) $heavyRaw < 0 || (float) $heavyRaw > 1000000) {
+            $errors['heavy_item_fee'] = 'Enter ₦0 to ₦1,000,000 for each heavy item.';
         }
         if ($estimatedDays === '') {
             $errors['estimated_days'] = 'Give customers a delivery estimate, e.g. "2-4 business days".';
@@ -221,6 +227,7 @@ class AdminZoneController
             'fee' => round((float) $feeRaw, 2),
             'items_included' => (int) $includedRaw,
             'extra_item_fee' => round((float) $extraRaw, 2),
+            'heavy_item_fee' => round((float) $heavyRaw, 2),
             'estimated_days' => $estimatedDays,
             'is_active' => $isActive,
         ];

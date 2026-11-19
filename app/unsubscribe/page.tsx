@@ -84,7 +84,7 @@ function Unsubscribe() {
           <button
             type="button"
             onClick={run}
-            className="bg-black text-white hover:bg-neutral-800 font-semibold px-6 py-3 rounded-full text-xs transition-colors"
+            className="bg-accent text-accent-ink hover:bg-accent-hover font-semibold px-6 py-3 rounded-full text-xs transition-colors"
           >
             Try again
           </button>

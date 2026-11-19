@@ -1,3 +1,4 @@
+import { SHOP, option1Word, option2Word } from '@/lib/shop';
 /**
  * Editable copy for the storefront information pages (/about, /faq, /shipping, /returns,
  * /privacy, /terms, /contact).
@@ -46,12 +47,12 @@ const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
 
 export const ABOUT: { intro: string; sections: ContentSection[] } = {
   // TODO(store owner): replace the intro with your own story (who you are, where you are based).
-  intro: 'SHOP.CO is an online clothing store delivering across Nigeria.',
+  intro: `${SHOP.name} is an ${SHOP.kind} delivering across Nigeria.`,
   sections: [
     {
       heading: 'How shopping here works',
       body: [
-        'Browse the catalogue, choose your size and colour, and check out as a guest or with your account. Prices and stock you see are checked again by our server when you place the order.',
+        `Browse the catalogue, choose your ${option1Word} and ${option2Word}, and check out as a guest or with your account. Prices and stock you see are checked again by our server when you place the order.`,
         'You can pay by card or bank transfer through our payment partners Kora and Monnify, or arrange a bank transfer with us on WhatsApp.',
         'Delivery fees depend on the state you are delivering to (and, for some areas, how many items you order) and are shown before you pay.',
       ],
@@ -73,6 +74,8 @@ export const SHIPPING: { intro: string; sections: ContentSection[] } = {
       heading: 'Delivery fees',
       body: [
         'The table on this page is live: it shows the delivery zones and fees our checkout uses right now. Where a fee covers a set number of items, each extra item adds the amount shown.',
+        // Only a shop that charges more for large items says so (features.heavyDelivery).
+        ...(SHOP.features.heavyDelivery ? ['Large items cost more to deliver. Where a zone shows a fee for large items, it is added for each one in your order.'] : []),
         'If your state is not listed, checkout will tell you that we do not deliver there yet.',
       ],
     },

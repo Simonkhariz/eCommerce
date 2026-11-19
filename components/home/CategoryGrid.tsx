@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ApiCategory } from '@/lib/api-client';
 import { canOptimizeImage } from '@/lib/image';
+import { SHOP } from '@/lib/shop';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ArrowUpRight01Icon } from '@hugeicons/core-free-icons';
 
@@ -34,17 +35,17 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({ categories }) => {
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 sm:mb-12">
           <div>
             <span className="text-xs font-bold uppercase tracking-widest text-neutral-600 block mb-1">
-              Curated Collections
+              {SHOP.wording.categoriesEyebrow}
             </span>
             <h2 className="font-integral text-2xl sm:text-4xl lg:text-5xl text-black tracking-tight">
-              EXPLORE BY CATEGORY
+              {SHOP.wording.categoriesTitle}
             </h2>
           </div>
           <Link
             href="/category"
             className="text-xs sm:text-sm font-semibold text-black hover:underline mt-2 sm:mt-0 flex items-center gap-1"
           >
-            <span>Browse All Collections</span>
+            <span>{SHOP.wording.categoriesCta}</span>
             <HugeiconsIcon icon={ArrowUpRight01Icon} size={16} aria-hidden="true" />
           </Link>
         </div>
@@ -55,7 +56,7 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({ categories }) => {
             <Link
               key={cat.slug}
               href={`/category?cat=${encodeURIComponent(cat.slug)}`}
-              className="group relative bg-[#F0EEED] rounded-3xl overflow-hidden aspect-[4/5] flex flex-col justify-between p-4 sm:p-5 shadow-sm hover:shadow-md transition-all duration-300"
+              className="group relative bg-card rounded-3xl overflow-hidden aspect-[4/5] flex flex-col justify-between p-4 sm:p-5 shadow-sm hover:shadow-md transition-all duration-300"
             >
               {/* Background Image with Zoom (only when the category has its own image) */}
               <div className="absolute inset-0 z-0 bg-neutral-800">
@@ -75,7 +76,7 @@ export const CategoryGrid: React.FC<CategoryGridProps> = ({ categories }) => {
 
               {/* Top Floating Badge */}
               <div className="relative z-10 self-end" aria-hidden="true">
-                <div className="w-8 h-8 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center text-black group-hover:bg-black group-hover:text-white transition-colors shadow-sm">
+                <div className="w-8 h-8 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center text-black group-hover:bg-accent group-hover:text-accent-ink transition-colors shadow-sm">
                   <HugeiconsIcon icon={ArrowUpRight01Icon} size={16} />
                 </div>
               </div>

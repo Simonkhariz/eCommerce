@@ -75,7 +75,7 @@ function VerifyMagicLink() {
             <button
               type="button"
               onClick={() => openAuthModal('magic')}
-              className="bg-black text-white hover:bg-neutral-800 font-semibold px-6 py-3 rounded-full text-xs transition-colors"
+              className="bg-accent text-accent-ink hover:bg-accent-hover font-semibold px-6 py-3 rounded-full text-xs transition-colors"
             >
               Send a new sign-in link
             </button>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Config\Shop;
 use App\Database\Database;
 use App\Services\FulfillmentService;
 use App\Support\Response;
@@ -579,7 +580,7 @@ class AdminDashboardController
         $s = $r['summary'];
         $money = static fn ($v): string => number_format((float) $v, 2, '.', '');
 
-        $out = $this->beginCsv('shopco-analytics-' . $range . '-' . date('Ymd-His') . '.csv');
+        $out = $this->beginCsv(Shop::fileName() . '-analytics-' . $range . '-' . date('Ymd-His') . '.csv');
 
         fputcsv($out, ['Report period', substr($start, 0, 10), date('Y-m-d', strtotime($end) - 1)]);
         fputcsv($out, ['Generated', date('Y-m-d H:i:s')]);
@@ -722,7 +723,7 @@ class AdminDashboardController
 
         $orders = $this->db->fetchAll($sql, $types, $params);
 
-        $filename = 'shopco-orders-export-' . date('Ymd-His') . '.csv';
+        $filename = Shop::fileName() . '-orders-export-' . date('Ymd-His') . '.csv';
         header('Content-Type: text/csv; charset=UTF-8');
         header('Content-Disposition: attachment; filename="' . $filename . '"');
         header('Pragma: no-cache');

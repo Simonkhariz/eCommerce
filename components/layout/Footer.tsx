@@ -1,8 +1,9 @@
 'use client';
 
+import { SHOP } from '@/lib/shop';
 import React, { useId, useState } from 'react';
 import Link from 'next/link';
-import { Mail, CheckCircle2 } from 'lucide-react';
+import { Mail, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiSubscribeNewsletter } from '@/lib/api-client';
 import { useStoreInfo, useStoreNav, whatsAppLink } from '@/lib/use-store-info';
 import { useStoreSupport } from '@/lib/use-store-support';
@@ -39,10 +40,13 @@ function NewsletterForm() {
     }
   };
 
+  // This form sits on the newsletter card, which is the shop's accent colour (black, orange,
+  // blue...). Its messages use the accent's own text colour, never a fixed red, green or grey
+  // that only reads on black.
   if (state === 'done') {
     return (
-      <div role="status" className="flex items-start gap-2 rounded-2xl bg-neutral-800 p-4 text-sm font-medium text-white">
-        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-400" aria-hidden="true" />
+      <div role="status" className="flex items-start gap-2 rounded-2xl bg-white/15 p-4 text-sm font-medium text-accent-ink">
+        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
         <span>{message}</span>
       </div>
     );
@@ -79,8 +83,9 @@ function NewsletterForm() {
         {state === 'sending' ? 'Subscribing…' : 'Subscribe to newsletter'}
       </button>
       {state === 'error' && (
-        <p id={statusId} role="alert" className="w-full text-sm text-red-300">
-          {message}
+        <p id={statusId} role="alert" className="flex w-full items-start gap-1.5 text-sm font-medium text-accent-ink">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{message}</span>
         </p>
       )}
     </form>
@@ -96,12 +101,12 @@ export const Footer: React.FC = () => {
   const waLink = whatsAppLink(whatsappNumber, 'Hello, I have a question about my order.');
 
   return (
-    <footer className="relative mt-36 bg-[#F0F0F0] pb-12 pt-48 lg:pt-36">
+    <footer className="relative mt-36 bg-surface pb-12 pt-48 lg:pt-36">
       {/* Newsletter card (overhangs the top of the footer) */}
       <div className="absolute -top-24 left-0 right-0 z-20 mx-auto max-w-7xl px-4 sm:-top-28 sm:px-6 lg:px-8">
-        <div className="flex flex-col items-center justify-between gap-6 rounded-3xl bg-black p-6 text-white shadow-2xl sm:p-10 lg:flex-row lg:gap-10 md:p-12">
+        <div className="flex flex-col items-center justify-between gap-6 rounded-3xl bg-accent p-6 text-accent-ink shadow-2xl sm:p-10 lg:flex-row lg:gap-10 md:p-12">
           <div className="w-full lg:max-w-md">
-            <h2 className="font-integral text-2xl uppercase leading-tight tracking-tight text-white sm:text-3xl sm:leading-[1.05] lg:text-[42px]">
+            <h2 className="font-integral text-2xl uppercase leading-tight tracking-tight text-accent-ink sm:text-3xl sm:leading-[1.05] lg:text-[42px]">
               Stay up to date about our latest offers
             </h2>
           </div>
@@ -116,10 +121,10 @@ export const Footer: React.FC = () => {
           {/* Brand & contact */}
           <div className="col-span-2 space-y-4 md:col-span-3 lg:col-span-2">
             <Link href="/" className="block font-integral text-2xl tracking-tighter text-black sm:text-3xl lg:text-4xl">
-              SHOP.CO
+              {SHOP.name}
             </Link>
             <p className="max-w-sm text-sm leading-relaxed text-neutral-700">
-              Clothes that suit your style and that you&apos;re proud to wear, delivered across Nigeria.
+              {SHOP.tagline}
             </p>
             <ul className="space-y-0.5 text-sm text-neutral-700">
               {origin?.contact_email && (
@@ -235,10 +240,10 @@ export const Footer: React.FC = () => {
         <div className="flex flex-col items-center justify-between gap-4 pt-8 text-xs text-neutral-700 sm:flex-row">
           <div className="flex flex-col items-center gap-1 sm:items-start">
             <p>
-              © {new Date().getFullYear()} {origin?.store_name || 'SHOP.CO'}. All rights reserved.
+              © {new Date().getFullYear()} {origin?.store_name || SHOP.name}. All rights reserved.
             </p>
             <p className="inline-flex items-center gap-1.5">
-              <span className="font-semibold text-black">{origin?.store_name || 'Shop.co'}</span> by{' '}
+              <span>Built by</span>
               <a
                 href={DEVELOPER.url}
                 target="_blank"

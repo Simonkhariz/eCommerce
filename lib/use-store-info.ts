@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ApiCategory, apiGetShippingZones, CatalogFacets, getCatalogFacets, ShippingZone, StoreOrigin } from '@/lib/api-client';
 import { useStoreSeed } from '@/components/layout/StoreDataProvider';
 import { normalizePhoneDigits } from '@/lib/whatsapp';
+import { SHOP } from '@/lib/shop';
 
 export type { StoreOrigin };
 
@@ -30,7 +31,9 @@ function infoFrom(res: { zones?: ShippingZone[]; origin?: StoreOrigin | null } |
 function navFrom(f: CatalogFacets | null | undefined): StoreNav {
   return {
     categories: (f?.categories ?? []).filter((c) => (c.product_count ?? 0) > 0),
-    dressStyles: f?.dress_styles ?? [],
+    // A shop with the style filter switched off has no styles to show anywhere (header menu,
+    // phone menu, home page tiles), whatever its products still hold.
+    dressStyles: SHOP.style.enabled ? (f?.dress_styles ?? []) : [],
     loaded: true,
   };
 }
@@ -99,7 +102,7 @@ export function useStoreInfo(): StoreInfo & { reload: () => void } {
   };
 }
 
-/** Categories that have published products, and dress styles that exist in the catalogue. */
+/** Categories that have published products, and the styles that exist in the catalogue (none when the shop has the style filter off). */
 export function useStoreNav(): StoreNav {
   const seeded = useStoreSeed()?.facets;
   const fromSeed = useMemo(() => (seeded ? navFrom(seeded) : null), [seeded]);

@@ -1,35 +1,20 @@
-export type CategoryType =
-  | 't-shirts'
-  | 'shorts'
-  | 'shirts'
-  | 'hoodie'
-  | 'jeans'
-  | 'apparel'
-  | 'footwear'
-  | 'accessories'
-  | 'electronics';
+// Plain text: the categories, styles and option values are whatever this shop sells
+// (backend/config/shop.json names the options; the catalogue holds the values).
+export type CategoryType = string;
 
-export type DressStyleType = 'casual' | 'formal' | 'party' | 'gym';
+export type DressStyleType = string;
 
-export type SizeType =
-  | 'XX-Small'
-  | 'X-Small'
-  | 'Small'
-  | 'Medium'
-  | 'Large'
-  | 'X-Large'
-  | 'XX-Large'
-  | '3X-Large'
-  | '4X-Large'
-  | 'One Size'
-  | 'US 8'
-  | 'US 9'
-  | 'US 10'
-  | 'US 11';
+export type SizeType = string;
 
 export interface ProductColor {
   name: string;
   hex: string;
+}
+
+/** One row of a product's specifications ("Battery" / "5000 mAh"). */
+export interface ProductSpec {
+  name: string;
+  value: string;
 }
 
 export interface Review {
@@ -42,7 +27,10 @@ export interface Review {
   date: string;
 }
 
-/** One purchasable size + colour combination, with its own price and stock. */
+/**
+ * One purchasable combination of the two options, with its own price and stock. `size` is
+ * option 1 and `color` option 2, whatever the shop calls them (lib/shop.ts).
+ */
 export interface ProductVariant {
   id: number;
   sku: string;
@@ -63,13 +51,13 @@ export interface Product {
   /** Average of approved reviews; 0 when there are none. */
   rating: number;
   reviewCount: number;
-  category: CategoryType | string;
+  category: CategoryType;
   categoryName?: string;
-  dressStyle: DressStyleType | (DressStyleType | string)[];
+  dressStyle: DressStyleType | DressStyleType[];
   gender: 'men' | 'women' | 'unisex';
   images: string[];
   colors: ProductColor[];
-  sizes: (SizeType | string)[];
+  sizes: SizeType[];
   /** Present on product detail; summaries only carry colours/sizes. */
   variants?: ProductVariant[];
   totalStock?: number;
@@ -77,6 +65,14 @@ export interface Product {
   sku?: string;
   isNewArrival?: boolean;
   isTopSelling?: boolean;
+  /** The owner's own rows for the product page (product detail only; empty in lists). */
+  specifications?: ProductSpec[];
+  /** Shown only when the shop has warranties switched on and the product has one. */
+  warranty?: string;
+  /** Counts towards a zone's large-item delivery fee. */
+  isHeavy?: boolean;
+  /** Its category is for adults only: checkout asks the buyer to confirm their age. */
+  ageRestricted?: boolean;
   details: string[];
   faqs: { question: string; answer: string }[];
   reviews: Review[];
@@ -95,7 +91,7 @@ export interface CartItem {
   price: number;
   originalPrice?: number;
   image: string;
-  size: SizeType | string;
+  size: SizeType;
   color: ProductColor;
   quantity: number;
   /** Last known stock for this variant, used to cap the quantity stepper. */

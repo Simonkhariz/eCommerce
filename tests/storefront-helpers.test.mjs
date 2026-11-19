@@ -4,13 +4,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withAddedLines } from '../lib/cart-lines.ts';
 import { storeAddressLine } from '../lib/store-address.ts';
-import {
+// lib/whatsapp.ts and lib/variants.ts read the shop's settings through the "@/" alias.
+import './helpers/alias-hooks.mjs';
+
+const {
   buildWhatsAppInvoiceUrl,
   buildWhatsAppMessageUrl,
   buildWhatsAppPrePaymentHelpUrl,
   buildWhatsAppReceiptUrl,
   formatSupportPhone,
-} from '../lib/whatsapp.ts';
+} = await import('../lib/whatsapp.ts');
 
 const line = (id, quantity, maxStock = 50) => ({ id, quantity, maxStock, name: `Item ${id}` });
 

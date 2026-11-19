@@ -5,6 +5,14 @@
 :root {
   --background: #FFFFFF;
   --foreground: #000000;
+  /* The shop's own colours. These are only the fallbacks: app/layout.tsx sets them on <html>
+     from backend/config/shop.json. */
+  --accent: #000000;
+  --accent-hover: #262626;
+  --accent-ink: #ffffff;
+  --surface: #F0F0F0;
+  --card: #F0EEED;
+  --hero: #F2F0F1;
   /* --font-space-grotesk / --font-satoshi come from next/font in app/layout.tsx (self-hosted). */
   --font-heading: var(--font-space-grotesk), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-body: var(--font-satoshi), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -214,7 +222,7 @@ input[type="range"] {
   cursor: pointer;
 }
 input[type="range"]::-webkit-slider-runnable-track {
-  background: #000000;
+  background: var(--accent);
   height: 6px;
   border-radius: 9999px;
 }
@@ -222,7 +230,7 @@ input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   margin-top: -7px;
-  background-color: #000000;
+  background-color: var(--accent);
   border: 3px solid #FFFFFF;
   box-shadow: 0 1px 3px rgba(0,0,0,0.3);
   height: 20px;

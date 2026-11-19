@@ -1,5 +1,6 @@
 'use client';
 
+import { SHOP } from '@/lib/shop';
 import React, { useState } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
@@ -70,7 +71,7 @@ export function AdminAnalytics() {
     try {
       const q = new URLSearchParams(params as Record<string, string>).toString();
       const endpoint = type === 'analytics' ? `/admin/analytics/export?${q}` : `/admin/orders/export?${q}`;
-      await adminDownloadExport(endpoint, `shopco-${type}-${params.range}-${new Date().toISOString().slice(0, 10)}.csv`);
+      await adminDownloadExport(endpoint, `${SHOP.key}-${type}-${params.range}-${new Date().toISOString().slice(0, 10)}.csv`);
       toast.success(type === 'analytics' ? 'Report downloaded.' : 'Orders downloaded.');
     } catch (err) {
       if (redirectIfSignedOut(err)) return;

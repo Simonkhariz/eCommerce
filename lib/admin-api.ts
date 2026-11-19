@@ -4,6 +4,7 @@
  */
 
 import { API_BASE_URL, ApiError, PaginationMeta, apiRequest, apiRequestFull } from '@/lib/api-client';
+import type { AdminProduct, AdminProductPayload } from '@/lib/api-client';
 import { refreshAfter, refreshBellCounts, refreshDevMode, refreshStorageAlert } from '@/lib/admin-query-keys';
 import { queryString as qs } from '@/lib/admin-logic';
 
@@ -85,7 +86,8 @@ export interface AdminOrderListItem {
   shipping_fee: number;
   discount_amount: number;
   grand_total: number;
-  shipping_zone_snapshot: { name?: string; fee?: number; estimated_days?: string } | null;
+  /** `heavy_items`: how many large or heavy items the delivery fee counted, at `heavy_item_fee` each. */
+  shipping_zone_snapshot: { name?: string; fee?: number; estimated_days?: string; heavy_item_fee?: number | string; heavy_items?: number | string } | null;
   shipping_address_snapshot: AddressSnapshot | null;
   created_at: string;
   updated_at: string;
@@ -125,6 +127,8 @@ export interface AdminOrderPayment {
 export interface AdminOrderDetail extends Omit<AdminOrderListItem, 'payment_provider' | 'payment_reference' | 'payment_record_status' | 'carrier' | 'tracking_number' | 'tracking_url' | 'shipment_status' | 'shipped_at' | 'delivered_at' | 'items_count' | 'total_quantity'> {
   notes: string | null;
   applied_promo_code: string | null;
+  /** When the customer confirmed their age at checkout (orders with adult-only items); null otherwise. */
+  age_confirmed_at?: string | null;
   allowed_transitions: OrderStatus[];
   shipment: {
     id: number;
@@ -141,7 +145,7 @@ export interface AdminOrderDetail extends Omit<AdminOrderListItem, 'payment_prov
     variant_id: number | null;
     item_name: string;
     sku: string | null;
-    variant_options: { size?: string; color?: string; color_name?: string } | null;
+    variant_options: { size?: string; color?: string; color_name?: string; warranty?: string } | null;
     unit_price: number;
     quantity: number;
     line_total: number;
@@ -294,6 +298,50 @@ export async function adminDownloadExport(endpoint: string, filename: string): P
   link.click();
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
+}
+
+// =============================================================================
+// Products: specifications, warranty and heavy items
+// (the product calls themselves are in api-client.ts; these are the fields the editor adds)
+// =============================================================================
+
+/** One row of a product's specifications ("Top notes" / "Bergamot, pink pepper"). */
+export interface ProductSpecification {
+  name: string;
+  value: string;
+}
+
+export const MAX_SPECIFICATIONS = 30;
+export const MAX_SPECIFICATION_NAME = 60;
+export const MAX_SPECIFICATION_VALUE = 300;
+export const MAX_WARRANTY = 160;
+
+/** What the admin product read carries besides AdminProduct. Optional: a list cached before an update lacks them. */
+export interface AdminProductExtras {
+  specifications?: ProductSpecification[] | null;
+  warranty?: string | null;
+  is_heavy?: boolean | number;
+  /** The product's own "adults only" flag, as ticked in the editor. */
+  is_age_restricted?: boolean | number;
+  /** Worked out by the server: that flag, or a category that is for adults only. Read only. */
+  age_restricted?: boolean;
+}
+
+/** The same fields when saving. A key that is left out keeps what the server has stored. */
+export interface AdminProductExtrasPayload {
+  /** An empty list clears them. */
+  specifications?: ProductSpecification[];
+  /** '' clears it. */
+  warranty?: string;
+  is_heavy?: boolean;
+  is_age_restricted?: boolean;
+}
+
+export type AdminProductSave = AdminProductPayload & AdminProductExtrasPayload;
+
+/** The extra fields of a product as the admin list returned it. */
+export function productExtras(product: AdminProduct): AdminProductExtras {
+  return product as AdminProduct & AdminProductExtras;
 }
 
 // =============================================================================
@@ -637,6 +685,8 @@ export interface ShippingZone {
   items_included: number;
   /** Added for each item after `items_included`. */
   extra_item_fee: number;
+  /** Added once for each large or heavy item in the order (only when the shop charges for them). */
+  heavy_item_fee?: number;
   estimated_days: string;
   is_active: boolean;
 }

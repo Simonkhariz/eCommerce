@@ -74,7 +74,7 @@ export function ShareProduct({ name, slug, price }: { name: string; slug: string
         onClick={share}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 px-3.5 py-2.5 text-sm font-semibold text-black transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
+        className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 px-3.5 py-2.5 text-sm font-semibold text-black transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         <Share2 className="size-4" aria-hidden="true" />
         Share

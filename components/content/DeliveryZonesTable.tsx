@@ -2,6 +2,7 @@
 
 import { formatPrice } from '@/lib/currency';
 import { useStoreInfo } from '@/lib/use-store-info';
+import { SHOP } from '@/lib/shop';
 
 /** Live delivery zones and fees, exactly as checkout uses them. */
 export function DeliveryZonesTable() {
@@ -43,6 +44,10 @@ export function DeliveryZonesTable() {
       ? `${Number(zone.items_included) > 1 ? `covers ${zone.items_included} items, then ` : 'for 1 item, then '}+${formatPrice(Number(zone.extra_item_fee))} each extra item`
       : null;
 
+  // Only a shop that charges more for large items says so, and only for a zone that has the fee.
+  const heavyFee = (zone: (typeof active)[number]) =>
+    SHOP.features.heavyDelivery && Number(zone.heavy_item_fee) > 0 ? `Large items: +${formatPrice(Number(zone.heavy_item_fee))} each` : null;
+
   return (
     <>
     {/* Phones: one card per zone, so the fee is always on screen (the table needs 520px). */}
@@ -54,6 +59,7 @@ export function DeliveryZonesTable() {
             <p className="shrink-0 whitespace-nowrap font-bold text-black">{formatPrice(Number(zone.fee))}</p>
           </div>
           {extraFee(zone) && <p className="mt-0.5 text-right text-xs text-neutral-600">{extraFee(zone)}</p>}
+          {heavyFee(zone) && <p className="mt-0.5 text-right text-xs text-neutral-600">{heavyFee(zone)}</p>}
           <p className="mt-2 text-neutral-700">{statesLabel(zone.states_covered ?? [])}</p>
           {zone.estimated_days && <p className="mt-1 text-xs text-neutral-600">Estimated delivery: {zone.estimated_days}</p>}
         </li>
@@ -94,6 +100,7 @@ export function DeliveryZonesTable() {
                     {formatPrice(Number(zone.extra_item_fee))} each extra item
                   </span>
                 )}
+                {heavyFee(zone) && <span className="block text-xs font-normal text-neutral-600">{heavyFee(zone)}</span>}
               </td>
               <td className="px-4 py-3 text-neutral-700">{zone.estimated_days || '—'}</td>
             </tr>

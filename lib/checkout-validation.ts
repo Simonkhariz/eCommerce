@@ -57,6 +57,22 @@ const SERVER_FIELDS: Record<string, CheckoutField> = {
   state: 'state',
 };
 
+/** The age tick box shown when the cart holds an item for adults only. */
+export function ageConfirmLabel(minimumAge: number): string {
+  return `I confirm that I am ${minimumAge} or older.`;
+}
+
+/** Said under the tick box when it was left empty (the server's own sentence). */
+export function ageConfirmMissingMessage(minimumAge: number): string {
+  return `Please confirm that you are ${minimumAge} or older to order these items.`;
+}
+
+/** The server's message for the age tick box in a 422 answer's `details`, when it sent one. */
+export function ageConfirmErrorFrom(details: unknown): string | null {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
+  return firstValidationMessage((details as Record<string, unknown>).age_confirmed);
+}
+
 /** A 422 answer's `details` on the checkout form's fields ("shipping_address.phone" or "phone"). */
 export function checkoutFieldErrorsFrom(details: unknown): CheckoutFieldErrors {
   const errors: CheckoutFieldErrors = {};

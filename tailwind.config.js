@@ -10,6 +10,11 @@ module.exports = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        // The shop's own colours (backend/config/shop.json, written into the page by app/layout.tsx).
+        accent: { DEFAULT: "var(--accent)", hover: "var(--accent-hover)", ink: "var(--accent-ink)" },
+        surface: "var(--surface)",
+        card: "var(--card)",
+        hero: "var(--hero)",
         shop: {
           black: "#000000",
           card: "#F0EEED",

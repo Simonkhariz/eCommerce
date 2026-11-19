@@ -6,7 +6,7 @@ import './admin-dark.css';
 
 export const metadata: Metadata = {
   title: 'Store Admin',
-  description: 'Shop.co store administration: orders, catalogue, inventory, payments and fulfilment.',
+  description: 'Store administration: orders, catalogue, inventory, payments and fulfilment.',
   robots: { index: false, follow: false },
 };
 

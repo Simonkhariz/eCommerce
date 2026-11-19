@@ -190,6 +190,64 @@ final class TestKit
         return $this->cookieDir . '/' . preg_replace('/\W/', '_', $jar) . '.txt';
     }
 
+    /**
+     * Start a second API on the same test database, run as another kind of shop: $shop is laid
+     * over the fixture shop (SHOP_CONFIG_OVERRIDES, which App\Config\Shop reads only while
+     * APP_ENV is "testing") and $env over the test environment. Returns its base URL
+     * ("http://127.0.0.1:<port>/api/v1"), or null when it did not start. Stopped in finish().
+     *
+     * @param array<string, mixed> $shop e.g. ['features' => ['ageCheck' => true]]
+     * @param array<string, string> $env e.g. ['ADMIN_COOKIE_NAME' => 'other_admin']
+     */
+    public function startApi(int $port, array $shop = [], array $env = []): ?string
+    {
+        $base = json_decode((string) getenv('SHOP_CONFIG_OVERRIDES'), true);
+        $config = \App\Config\Shop::merge(is_array($base) ? $base : [], $shop);
+
+        // Values from the env file win over the process environment, so $env goes in a copy of the file.
+        $envFile = $this->cookieDir . "/env-{$port}";
+        $lines = array_values(array_filter(
+            file((string) getenv('SHOPCO_ENV_FILE'), FILE_IGNORE_NEW_LINES) ?: [],
+            static fn (string $line): bool => !array_key_exists(trim(strstr($line, '=', true) ?: ''), $env)
+        ));
+        foreach ($env as $name => $value) {
+            $lines[] = "{$name}={$value}";
+        }
+        file_put_contents($envFile, implode("\n", $lines) . "\n");
+
+        $log = $this->cookieDir . "/api-{$port}.log";
+        $process = proc_open(
+            [PHP_BINARY, '-S', "127.0.0.1:{$port}", '-t', BASE_PATH . '/public'],
+            [1 => ['file', $log, 'w'], 2 => ['file', $log, 'a']],
+            $pipes,
+            BASE_PATH,
+            array_merge(getenv(), ['SHOPCO_ENV_FILE' => $envFile, 'SHOP_CONFIG_OVERRIDES' => json_encode($config, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)])
+        );
+        $this->cleanup(static function () use ($process): void {
+            if (is_resource($process)) {
+                proc_terminate($process);
+                proc_close($process);
+            }
+        });
+
+        // Up as soon as it answers at all: a suite may start it to see it refuse (a 500 is an answer).
+        $url = "http://127.0.0.1:{$port}/api/v1";
+        $anyAnswer = stream_context_create(['http' => ['ignore_errors' => true, 'timeout' => 5]]);
+        for ($i = 0; $i < 50; $i++) {
+            usleep(200000);
+            if (@file_get_contents("{$url}/health", false, $anyAnswer) !== false) {
+                return $url;
+            }
+        }
+        return null;
+    }
+
+    /** What an API started with startApi() has written to its output and PHP error log so far. */
+    public function apiLog(int $port): string
+    {
+        return (string) @file_get_contents($this->cookieDir . "/api-{$port}.log");
+    }
+
     // -------------------------------------------------------------------------
     // Database & fixtures
     // -------------------------------------------------------------------------

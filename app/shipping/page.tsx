@@ -1,10 +1,11 @@
+import { SHOP } from '@/lib/shop';
 import type { Metadata } from 'next';
 import { ContentPage } from '@/components/content/ContentPage';
 import { DeliveryZonesTable } from '@/components/content/DeliveryZonesTable';
 import { SHIPPING } from '@/lib/site-content';
 
 export const metadata: Metadata = {
-  title: 'Shipping & delivery | SHOP.CO',
+  title: `Shipping & delivery | ${SHOP.name}`,
   description: 'Delivery fees by state and estimated delivery times, taken live from our checkout.',
 };
 

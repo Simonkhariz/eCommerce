@@ -1,5 +1,6 @@
 'use client';
 
+import { SHOP, SHOP_FILE_NAME, optionsText } from '@/lib/shop';
 import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -331,7 +332,7 @@ function CheckoutCallbackContent() {
     try {
       const dataUrl = await toJpeg(node, { quality: 0.95, backgroundColor: '#FFFFFF', pixelRatio: 2 });
       const link = document.createElement('a');
-      link.download = `SHOPCO-Receipt-${effectiveOrderNumber || orderNumber}.jpeg`;
+      link.download = `${SHOP_FILE_NAME}-Receipt-${effectiveOrderNumber || orderNumber}.jpeg`;
       link.href = dataUrl;
       link.click();
     } catch {
@@ -368,7 +369,7 @@ function CheckoutCallbackContent() {
           type="button"
           onClick={() => void handleRetryPayment(payNowGateway)}
           disabled={isRetrying !== false}
-          className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm disabled:opacity-50"
+          className="w-full bg-accent text-accent-ink hover:bg-accent-hover font-semibold py-3 rounded-full text-sm disabled:opacity-50"
         >
           {isRetrying === payNowGateway ? 'Opening payment…' : 'Pay now'}
         </button>
@@ -438,15 +439,15 @@ function CheckoutCallbackContent() {
                   value={keyInput}
                   onChange={(e) => setKeyInput(e.target.value.trim())}
                   placeholder="Order access key"
-                  className="flex-1 text-sm px-3 py-2 border border-neutral-300 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-black"
+                  className="flex-1 text-sm px-3 py-2 border border-neutral-300 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-accent"
                 />
-                <button type="submit" disabled={!keyInput} className="bg-black text-white text-sm px-4 py-2 rounded-xl disabled:opacity-40">
+                <button type="submit" disabled={!keyInput} className="bg-accent text-accent-ink text-sm px-4 py-2 rounded-xl disabled:opacity-40">
                   Open
                 </button>
               </form>
             )}
             <div className="flex flex-col gap-2.5">
-              <button type="button" onClick={() => void checkAgain()} className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm">
+              <button type="button" onClick={() => void checkAgain()} className="w-full bg-accent text-accent-ink hover:bg-accent-hover font-semibold py-3 rounded-full text-sm">
                 Try again
               </button>
               <Link href={`/track-order${effectiveOrderNumber || orderNumber ? `?order=${encodeURIComponent(effectiveOrderNumber || orderNumber)}` : ''}`} className="w-full bg-neutral-100 hover:bg-neutral-200 font-semibold py-3 rounded-full text-sm">
@@ -461,7 +462,7 @@ function CheckoutCallbackContent() {
             <div id="printable-receipt" className="space-y-4 bg-white p-5 sm:p-7 rounded-3xl border border-neutral-100 shadow-sm">
               <div className="flex items-center justify-between pb-3 text-left">
                 <div>
-                  <span className="font-black text-lg tracking-tight text-black block">SHOP.CO</span>
+                  <span className="font-black text-lg tracking-tight text-black block">{SHOP.name}</span>
                   <span className="text-xs text-neutral-600 uppercase tracking-widest">Payment receipt</span>
                 </div>
                 {receiptDate && <span className="text-xs text-neutral-600">{formatDate(receiptDate)}</span>}
@@ -480,19 +481,25 @@ function CheckoutCallbackContent() {
               <div className="bg-[#FAFAFA] rounded-2xl p-4 text-sm text-neutral-700 text-left space-y-3">
                 {order && order.items.length > 0 && (
                   <ul className="divide-y divide-neutral-100">
-                    {order.items.map((item) => (
-                      <li key={item.id} className="py-2 flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="font-semibold text-black truncate">{item.item_name}</p>
-                          <p className="text-xs text-neutral-600">
-                            Qty {item.quantity}
-                            {item.variant_options?.size ? ` · ${item.variant_options.size}` : ''}
-                            {item.variant_options?.color ? ` · ${item.variant_options.color}` : ''}
-                          </p>
-                        </div>
-                        <span className="font-medium text-black shrink-0">{formatPrice(item.line_total)}</span>
-                      </li>
-                    ))}
+                    {order.items.map((item) => {
+                      // Only the options the product uses ("M · Navy"); nothing for one with none.
+                      const options = optionsText(item.variant_options?.size, item.variant_options?.color, ' · ');
+                      return (
+                        <li key={item.id} className="py-2 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-black truncate">{item.item_name}</p>
+                            <p className="text-xs text-neutral-600">
+                              Qty {item.quantity}
+                              {options ? ` · ${options}` : ''}
+                            </p>
+                            {item.variant_options?.warranty && (
+                              <p className="text-xs text-neutral-600">Warranty: {item.variant_options.warranty}</p>
+                            )}
+                          </div>
+                          <span className="font-medium text-black shrink-0">{formatPrice(item.line_total)}</span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
 
@@ -541,7 +548,7 @@ function CheckoutCallbackContent() {
             <div className="space-y-3">
               <Link
                 href={`/track-order?order=${encodeURIComponent(effectiveOrderNumber || orderNumber)}`}
-                className="w-full bg-black text-white hover:bg-neutral-800 font-bold py-3.5 rounded-full text-sm shadow-md flex items-center justify-center gap-2"
+                className="w-full bg-accent text-accent-ink hover:bg-accent-hover font-bold py-3.5 rounded-full text-sm shadow-md flex items-center justify-center gap-2"
               >
                 <span>Track your order</span>
                 <HugeiconsIcon icon={ArrowRight01Icon} size={15} aria-hidden="true" />
@@ -609,7 +616,7 @@ function CheckoutCallbackContent() {
             </p>
             {awaitingWhatsApp && result?.status !== 'not_started' && (
               // The amount to transfer, so the customer never has to scroll back through WhatsApp for it.
-              <div className="flex items-center justify-between gap-3 rounded-[20px] bg-[#F0F0F0] px-5 py-4 text-left">
+              <div className="flex items-center justify-between gap-3 rounded-[20px] bg-surface px-5 py-4 text-left">
                 <span className="text-sm text-black/60">{awaitingConfirmation ? 'Amount sent' : 'Amount to transfer'}</span>
                 <span className="text-xl font-bold text-black whitespace-nowrap">{formatPrice(result?.amount ?? order?.grand_total ?? 0)}</span>
               </div>
@@ -640,7 +647,7 @@ function CheckoutCallbackContent() {
                   type="button"
                   onClick={() => void checkAgain()}
                   disabled={isRefreshing}
-                  className="w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm disabled:opacity-60"
+                  className="w-full bg-accent text-accent-ink hover:bg-accent-hover font-semibold py-3 rounded-full text-sm disabled:opacity-60"
                 >
                   {isRefreshing ? 'Checking…' : 'Check again'}
                 </button>
@@ -714,7 +721,7 @@ function CheckoutCallbackContent() {
             <Link
               href="/cart"
               onClick={() => clearPendingOrder(effectiveOrderNumber || orderNumber)}
-              className="block w-full bg-black text-white hover:bg-neutral-800 font-semibold py-3 rounded-full text-sm"
+              className="block w-full bg-accent text-accent-ink hover:bg-accent-hover font-semibold py-3 rounded-full text-sm"
             >
               Go to cart
             </Link>

@@ -22,6 +22,7 @@ import {
 import { adminGetOverview, DashboardOverview } from '@/lib/admin-api';
 import { ITEM_SALES_NOTE, formatDate, formatDateTime, formatPrice, formatRelative, gatewayLabel, humanize, num, orderStatus, paymentStatus } from '@/lib/admin-format';
 import type { StatusTone } from '@/lib/order-status';
+import { optionsText } from '@/lib/shop';
 import { AdminIcon } from '@/components/admin/AdminIcon';
 import { useAdminSession } from '@/components/admin/AdminAuthGate';
 import { ErrorState, LoadingState, Notice, useAdminData, useUrlFilters } from '@/components/admin/ui';
@@ -733,7 +734,8 @@ function buildFeed(data: DashboardOverview): FeedItem[] {
       key: `stock-${v.id}`,
       kind: 'stock',
       title: stock === 0 ? 'Sold out' : 'Low stock',
-      detail: `${v.product_name} · ${[v.size, v.color_name].filter(Boolean).join(' / ')}`,
+      // An item without options is just its name (the stored "none" values are never printed).
+      detail: [v.product_name, optionsText(v.size, v.color_name)].filter(Boolean).join(' · '),
       time: null,
       side: stock === 0 ? 'None left' : `${stock} left`,
       href: stock === 0 ? '/admin/inventory?filter=out_of_stock' : '/admin/inventory?filter=low_stock',
@@ -1053,7 +1055,7 @@ function LowStock({ data }: { data: DashboardOverview }) {
                 <div className="min-w-0">
                   <p className="truncate font-medium text-[#1f2937]">{v.product_name}</p>
                   <p className="truncate text-xs text-[#6b7280]">
-                    {[v.size, v.color_name].filter(Boolean).join(' / ')} · {v.sku}
+                    {[optionsText(v.size, v.color_name), v.sku].filter(Boolean).join(' · ')}
                   </p>
                 </div>
                 <div className="flex w-[120px] shrink-0 flex-col items-end gap-1.5">

@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ImageOff, Plus, Share2, Trash2, Upload } from 'lucide-react';
 import {
   AdminProduct,
-  AdminProductPayload,
   PRODUCT_IMAGE_PLACEHOLDER,
   apiCreateAdminProduct,
   apiDeleteAdminProduct,
@@ -14,9 +13,21 @@ import {
   apiUpdateAdminProductStatus,
   apiUploadProductImage,
 } from '@/lib/api-client';
-import { adminGetCategories, errorMessage, fieldErrors } from '@/lib/admin-api';
+import {
+  AdminProductSave,
+  MAX_SPECIFICATIONS,
+  MAX_SPECIFICATION_NAME,
+  MAX_SPECIFICATION_VALUE,
+  MAX_WARRANTY,
+  ProductSpecification,
+  adminGetCategories,
+  errorMessage,
+  fieldErrors,
+  productExtras,
+} from '@/lib/admin-api';
 import { formatPrice, num } from '@/lib/admin-format';
-import { isNumericSlug, slugify, splitUploads, uploadFailureMessage, wholeNumber } from '@/lib/admin-logic';
+import { isNumericSlug, listedChoice, optionPairProblems, slugify, specificationRows, splitUploads, uploadFailureMessage, wholeNumber } from '@/lib/admin-logic';
+import { SHOP, hasOption1, hasOption2, option1Word, option2Word, optionsText, withArticle } from '@/lib/shop';
 import { ShareProductModal, type ShareableProduct } from '@/components/admin/ShareProductModal';
 import { AdminImage } from '@/components/admin/AdminImage';
 import {
@@ -49,10 +60,18 @@ import {
 
 type ProductStatus = 'draft' | 'published' | 'archived';
 
-const DRESS_STYLES = ['Casual', 'Formal', 'Party', 'Gym'];
-// Short names, one per size: the shop's size filter lists every distinct name, so "M" and "Medium"
+// The names of the two options and the style field come from the shop's config (lib/shop.ts).
+const STYLES = SHOP.style.values;
+// Short names, one per choice: the shop's filter lists every distinct name, so "M" and "Medium"
 // would show as two sizes. A product saved with another name keeps it in its own list.
-const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', '28', '30', '32', '34', '36', '38', '40', 'One Size'];
+const OPTION1_CHOICES = SHOP.option1.choices;
+const OPTION1_PLURAL = SHOP.option1.plural.toLowerCase();
+const OPTION2_PLURAL = SHOP.option2.plural.toLowerCase();
+/** False when the second option is plain text (a scent, a flavour): no colour picker, no swatch column. */
+const SWATCHES = SHOP.option2.swatch;
+/** Shops that sell adult-only goods: the slugs of the categories whose every product needs the age confirmation. */
+const AGE_CHECK = SHOP.features.ageCheck;
+const ADULT_CATEGORIES = new Set(SHOP.ageCheck.categories.map((slug) => slug.trim().toLowerCase()));
 
 const STATUS_LABELS: Record<ProductStatus, { label: string; tone: 'green' | 'amber' | 'neutral' }> = {
   published: { label: 'Published', tone: 'green' },
@@ -64,12 +83,20 @@ interface VariantForm {
   /** Set for variants that already exist (their stock is changed on the Inventory page). */
   id?: number;
   sku: string;
+  /** The first option ('' = the product does not use it; the server stores its "none" value). */
   size: string;
+  /** "Type another" was pressed: the first option is typed instead of picked from the list. */
+  size_typed?: boolean;
   color_name: string;
   color_hex: string;
   price_override: string;
   stock_quantity: string;
   low_stock_threshold: string;
+  /**
+   * Set on a new row that took over a variant removed earlier in this edit (see
+   * restoreRemovedVariants): what the row held as a new row, to put back if it stops being that variant.
+   */
+  came_back?: { sku: string; stock_quantity: string; color_hex: string };
 }
 
 interface ImageForm {
@@ -96,6 +123,11 @@ interface ProductForm {
   rating_start: string;
   images: ImageForm[];
   variants: VariantForm[];
+  specifications: ProductSpecification[];
+  warranty: string;
+  is_heavy: boolean;
+  /** The product's own flag; a product in an adult-only category needs the confirmation without it. */
+  is_age_restricted: boolean;
 }
 
 /** 'YYYY-MM-DD HH:MM:SS' (server) → 'YYYY-MM-DDTHH:MM' (datetime-local input). */
@@ -109,8 +141,10 @@ function flashDealEnd(value: string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** Wide screens: one row per variant (Size, Colour, Swatch, SKU, Price, Stock, Alert, Remove). */
-const VARIANT_GRID = 'lg:grid-cols-[minmax(0,8rem)_minmax(0,7rem)_3.75rem_minmax(0,1fr)_minmax(0,7rem)_minmax(0,5rem)_minmax(0,5rem)_2rem]';
+/** Wide screens: one row per variant (option 1, option 2, Swatch when option 2 is a colour, SKU, Price, Stock, Alert, Remove). */
+const VARIANT_GRID = SWATCHES
+  ? 'lg:grid-cols-[minmax(0,8rem)_minmax(0,7rem)_3.75rem_minmax(0,1fr)_minmax(0,7rem)_minmax(0,5rem)_minmax(0,5rem)_2rem]'
+  : 'lg:grid-cols-[minmax(0,8rem)_minmax(0,9rem)_minmax(0,1fr)_minmax(0,7rem)_minmax(0,5rem)_minmax(0,5rem)_2rem]';
 const VARIANT_FIELD = 'flex min-w-0 flex-col gap-1';
 /** Field names are shown on the phone/tablet cards; the header row names them on wide screens. */
 const VARIANT_LABEL = 'text-xs text-[#6b7280] lg:sr-only';
@@ -140,6 +174,11 @@ const EMPTY_FORM: ProductForm = {
   rating_start: '',
   images: [],
   variants: [{ ...NEW_VARIANT }],
+  // A new product starts with the names this kind of shop usually fills in (none for most shops).
+  specifications: SHOP.specs.suggested.slice(0, MAX_SPECIFICATIONS).map((name) => ({ name, value: '' })),
+  warranty: '',
+  is_heavy: false,
+  is_age_restricted: false,
 };
 
 function productToForm(p: AdminProduct): ProductForm {
@@ -150,6 +189,7 @@ function productToForm(p: AdminProduct): ProductForm {
         ? [{ image_url: p.primary_image, alt_text: p.name, is_primary: true }]
         : [];
   if (images.length > 0 && !images.some((i) => i.is_primary)) images[0].is_primary = true;
+  const extras = productExtras(p);
 
   return {
     name: p.name,
@@ -169,21 +209,209 @@ function productToForm(p: AdminProduct): ProductForm {
     variants: (p.variants ?? []).map((v) => ({
       id: v.id,
       sku: v.sku,
-      size: v.size,
-      color_name: v.color_name,
+      // The stored "none" value is an empty box here, never a choice called "Standard" or "Default".
+      size: hasOption1(v.size) ? v.size : '',
+      color_name: hasOption2(v.color_name) ? v.color_name : '',
       color_hex: v.color_hex || '#000000',
       price_override: v.price_override ? String(num(v.price_override)) : '',
       stock_quantity: String(num(v.stock_quantity)),
       low_stock_threshold: String(v.low_stock_threshold ?? 5),
     })),
+    specifications: (Array.isArray(extras.specifications) ? extras.specifications : []).map((s) => ({
+      name: String(s?.name ?? ''),
+      value: String(s?.value ?? ''),
+    })),
+    warranty: extras.warranty ?? '',
+    is_heavy: Boolean(extras.is_heavy),
+    is_age_restricted: Boolean(extras.is_age_restricted),
   };
 }
 
 /** Server field messages the editor shows beside a field (anything else goes in the banner). */
 const SHOWN_ERROR_FIELDS = new Set([
-  'name', 'slug', 'category_id', 'dress_style', 'description', 'base_price', 'original_price', 'sku', 'status',
-  'rating_start', 'flash_deal_ends_at', 'variants', 'images',
+  'name', 'slug', 'category_id', 'description', 'base_price', 'original_price', 'sku', 'status',
+  'rating_start', 'flash_deal_ends_at', 'variants', 'images', 'specifications',
+  // These boxes exist only when the shop's config switches them on.
+  ...(SHOP.style.enabled ? ['dress_style'] : []),
+  ...(SHOP.features.warranty ? ['warranty'] : []),
+  ...(SHOP.features.heavyDelivery ? ['is_heavy'] : []),
+  ...(AGE_CHECK ? ['is_age_restricted'] : []),
 ]);
+
+/** The first option as it is saved: a typed value that is one of the shop's choices takes the list's spelling. */
+function savedOption1(v: VariantForm): string {
+  return v.size_typed ? (listedChoice(v.size, OPTION1_CHOICES) ?? v.size.trim()) : v.size.trim();
+}
+
+/** A row's two options as they are compared and saved ('' = the product does not use that option). */
+function optionPair(v: VariantForm): [string, string] {
+  return [hasOption1(v.size) ? savedOption1(v) : '', hasOption2(v.color_name) ? v.color_name.trim() : ''];
+}
+
+/** Two rows with the same key are the same variant (the rule the duplicate check uses). */
+function optionPairKey(v: VariantForm): string {
+  return optionPair(v).join('|').toLowerCase();
+}
+
+/**
+ * A variant removed in this edit and then added again is the same variant coming back: the server
+ * keeps its stock, so asking for a starting stock would mislead. A new row whose options match a
+ * removed row takes that row's id, SKU and stock, and is saved as the old variant. When its options
+ * are changed to something else it is a new row again, with what it held before.
+ */
+function restoreRemovedVariants(variants: VariantForm[], removed: VariantForm[]): VariantForm[] {
+  if (removed.length === 0) return variants;
+  const rows = variants.map((v) => {
+    const source = v.came_back ? removed.find((r) => r.id === v.id) : undefined;
+    if (!v.came_back || (source && optionPairKey(source) === optionPairKey(v))) return v;
+    const fresh: VariantForm = { ...v, sku: v.came_back.sku, stock_quantity: v.came_back.stock_quantity, color_hex: v.came_back.color_hex };
+    delete fresh.id;
+    delete fresh.came_back;
+    return fresh;
+  });
+  const taken = new Set(rows.map((v) => v.id));
+  return rows.map((v) => {
+    const key = optionPairKey(v);
+    // A row with neither option is never matched: every new row starts that way.
+    if (v.id !== undefined || key === '|') return v;
+    const source = removed.find((r) => !taken.has(r.id) && optionPairKey(r) === key);
+    if (!source) return v;
+    taken.add(source.id);
+    return {
+      ...v,
+      id: source.id,
+      sku: source.sku,
+      stock_quantity: source.stock_quantity,
+      // Without swatches there is no colour picker, so the variant keeps the colour it had.
+      color_hex: SWATCHES ? v.color_hex : source.color_hex,
+      came_back: { sku: v.sku, stock_quantity: v.stock_quantity, color_hex: v.color_hex },
+    };
+  });
+}
+
+/** The small text button under the first option that swaps its list for a text box, or back. */
+const OPTION1_SWITCH =
+  'self-start rounded text-xs font-medium text-[#6b7280] underline outline-none hover:text-[#111827] focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40 disabled:no-underline disabled:opacity-60';
+
+/**
+ * The first option of one variant: the shop's list of choices with a "Type another" button for a
+ * value that is not in it, or simply a text box when the shop has no list. The switch is a button
+ * of its own, never an entry of the list: arrowing through a closed list picks each entry in turn.
+ */
+function Option1Field({
+  label,
+  value,
+  typed,
+  invalid,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  typed: boolean;
+  invalid: boolean;
+  /** `size_typed` is only ever true or absent, so going back to the list leaves the form as it was. */
+  onChange: (changes: Pick<VariantForm, 'size' | 'size_typed'>) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selectRef = useRef<HTMLSelectElement>(null);
+  // Set by the two switch buttons: the control that replaces the other one takes the keyboard focus.
+  const focusAfterSwitch = useRef(false);
+  useEffect(() => {
+    if (!focusAfterSwitch.current) return;
+    focusAfterSwitch.current = false;
+    if (typed) {
+      inputRef.current?.focus();
+      // The value comes along, selected, so typing replaces it.
+      inputRef.current?.select();
+    } else {
+      selectRef.current?.focus();
+    }
+  }, [typed]);
+
+  if (OPTION1_CHOICES.length === 0) {
+    return (
+      <input
+        aria-label={`${label} ${option1Word}`}
+        maxLength={50}
+        value={value}
+        onChange={(e) => onChange({ size: e.target.value })}
+        className={`${inputClass} h-9 w-full py-1 lg:h-8`}
+        aria-invalid={invalid ? true : undefined}
+      />
+    );
+  }
+
+  if (typed) {
+    const listed = listedChoice(value, OPTION1_CHOICES);
+    // The list can only show one of its own choices (or nothing), so any other text stays in the box.
+    const canUseList = value.trim() === '' || listed !== null;
+    return (
+      <>
+        <input
+          ref={inputRef}
+          aria-label={`${label} ${option1Word}`}
+          maxLength={50}
+          value={value}
+          onChange={(e) => onChange({ size: e.target.value })}
+          onBlur={() => {
+            if (listed !== null && listed !== value) onChange({ size: listed });
+          }}
+          className={`${inputClass} h-9 w-full py-1 lg:h-8`}
+          aria-invalid={invalid ? true : undefined}
+        />
+        <button
+          type="button"
+          disabled={!canUseList}
+          onClick={() => {
+            focusAfterSwitch.current = true;
+            onChange({ size: listed ?? '', size_typed: undefined });
+          }}
+          aria-label={
+            canUseList
+              ? `${label}: choose ${withArticle(option1Word)} from the list`
+              : `${label}: clear the box to choose ${withArticle(option1Word)} from the list`
+          }
+          title={canUseList ? undefined : 'Clear the box to choose from the list'}
+          className={OPTION1_SWITCH}
+        >
+          Choose from the list
+        </button>
+      </>
+    );
+  }
+
+  const choices = value && !OPTION1_CHOICES.includes(value) ? [...OPTION1_CHOICES, value] : OPTION1_CHOICES;
+  return (
+    <>
+      <select
+        ref={selectRef}
+        aria-label={`${label} ${option1Word}`}
+        value={value}
+        onChange={(e) => onChange({ size: e.target.value })}
+        className={`${inputClass} h-9 w-full !py-0 pr-7 lg:h-8`}
+        aria-invalid={invalid ? true : undefined}
+      >
+        <option value="">Choose…</option>
+        {choices.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={() => {
+          focusAfterSwitch.current = true;
+          onChange({ size: value, size_typed: true });
+        }}
+        aria-label={`${label}: type another ${option1Word}`}
+        className={OPTION1_SWITCH}
+      >
+        Type another
+      </button>
+    </>
+  );
+}
 
 /** '4.5' -> 4.5; null when empty or not 1 to 5 with at most one decimal. */
 function startingRating(value: string): number | null {
@@ -247,6 +475,9 @@ export function ProductManagement() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const editingProduct = editingId ? products.find((p) => p.id === editingId) : undefined;
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
+  // Every product in one of the shop's adult-only categories needs the age confirmation, whatever its own flag says.
+  const adultCategory =
+    AGE_CHECK && ADULT_CATEGORIES.has((categories.find((c) => String(c.id) === form.category_id)?.slug ?? '').trim().toLowerCase());
   const closeEditor = useDiscardGuard(editorOpen, form, () => setEditorOpen(false));
   const [slugTouched, setSlugTouched] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -257,20 +488,32 @@ export function ProductManagement() {
   const fileRef = useRef<HTMLInputElement>(null);
   // Counts each opening of the editor, so a late upload can't land in a different product's form.
   const editorOpening = useRef(0);
+  // The newer fields the product being edited came without (see the save: they are not sent empty).
+  const unreadFields = useRef({ specifications: false, warranty: false, is_heavy: false, is_age_restricted: false });
 
   const update = <K extends keyof ProductForm>(key: K, value: ProductForm[K]) => setForm((f) => ({ ...f, [key]: value }));
 
+  // The existing variants removed since the editor opened (a new row with the same options is that variant again).
+  const [removedVariants, setRemovedVariants] = useState<VariantForm[]>([]);
+
   const updateVariant = (index: number, changes: Partial<VariantForm>) =>
-    setForm((f) => ({ ...f, variants: f.variants.map((v, i) => (i === index ? { ...v, ...changes } : v)) }));
+    setForm((f) => ({
+      ...f,
+      variants: restoreRemovedVariants(
+        f.variants.map((v, i) => (i === index ? { ...v, ...changes } : v)),
+        removedVariants
+      ),
+    }));
 
   const openCreate = () => {
     editorOpening.current += 1;
     setEditingId(null);
-    setForm({ ...EMPTY_FORM, variants: [{ ...NEW_VARIANT }] });
+    setForm({ ...EMPTY_FORM, variants: [{ ...NEW_VARIANT }], specifications: EMPTY_FORM.specifications.map((s) => ({ ...s })) });
     setSlugTouched(false);
     setErrors({});
     setFormError(null);
     setNewImageUrl('');
+    setRemovedVariants([]);
     setEditorOpen(true);
   };
 
@@ -278,10 +521,18 @@ export function ProductManagement() {
     editorOpening.current += 1;
     setEditingId(p.id);
     setForm(productToForm(p));
+    const extras = productExtras(p);
+    unreadFields.current = {
+      specifications: !Array.isArray(extras.specifications),
+      warranty: extras.warranty === undefined,
+      is_heavy: extras.is_heavy === undefined,
+      is_age_restricted: extras.is_age_restricted === undefined,
+    };
     setSlugTouched(true);
     setErrors({});
     setFormError(null);
     setNewImageUrl('');
+    setRemovedVariants([]);
     setEditorOpen(true);
   };
 
@@ -340,14 +591,20 @@ export function ProductManagement() {
     const v = form.variants[index];
     if (v.id) {
       const ok = await confirm({
-        title: `Remove ${v.size} / ${v.color_name}?`,
+        title: `Remove ${optionsText(v.size, v.color_name) || 'this variant'}?`,
         message: 'It stops being sold once you save. Past orders keep their record of it.',
         confirmLabel: 'Remove variant',
         tone: 'danger',
       });
       if (!ok) return;
     }
-    setForm((f) => ({ ...f, variants: f.variants.filter((_, i) => i !== index) }));
+    // Remembered without the note a row carries when it had itself come back.
+    const gone: VariantForm = { ...v };
+    delete gone.came_back;
+    const removed = v.id ? [...removedVariants.filter((r) => r.id !== v.id), gone] : removedVariants;
+    setRemovedVariants(removed);
+    // Another new row may already hold the same options as the row that just went.
+    setForm((f) => ({ ...f, variants: restoreRemovedVariants(f.variants.filter((_, i) => i !== index), removed) }));
   };
 
   const validate = (): Record<string, string> => {
@@ -364,16 +621,18 @@ export function ProductManagement() {
     if (form.rating_start.trim() !== '' && startingRating(form.rating_start) === null) {
       e.rating_start = 'Enter 1 to 5 with at most one decimal, e.g. 4.5, or leave it empty.';
     }
-    if (form.variants.length === 0) e.variants = 'Add at least one size and colour.';
-    const seen = new Set<string>();
+    if (form.variants.length === 0) e.variants = `Add at least one ${option1Word} and ${option2Word}.`;
+    // An option may be left empty (the product does not use it). Typing the "none" word means the same.
+    const problems = optionPairProblems(
+      form.variants.map(optionPair)
+    );
     form.variants.forEach((v, i) => {
-      if (!v.size.trim() || !v.color_name.trim()) {
-        e[`variant_${i}`] = 'Choose a size and enter a colour.';
+      if (problems[i] === 'empty') {
+        // Only a product with a single variant can do without both options.
+        e[`variant_${i}`] = `${OPTION1_CHOICES.length > 0 ? 'Choose' : 'Enter'} ${withArticle(option1Word)} or enter ${withArticle(option2Word)}.`;
         return;
       }
-      const key = `${v.size.trim().toLowerCase()}|${v.color_name.trim().toLowerCase()}`;
-      if (seen.has(key)) e[`variant_${i}`] = 'This size and colour is listed twice.';
-      seen.add(key);
+      if (problems[i] === 'duplicate') e[`variant_${i}`] = `This ${option1Word} and ${option2Word} is listed twice.`;
       if (!v.id && !((wholeNumber(v.stock_quantity.trim() || '0') ?? -1) >= 0)) {
         e[`variant_${i}`] = 'Starting stock must be a whole number, 0 or more.';
       }
@@ -382,6 +641,8 @@ export function ProductManagement() {
       }
       if (v.price_override.trim() !== '' && !(parseFloat(v.price_override) > 0)) e[`variant_${i}`] = 'Variant price must be above 0.';
     });
+    // A row without a value is simply not saved; a value without a name would be lost, so it is refused.
+    if (specificationRows(form.specifications).unnamed > 0) e.specifications = 'Give each row a name, or remove the row.';
     return e;
   };
 
@@ -393,7 +654,14 @@ export function ProductManagement() {
     setFormError(Object.keys(local).length ? 'Please fix the highlighted fields.' : null);
     if (Object.keys(local).length) return;
 
-    const payload: AdminProductPayload = {
+    const specifications = specificationRows(form.specifications).rows;
+    const warranty = form.warranty.trim();
+    // A key that is left out keeps what the server has. That is what happens to a field this shop
+    // has switched off, and to one the product list did not carry (a list cached before an update),
+    // unless something was entered: an empty box must never wipe a value nobody saw.
+    const send = (field: keyof typeof unreadFields.current, entered: boolean) => !editingId || !unreadFields.current[field] || entered;
+
+    const payload: AdminProductSave = {
       name: form.name.trim(),
       slug: form.slug.trim(),
       category_id: form.category_id ? Number(form.category_id) : null,
@@ -419,12 +687,20 @@ export function ProductManagement() {
       variants: form.variants.map((v) => ({
         ...(v.id ? { id: v.id } : { stock_quantity: wholeNumber(v.stock_quantity) ?? 0 }),
         sku: v.sku.trim(),
-        size: v.size.trim(),
+        // Empty = the product does not use this option; the server stores its "none" value.
+        size: savedOption1(v),
         color_name: v.color_name.trim(),
-        color_hex: v.color_hex,
+        // A shop without swatches has no colour picker: a new row gets black, and a row that
+        // already exists keeps the colour it was loaded with.
+        color_hex: SWATCHES || v.id ? v.color_hex : '#000000',
         price_override: v.price_override.trim() ? Number(v.price_override) : null,
         low_stock_threshold: wholeNumber(v.low_stock_threshold) ?? 0,
       })),
+      ...(send('specifications', specifications.length > 0) ? { specifications } : {}),
+      ...(SHOP.features.warranty && send('warranty', warranty !== '') ? { warranty } : {}),
+      ...(SHOP.features.heavyDelivery && send('is_heavy', form.is_heavy) ? { is_heavy: form.is_heavy } : {}),
+      // In an adult-only category the box is locked on, so the product's own flag is not touched.
+      ...(AGE_CHECK && !adultCategory && send('is_age_restricted', form.is_age_restricted) ? { is_age_restricted: form.is_age_restricted } : {}),
     };
 
     setSaving(true);
@@ -490,13 +766,16 @@ export function ProductManagement() {
     form.category_id && !categories.some((c) => String(c.id) === form.category_id)
       ? [...categories, { id: Number(form.category_id), name: `Category #${form.category_id}`, is_active: false }]
       : categories;
-  const dressStyles = form.dress_style && !DRESS_STYLES.includes(form.dress_style) ? [...DRESS_STYLES, form.dress_style] : DRESS_STYLES;
+  const styles = form.dress_style && !STYLES.includes(form.dress_style) ? [...STYLES, form.dress_style] : STYLES;
+
+  const updateSpecification = (index: number, changes: Partial<ProductSpecification>) =>
+    setForm((f) => ({ ...f, specifications: f.specifications.map((s, i) => (i === index ? { ...s, ...changes } : s)) }));
 
   return (
     <div className="flex w-full flex-col">
       <PageHeader
         title="Products"
-        description="Catalogue, prices, photos and the sizes and colours you sell."
+        description={`Catalogue, prices, photos and the ${OPTION1_PLURAL} and ${OPTION2_PLURAL} you sell.`}
         actions={
           <Button variant="primary" onClick={openCreate}>
             <Plus className="size-4" aria-hidden="true" />
@@ -601,7 +880,7 @@ export function ProductManagement() {
                     </td>
                     <td>
                       {p.category_name || <span className="text-[#6b7280]">No category</span>}
-                      {p.dress_style && <span className="block text-xs text-[#6b7280]">{p.dress_style}</span>}
+                      {SHOP.style.enabled && p.dress_style && <span className="block text-xs text-[#6b7280]">{p.dress_style}</span>}
                     </td>
                     <td className="whitespace-nowrap tabular-nums">
                       <span className="font-semibold">{formatPrice(price)}</span>
@@ -726,24 +1005,26 @@ export function ProductManagement() {
                 </Select>
               )}
             </Field>
-            <Field label="Dress style" error={errors.dress_style}>
-              {(p) => (
-                <Select {...p} value={form.dress_style} onChange={(e) => update('dress_style', e.target.value)}>
-                  <option value="">Not set</option>
-                  {dressStyles.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </Field>
+            {SHOP.style.enabled && (
+              <Field label={SHOP.style.label} error={errors.dress_style}>
+                {(p) => (
+                  <Select {...p} value={form.dress_style} onChange={(e) => update('dress_style', e.target.value)}>
+                    <option value="">Not set</option>
+                    {styles.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+            )}
             <Field label="Description" error={errors.description} className="sm:col-span-2">
               {(p) => (
                 <TextArea
                   {...p}
                   rows={4}
-                  placeholder="Fabric, fit, care instructions…"
+                  placeholder={SHOP.wording.descriptionHint}
                   value={form.description}
                   onChange={(e) => update('description', e.target.value)}
                 />
@@ -791,6 +1072,32 @@ export function ProductManagement() {
             <div className="flex flex-col justify-end gap-2 pb-1 sm:col-span-3">
               <Checkbox label="Featured on the home page" hint="The home page's Featured row shows the 4 newest ticked products; View All lists the rest. Must be Published." checked={form.is_featured} onChange={(v) => update('is_featured', v)} />
               <Checkbox label="Show in flash deals" checked={form.is_flash_deal} onChange={(v) => update('is_flash_deal', v)} />
+              {SHOP.features.heavyDelivery && (
+                <>
+                  <Checkbox
+                    label="Large or heavy item (adds the zone's heavy-item fee to delivery)"
+                    checked={form.is_heavy}
+                    onChange={(v) => update('is_heavy', v)}
+                  />
+                  {errors.is_heavy && <p className="text-xs text-red-600">{errors.is_heavy}</p>}
+                </>
+              )}
+              {AGE_CHECK && (
+                <>
+                  <Checkbox
+                    label={`Only for buyers aged ${SHOP.ageCheck.minAge} and over`}
+                    hint={
+                      adultCategory
+                        ? 'Every product in this category is for adults only.'
+                        : 'Tick this for a product outside your adult-only categories that still needs the age confirmation at checkout, such as a hamper with wine.'
+                    }
+                    checked={adultCategory || form.is_age_restricted}
+                    disabled={adultCategory}
+                    onChange={(v) => update('is_age_restricted', v)}
+                  />
+                  {errors.is_age_restricted && <p className="text-xs text-red-600">{errors.is_age_restricted}</p>}
+                </>
+              )}
             </div>
             {form.is_flash_deal && (
               <Field
@@ -912,13 +1219,18 @@ export function ProductManagement() {
 
           <fieldset className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <legend className="text-[13px] font-semibold text-[#111827]">Sizes and colours ({form.variants.length})</legend>
+              <legend className="text-[13px] font-semibold text-[#111827]">
+                {SHOP.option1.plural} and {OPTION2_PLURAL} ({form.variants.length})
+              </legend>
               <Button size="sm" onClick={() => update('variants', [...form.variants, { ...NEW_VARIANT }])}>
                 <Plus className="size-3.5" aria-hidden="true" />
                 Add variant
               </Button>
             </div>
             {errors.variants && <Notice tone="danger">{errors.variants}</Notice>}
+            <p className="text-xs text-[#6b7280]">
+              One row for each choice you sell. Leave a box empty when the product does not come in different {OPTION1_PLURAL} or {OPTION2_PLURAL}.
+            </p>
             {editingId && (
               <p className="text-xs text-[#6b7280]">
                 Stock on existing variants is changed on the{' '}
@@ -935,9 +1247,9 @@ export function ProductManagement() {
                 aria-hidden="true"
                 className={`hidden rounded-t-lg bg-[#fafafa] px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-[#6b7280] lg:grid lg:gap-2 ${VARIANT_GRID}`}
               >
-                <span>Size</span>
-                <span>Colour</span>
-                <span>Swatch</span>
+                <span>{SHOP.option1.label}</span>
+                <span>{SHOP.option2.label}</span>
+                {SWATCHES && <span>Swatch</span>}
                 <span>SKU</span>
                 <span>Price (₦)</span>
                 <span>Stock</span>
@@ -948,7 +1260,6 @@ export function ProductManagement() {
                 {form.variants.map((v, idx) => {
                   const rowError = errors[`variant_${idx}`];
                   const label = `Variant ${idx + 1}`;
-                  const sizes = v.size && !SIZES.includes(v.size) ? [...SIZES, v.size] : SIZES;
                   const removeButton = (
                     <button
                       type="button"
@@ -962,51 +1273,49 @@ export function ProductManagement() {
                     </button>
                   );
                   return (
-                    <li key={v.id ?? `new-${idx}`} className="border-t border-[#f3f4f6] p-3 first:border-t-0 lg:px-2 lg:py-2">
+                    // A new row that became a removed variant again keeps its key, so the box being typed in stays put.
+                    <li key={v.came_back || !v.id ? `new-${idx}` : v.id} className="border-t border-[#f3f4f6] p-3 first:border-t-0 lg:px-2 lg:py-2">
                       <div className="mb-2 flex items-center justify-between lg:hidden">
                         <span className="text-[13px] font-semibold text-[#111827]">{label}</span>
                         {removeButton}
                       </div>
-                      <div className={`grid grid-cols-2 gap-3 sm:grid-cols-3 lg:items-center lg:gap-2 ${VARIANT_GRID}`}>
-                        <label className={VARIANT_FIELD}>
-                          <span className={VARIANT_LABEL}>Size</span>
-                          <select
-                            aria-label={`${label} size`}
+                      {/* Top-aligned on wide screens: the first option has a small button under its box. */}
+                      <div className={`grid grid-cols-2 gap-3 sm:grid-cols-3 lg:items-start lg:gap-2 ${VARIANT_GRID}`}>
+                        {/* Not a <label>: this field also holds the button that swaps the list and the text box. */}
+                        <div className={VARIANT_FIELD}>
+                          <span className={VARIANT_LABEL}>{SHOP.option1.label}</span>
+                          <Option1Field
+                            label={label}
                             value={v.size}
-                            onChange={(e) => updateVariant(idx, { size: e.target.value })}
-                            className={`${inputClass} h-9 w-full !py-0 pr-7 lg:h-8`}
-                            aria-invalid={rowError ? true : undefined}
-                          >
-                            <option value="">Choose…</option>
-                            {sizes.map((s) => (
-                              <option key={s} value={s}>
-                                {s}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                            typed={Boolean(v.size_typed)}
+                            invalid={Boolean(rowError)}
+                            onChange={(changes) => updateVariant(idx, changes)}
+                          />
+                        </div>
                         <label className={VARIANT_FIELD}>
-                          <span className={VARIANT_LABEL}>Colour</span>
+                          <span className={VARIANT_LABEL}>{SHOP.option2.label}</span>
                           <input
-                            aria-label={`${label} colour name`}
+                            aria-label={SWATCHES ? `${label} ${option2Word} name` : `${label} ${option2Word}`}
                             maxLength={50}
                             value={v.color_name}
                             onChange={(e) => updateVariant(idx, { color_name: e.target.value })}
-                            placeholder="e.g. Navy"
+                            placeholder={SHOP.option2.placeholder}
                             className={`${inputClass} h-9 w-full py-1 lg:h-8`}
                             aria-invalid={rowError ? true : undefined}
                           />
                         </label>
-                        <label className={VARIANT_FIELD}>
-                          <span className={VARIANT_LABEL}>Swatch</span>
-                          <input
-                            type="color"
-                            aria-label={`${label} colour swatch`}
-                            value={v.color_hex}
-                            onChange={(e) => updateVariant(idx, { color_hex: e.target.value })}
-                            className="h-9 w-full cursor-pointer rounded border border-[#d1d5db] bg-white p-0.5 lg:h-8 lg:w-10"
-                          />
-                        </label>
+                        {SWATCHES && (
+                          <label className={VARIANT_FIELD}>
+                            <span className={VARIANT_LABEL}>Swatch</span>
+                            <input
+                              type="color"
+                              aria-label={`${label} ${option2Word} swatch`}
+                              value={v.color_hex}
+                              onChange={(e) => updateVariant(idx, { color_hex: e.target.value })}
+                              className="h-9 w-full cursor-pointer rounded border border-[#d1d5db] bg-white p-0.5 lg:h-8 lg:w-10"
+                            />
+                          </label>
+                        )}
                         <label className={`${VARIANT_FIELD} col-span-2 sm:col-span-1`}>
                           <span className={VARIANT_LABEL}>SKU</span>
                           <input
@@ -1066,7 +1375,7 @@ export function ProductManagement() {
                             className={`${inputClass} h-9 w-full py-1 lg:h-8`}
                           />
                         </label>
-                        <div className="hidden justify-end lg:flex">{removeButton}</div>
+                        <div className="hidden justify-end lg:flex lg:h-8 lg:items-center">{removeButton}</div>
                       </div>
                       {rowError && <p className="mt-2 text-xs text-red-600">{rowError}</p>}
                     </li>
@@ -1075,6 +1384,76 @@ export function ProductManagement() {
               </ul>
             </div>
             <p className="text-xs text-[#6b7280]">Variant price is optional; leave it blank to use the product price.</p>
+          </fieldset>
+
+          <fieldset className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <legend className="text-[13px] font-semibold text-[#111827]">
+                {SHOP.specs.label} ({form.specifications.length})
+              </legend>
+              <Button
+                size="sm"
+                onClick={() => update('specifications', [...form.specifications, { name: '', value: '' }])}
+                disabled={form.specifications.length >= MAX_SPECIFICATIONS}
+                title={form.specifications.length >= MAX_SPECIFICATIONS ? `A product can have up to ${MAX_SPECIFICATIONS} rows` : undefined}
+              >
+                <Plus className="size-3.5" aria-hidden="true" />
+                Add a row
+              </Button>
+            </div>
+            {errors.specifications && <Notice tone="danger">{errors.specifications}</Notice>}
+            {form.specifications.length > 0 && (
+              <ul className="space-y-2">
+                {form.specifications.map((s, idx) => (
+                  <li key={idx} className="flex items-start gap-2">
+                    <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
+                      <input
+                        aria-label={`Row ${idx + 1} name`}
+                        maxLength={MAX_SPECIFICATION_NAME}
+                        value={s.name}
+                        onChange={(e) => updateSpecification(idx, { name: e.target.value })}
+                        placeholder="Name"
+                        className={`${inputClass} h-9 py-1`}
+                        aria-invalid={errors.specifications && !s.name.trim() && s.value.trim() ? true : undefined}
+                      />
+                      <input
+                        aria-label={`Row ${idx + 1} value`}
+                        maxLength={MAX_SPECIFICATION_VALUE}
+                        value={s.value}
+                        onChange={(e) => updateSpecification(idx, { value: e.target.value })}
+                        placeholder="Value"
+                        className={`${inputClass} h-9 py-1`}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => update('specifications', form.specifications.filter((_, i) => i !== idx))}
+                      aria-label={`Remove row ${idx + 1}`}
+                      title="Remove row"
+                      className="rounded p-2 text-[#6b7280] outline-none hover:bg-red-50 hover:text-red-600 focus-visible:ring-[3px] focus-visible:ring-[#9ca3af]/40"
+                    >
+                      <Trash2 className="size-4" aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-[#6b7280]">
+              Optional. Short facts about the product, one row each: a name and its value. A row without a value is not saved.
+            </p>
+            {SHOP.features.warranty && (
+              <Field label="Warranty" error={errors.warranty} hint="Optional. Leave it empty when the product has none.">
+                {(p) => (
+                  <TextInput
+                    {...p}
+                    maxLength={MAX_WARRANTY}
+                    placeholder="e.g. 12 months manufacturer warranty"
+                    value={form.warranty}
+                    onChange={(e) => update('warranty', e.target.value)}
+                  />
+                )}
+              </Field>
+            )}
           </fieldset>
         </form>
       </Modal>

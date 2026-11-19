@@ -3,7 +3,8 @@
  * Communicates with the PHP 8+ REST backend API running on XAMPP / local server.
  */
 
-import type { Product, ProductColor, ProductVariant, Review } from '@/types';
+import type { Product, ProductColor, ProductSpec, ProductVariant, Review } from '@/types';
+import { SHOP } from '@/lib/shop';
 import { optimizeImageForUpload } from '@/lib/image-optimize';
 import { productListFrom, productListPath } from '@/lib/catalog-query';
 import { clearQueryCache } from '@/lib/query-client';
@@ -43,6 +44,13 @@ export interface ApiProductSummary {
   discount_percent: number;
   available_colors?: Array<{ name: string; hex: string }>;
   available_sizes?: string[];
+  /**
+   * Worked out by the server (the shop's age check): the product's category is for adults only,
+   * or the product itself is flagged. This is the one the storefront reads.
+   */
+  age_restricted?: boolean;
+  /** The owner's own flag on this product, already counted in `age_restricted`. Not read here. */
+  is_age_restricted?: boolean;
 }
 
 export interface ApiProductImage {
@@ -83,6 +91,11 @@ export interface ApiProductDetail extends ApiProductSummary {
   available_colors: Array<{ name: string; hex: string }>;
   available_sizes: string[];
   reviews?: ApiProductReview[];
+  /** The owner's rows for the product page ([] when none). */
+  specifications?: Array<{ name: string; value: string }> | null;
+  warranty?: string | null;
+  /** Counts towards a delivery zone's `heavy_item_fee`. */
+  is_heavy?: boolean;
 }
 
 export interface CatalogFacets {
@@ -428,6 +441,20 @@ async function fetchFromApi<T>(
 export const apiRequest = fetchFromApi;
 export const apiRequestFull = fetchFullFromApi;
 
+/** A product's specification rows as the page shows them: trimmed, and no row without a name or a value. */
+export function specificationRowsFrom(value: unknown): ProductSpec[] {
+  if (!Array.isArray(value)) return [];
+  const rows: ProductSpec[] = [];
+  for (const row of value) {
+    if (!row || typeof row !== 'object') continue;
+    const { name, value: text } = row as { name?: unknown; value?: unknown };
+    const cleanName = typeof name === 'string' ? name.trim() : '';
+    const cleanValue = typeof text === 'string' || typeof text === 'number' ? String(text).trim() : '';
+    if (cleanName && cleanValue) rows.push({ name: cleanName, value: cleanValue });
+  }
+  return rows;
+}
+
 /**
  * Maps an API product summary or detail into the storefront Product shape.
  * Only data from the API is used: no invented reviews, specifications, FAQs, colours or sizes.
@@ -486,6 +513,10 @@ export function mapApiProductToStorefront(item: ApiProductSummary | ApiProductDe
 
   const details = [item.sku ? `SKU: ${item.sku}` : '', item.category_name ? `Category: ${item.category_name}` : ''].filter(Boolean);
 
+  // Only a product's own page sends these; a list answer leaves them empty.
+  const detail = item as Partial<ApiProductDetail>;
+  const warranty = typeof detail.warranty === 'string' ? detail.warranty.trim() : '';
+
   return {
     id: String(item.id),
     name: item.name,
@@ -499,7 +530,8 @@ export function mapApiProductToStorefront(item: ApiProductSummary | ApiProductDe
     // A product can have no category (the API then sends null).
     category: item.category_slug ?? '',
     categoryName: item.category_name,
-    dressStyle: item.dress_style ? [item.dress_style.toLowerCase()] : [],
+    // As the shop wrote it ("LG", "Eau de Parfum"): only a link carries the lower-case form.
+    dressStyle: item.dress_style?.trim() ? [item.dress_style.trim()] : [],
     gender: 'unisex',
     images,
     colors,
@@ -508,6 +540,11 @@ export function mapApiProductToStorefront(item: ApiProductSummary | ApiProductDe
     totalStock,
     inStock,
     sku: item.sku,
+    specifications: specificationRowsFrom(detail.specifications),
+    // A shop that has warranties switched off never shows one, even if a product still holds it.
+    warranty: SHOP.features.warranty && warranty ? warranty : undefined,
+    isHeavy: detail.is_heavy === true || Number(detail.is_heavy) === 1,
+    ageRestricted: item.age_restricted === true,
     details,
     faqs: [],
     reviews,
@@ -600,6 +637,7 @@ export interface ApiShippingZone {
   description: string;
   states_covered: string[];
   fee: number;
+  heavy_item_fee?: number;
   estimated_days: string;
   is_active: boolean;
 }
@@ -1076,16 +1114,23 @@ export interface ShippingZone {
   items_included?: number;
   /** Added for each item after `items_included`. */
   extra_item_fee?: number;
+  /** Added for each large or heavy item (only charged when the shop has heavy delivery on). */
+  heavy_item_fee?: number;
   estimated_days: string;
   states_covered: string[];
   is_active: boolean;
 }
 
-/** Size and colour as saved on an order line. */
+/**
+ * The two options as saved on an order line (`size` is option 1, `color` option 2; a product
+ * that does not use one holds the shop's "none" value there), with the product's warranty when
+ * it had one.
+ */
 export interface VariantOptions {
   size?: string;
   color?: string;
   color_hex?: string;
+  warranty?: string;
 }
 
 /** Store contact and dispatch details as configured in admin Settings ('' means not set). */
@@ -1126,6 +1171,11 @@ export interface CheckoutQuoteResponse {
   shipping_zone: ShippingZone | null;
   eligible_zones: ShippingZone[];
   origin: StoreOrigin;
+  /** How many large or heavy items the delivery fee counted (0 when the shop does not charge for them). */
+  heavy_items?: number;
+  /** An item in the cart is for adults only: the order needs `age_confirmed`. */
+  age_check_required?: boolean;
+  minimum_age?: number;
 }
 
 /** The delivery zone as it was when the order was placed. */
@@ -1136,6 +1186,8 @@ export interface OrderZoneSnapshot {
   fee: number;
   estimated_days: string;
   origin?: StoreOrigin;
+  heavy_item_fee?: number;
+  heavy_items?: number;
 }
 
 export interface CheckoutOrderResponse {
@@ -1285,6 +1337,8 @@ export async function apiCreateCheckoutOrder(data: {
   shipping_zone_id?: number;
   coupon_code?: string;
   notes?: string;
+  /** Sent as true when the quote asked for the age check and the buyer ticked the box. */
+  age_confirmed?: boolean;
 }, idempotencyKey?: string): Promise<CheckoutOrderResponse> {
   const headers: Record<string, string> = {};
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;

@@ -19,6 +19,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { clearCheckoutDraft, clearPendingOrder, isOrderSettled, markOrderSettled, readGuestToken, readPendingOrder, signatureQuantities } from '@/lib/pending-order';
 import { withAddedLines, type AddedLine } from '@/lib/cart-lines';
+import { mainOption, nameWithOptions, optionsText } from '@/lib/shop';
 
 interface ToastMessage {
   id: string;
@@ -112,6 +113,17 @@ function writeStorage(key: string, value: string | null): void {
 
 function lineKey(variantId: number): string {
   return String(variantId);
+}
+
+// How a toast or notice names a line. Only the options the product uses are named: the "none"
+// value of an unused option ("Standard", "Default") is never shown.
+/** "Classic Tee (M / Navy)". */
+function fullName(name: string, size: string | null | undefined, color: string | null | undefined): string {
+  return nameWithOptions(name, optionsText(size, color));
+}
+/** "Classic Tee (M)": the short form, with the one option that tells the lines apart. */
+function shortName(name: string, size: string | null | undefined, color: string | null | undefined): string {
+  return nameWithOptions(name, mainOption(size, color));
 }
 
 function fromSavedLine(line: ApiSavedCartItem): CartItem {
@@ -343,7 +355,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const id = lineKey(variant.id);
     const cap = Math.min(MAX_QUANTITY_PER_LINE, variant.stock);
     if (cap <= 0) {
-      showToast('Out of stock', `${product.name} (${variant.size} / ${variant.color.name}) is sold out.`);
+      showToast('Out of stock', `${fullName(product.name, variant.size, variant.color.name)} is sold out.`);
       return;
     }
 
@@ -380,8 +392,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     showToast(
       capped ? 'Quantity limited' : 'Added to cart',
       capped
-        ? `Only ${cap} of ${product.name} (${variant.size}) can be ordered.`
-        : `${product.name} (${variant.size} / ${variant.color.name})`,
+        ? `Only ${cap} of ${shortName(product.name, variant.size, variant.color.name)} can be ordered.`
+        : fullName(product.name, variant.size, variant.color.name),
       product.images[0],
       true
     );
@@ -541,7 +553,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             resolved.push({ ...item, id: lineKey(match.id), variantId: match.id, sku: match.sku });
             startedAs.set(lineKey(match.id), item.id);
           } else {
-            notices.push(`${item.name} (${item.size} / ${item.color.name}) is no longer offered and was removed. Please choose another option.`);
+            notices.push(`${fullName(item.name, item.size, item.color.name)} is no longer offered and was removed. Please choose another option.`);
           }
         } catch {
           notices.push(`${item.name} is no longer available and was removed from your cart.`);
@@ -560,18 +572,18 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       for (const item of resolved) {
         const live = byVariant.get(item.variantId as number);
         if (!live || !live.available) {
-          notices.push(`${item.name} (${item.size}) is no longer available and was removed.`);
+          notices.push(`${shortName(item.name, item.size, item.color?.name)} is no longer available and was removed.`);
           continue;
         }
         const available = live.stock_quantity + (reservedForMe.get(String(item.variantId)) ?? 0);
         if (available <= 0) {
-          notices.push(`${item.name} (${item.size} / ${item.color.name}) sold out and was removed.`);
+          notices.push(`${fullName(item.name, item.size, item.color?.name)} sold out and was removed.`);
           continue;
         }
         let quantity = item.quantity;
         if (quantity > available) {
           quantity = available;
-          notices.push(`Only ${available} left of ${item.name} (${item.size}); quantity updated.`);
+          notices.push(`Only ${available} left of ${shortName(item.name, item.size, item.color?.name)}; quantity updated.`);
         }
         if (Math.abs(live.unit_price - item.price) >= 0.01) {
           notices.push(

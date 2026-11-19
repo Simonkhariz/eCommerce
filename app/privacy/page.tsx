@@ -1,10 +1,11 @@
+import { SHOP } from '@/lib/shop';
 import type { Metadata } from 'next';
 import { ContentPage } from '@/components/content/ContentPage';
 import { PRIVACY } from '@/lib/site-content';
 
 export const metadata: Metadata = {
-  title: 'Privacy policy | SHOP.CO',
-  description: 'What personal information SHOP.CO collects, why, and your choices.',
+  title: `Privacy policy | ${SHOP.name}`,
+  description: `What personal information ${SHOP.name} collects, why, and your choices.`,
 };
 
 export default function PrivacyPage() {

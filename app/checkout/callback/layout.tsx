@@ -1,7 +1,8 @@
+import { SHOP } from '@/lib/shop';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Payment status | SHOP.CO',
+  title: `Payment status | ${SHOP.name}`,
   robots: { index: false, follow: false },
 };
 

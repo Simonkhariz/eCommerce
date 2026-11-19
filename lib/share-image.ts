@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { headers } from 'next/headers';
+import { SHOP } from '@/lib/shop';
 
 /**
  * Pictures for link previews (WhatsApp, Facebook, X, iMessage and the rest).
@@ -17,10 +18,11 @@ const BACKEND_ORIGIN = (process.env.BACKEND_ORIGIN || 'http://127.0.0.1:8000').r
 
 export const SHARE_WIDTH = 1200;
 export const SHARE_HEIGHT = 630;
-export const DEFAULT_HERO = '/images/hero/african_models_hero.webp';
-/** Behind the hero art on the home page, and behind a product on its card. */
-const HERO_BACKGROUND = '#F2F0F1';
-const PRODUCT_BACKGROUND = '#F0EEED';
+/** The shop's own hero art (backend/config/shop.json), shown when the owner has set no banner. */
+export const DEFAULT_HERO = SHOP.hero.image;
+/** Behind the hero art on the home page, and behind a product on its card (the shop's own colours). */
+const HERO_BACKGROUND = SHOP.theme.hero;
+const PRODUCT_BACKGROUND = SHOP.theme.card;
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 
 export type ShareLook = 'hero' | 'banner' | 'product';
@@ -79,8 +81,8 @@ async function toShareJpeg(source: Buffer, look: ShareLook): Promise<Buffer> {
       .jpeg({ quality: 84, mozjpeg: true })
       .toBuffer();
   }
-  // The hero picture fills the frame. Hero art and fashion banners are usually taller than the
-  // frame, so it is filled from the top: faces stay in the picture.
+  // The hero picture fills the frame. Hero art and banners are usually taller than the frame,
+  // so it is filled from the top: faces stay in the picture.
   return image
     .flatten({ background: HERO_BACKGROUND })
     .resize(SHARE_WIDTH, SHARE_HEIGHT, { fit: 'cover', position: 'top' })

@@ -15,7 +15,7 @@ It is written for three uses:
 > **Keep this file current.** Any change to what shoppers or admins see, to a safeguard, a limit
 > or a measured number updates this file in the same commit (changelog at the end).
 
-**Last updated:** 11 November 2026, branch `main`.
+**Last updated:** 19 November 2026, branch `main`.
 
 ---
 
@@ -59,7 +59,7 @@ Monnify**, or by **bank transfer arranged on WhatsApp**.
   - **Daily database backups,** copied off the server to cloud storage, with a careful restore that
     works even on hosts without SSH.
 
-The backend has 1,847 automated checks in 25 test suites, the storefront 81 unit tests, and the
+The backend has 2,192 automated checks in 29 test suites, the storefront 117 unit tests, and the
 system has passed a full load test.
 
 ---
@@ -821,7 +821,14 @@ past its deadline (section 6.2).
     - **sizes and colours**: each with its own SKU, optional own price, starting stock and low-stock
       alert level (5 by default). Stock on an existing option is changed in Inventory, so every
       change has a logged reason. **A removed option can be added back,** with its stock; the log
-      says "Variant added back".
+      says "Variant added back". **An SKU left empty is made automatically and is always unique**,
+      so two products can't end up with the same code. "Type another" beside the size list adds a
+      size that isn't in the usual list. "Standard" (size) and "Default" (colour) are reserved to
+      mean "this product doesn't use this option" and are refused as real choices;
+    - **Specifications (optional):** name-and-value lines (e.g. "Material: Cotton"). When a product
+      has some, the product page shows them as a table under "Specifications"; without them it
+      shows "Product details" (SKU, category, style) as before;
+    - **"Adults only" tick box:** only used when the shop's age check is switched on (section 6.11).
   - Stock, alert levels and similar fields take whole numbers only: 12.5 or 1e3 is refused instead of
     being cut down.
   - New products start as Draft.
@@ -1516,6 +1523,36 @@ where text belongs, a zero byte in a password, an absurd page number) gets a ref
 
 ---
 
+### 6.11 One settings file: the same shop for any business
+
+Everything that makes this a *clothing* shop lives in one file, `backend/config/shop.json`, read by
+both the API (`App\Config\Shop`) and the storefront (`lib/shop.ts`), so pages, admin, emails and
+server messages always agree. It holds:
+
+- the name, page title, tagline, hero text and picture, and the colours (accent, its text colour,
+  background tints);
+- the names of the two product options (here Size and Colour) and the size choices; a product can
+  use both options, one or none;
+- the extra filter (here "Dress style": Casual, Formal, Party, Gym) and its pictures;
+- shop-specific wording (home page rows, empty cart, contact page, search examples);
+- **extras, off for Shop.co:** a **warranty** line on products (electricals), a **heavy-item
+  delivery fee** per zone for products ticked as heavy (furniture, appliances; migration 031), and
+  an **age confirmation at checkout** for listed categories or products ticked "Adults only"
+  (drinks; the confirmation time is kept on the order and shown in the admin; migration 032).
+
+The API refuses to start without a readable settings file, with a plain message saying so.
+
+**The store editions.** Six more shops are made from this same code with only this file, their own
+demo products and pictures changed: SCENT.CO (perfume), GLOW.CO (skincare), CROWN.CO (hair),
+CRATE.CO (snacks and drinks, age check on), CARAT.CO (jewellery) and VOLT.CO (electricals,
+warranty and heavy-item delivery on). They live beside this project in `Domain-sites`, and a fix is
+made once in `_template` and carried to every shop with `_tools/sync-all.py`. All of them pass the
+same automated checks; the checks pin the clothing settings so they mean the same in every copy.
+
+**Demo sales figures.** A demo catalogue can give a product a starting "units sold" figure
+(`units_sold_start`); real paid orders are added on top, so the first real sale no longer wipes it.
+Products an owner creates start at 0.
+
 ## 7. Built not to break: the careful planning
 
 Each risk below was thought through, built against, and **tested**. This is the heart of the
@@ -1564,9 +1601,9 @@ proposal.
 
 **Proof in numbers:**
 
-- **1,823 automated backend checks** in 25 test suites. They run against a throw-away database
+- **2,192 automated backend checks** in 29 test suites. They run against a throw-away database
   that is created and deleted on every run, so real data, buckets and Redis are never touched.
-- Plus 79 storefront unit tests, type checks, lint and a production build. They are run by hand
+- Plus 117 storefront unit tests, type checks, lint and a production build. They are run by hand
   before changes are finished; there is no automatic build server yet.
 - **The release gate passed every check** on 30 October 2026, on an isolated copy with stand-ins for
   the payment and email services and nothing deployed. Later full reviews found and fixed more
@@ -1687,7 +1724,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 | 4 | An envelope that waits, retries and arrives | "Emails queue, retry and arrive once." |
 | 5 | A clean-up button behind a password field and an emailed code | "No clean-up without your password and an emailed code." |
 | 6 | A calendar with a backup box every night, flying to a cloud | "Daily backups, copied off the server, with a careful restore." |
-| 7 | A counter climbing: 1,823 ✓ | "Over 1,800 automated backend checks." |
+| 7 | A counter climbing: 2,192 ✓ | "Over 2,000 automated backend checks." |
 | 8 | Graph: 3,481 orders in 3 minutes, 0 errors | "Load-tested: thousands of orders, zero errors." |
 
 ### 9.4 Production notes (suggestions)
@@ -1727,7 +1764,7 @@ Animated, not screen-recorded. Use the real numbers from section 8.
 > orders, refunds, promotions, newsletters and reports. It is engineered like a much larger
 > system: no overselling, every payment applied exactly once, no lost order emails, daily backups
 > copied off the server, full audit trail. It has been load-tested at thousands of orders with zero
-> errors, and checked by over 1,600 automated backend tests.
+> errors, and checked by over 2,000 automated backend tests.
 
 ### 10.2 Selling points
 
@@ -1910,3 +1947,4 @@ When something changes, update the matching section in the same commit:
 | 10 Nov 2026 | **Full review of storefront and admin** (code read end to end and every screen looked at on a phone and a laptop, light and dark). Fixed, among about 90 findings: **the owner can no longer be removed by staff** (first admin = Owner; migration 027); the shipping queue could offer "Mark delivered" on a paid order while a tab was loading; a shopper's own unpaid order could block their next checkout ("only 0 available"), it is now released first; changing colour could silently swap the chosen size; the newsletter went to sign-ups whose email was never confirmed; a customer's unsubscribe could be undone from the footer form; alerts kept going to a removed admin named in "Send admin alerts to"; passwords could land in the error log's stack traces; one shared, count-first limit for password re-checks; lists said "nothing here" while a new filter loaded; stock adjustments now report the real figure; an admin's cached screens are cleared when the session ends; forms no longer lose typing when fresh data arrives. Screens: orders and payments stay tables on a laptop (cards only on phones); dark-mode tick boxes, focus rings and dialog backdrops; loading placeholders shaped like the page; delivery fees as cards on phones; the phone purchase bar hides while the page's own Add to Cart is on screen; product cards line up (two-line names, old price under the price); empty cart without a zero summary; WhatsApp messages state the exact amount. |
 | 10 Nov 2026 | **Demo polish.** Admin: a search box in the top bar finds orders, customers and products from any screen; the orders list and shipping queue refresh by themselves every minute; closing a product, category, banner, zone or promo form with unsaved changes asks "Discard your changes?". Storefront: a search that finds nothing says so in its own words with a way on; colours in the filter are named; each size has one name (the editor now offers S, M, L, XL...; migration 028 renames options saved as Small, Medium, Large... where that causes no clash). Checkout already fills in a signed-in customer's saved address. |
 | 11 Nov 2026 | **Stock can't be held by orders nobody pays for:** at most 2 unpaid orders per customer at a time, counted by account, email, phone and device (store setting, migration 029), and shorter payment windows: 30 minutes for card or transfer, 6 hours for WhatsApp (were 60 minutes and 24 hours). **Refunds show on the sales chart** (red part of the day's bar, a Refunded column in its table) and as their own Analytics card; refunds recorded but not completed are listed as pending. **Shared links carry a picture:** a product link shows the product, the shop's link shows the hero picture, as a JPEG that WhatsApp accepts. 1,887 backend checks |
+| 19 Nov 2026 | **Shop.co brought level with the store editions.** One settings file (`backend/config/shop.json`, section 6.11) now holds everything that makes this a clothing shop; the same code runs SCENT.CO, GLOW.CO, CROWN.CO, CRATE.CO, CARAT.CO and VOLT.CO. Brought in from the 12 Nov cross-check: optional product specifications, unique automatic SKUs, a removed choice keeps its stock when added back, reserved "Standard"/"Default" refused as real choices, exact colour filter, demo sales figures that survive real orders, clearer sold-out message, option lines on payment, WhatsApp and Track order. Extras that stay off for Shop.co: warranty, heavy-item delivery fee, age confirmation. Visible wording: "Colour" (was "Color"), "Dress style", "Product details" when a product has no specifications, footer "Built by KharizDigital". Migrations 030-032 (columns only). 2,192 backend checks in 29 suites, 117 storefront tests |

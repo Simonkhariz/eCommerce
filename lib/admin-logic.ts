@@ -135,6 +135,42 @@ export function zoneOverlaps(zones: Array<{ name: string; is_active: boolean; st
   return Array.from(byState, ([state, names]) => ({ state, zones: names })).filter((o) => o.zones.length > 1);
 }
 
+/**
+ * What is wrong with each variant row's pair of options (already trimmed, '' = the product does
+ * not use that option). A row with neither option is fine only when it is the product's one row,
+ * and a pair may be listed once (the first row keeps it, later rows are the duplicates).
+ */
+export function optionPairProblems(pairs: Array<[string, string]>): Array<'empty' | 'duplicate' | null> {
+  const seen = new Set<string>();
+  return pairs.map(([first, second]) => {
+    if (!first && !second) return pairs.length > 1 ? 'empty' : null;
+    const key = `${first.toLowerCase()}|${second.toLowerCase()}`;
+    if (seen.has(key)) return 'duplicate';
+    seen.add(key);
+    return null;
+  });
+}
+
+/**
+ * The choice a typed value means, whatever its capitals and spaces ("50 ML" is "50ml"), so one
+ * choice is never saved under two spellings. null when the value is empty or not in the list.
+ */
+export function listedChoice(value: string, choices: string[]): string | null {
+  const key = (text: string) => text.replace(/\s+/g, '').toLowerCase();
+  const typed = key(value);
+  if (typed === '') return null;
+  return choices.find((choice) => key(choice) === typed) ?? null;
+}
+
+/**
+ * The specification rows worth saving: trimmed, without the rows that have no value (a suggested
+ * name nobody filled in). `unnamed` counts the rows with a value but no name, which the form refuses.
+ */
+export function specificationRows(rows: Array<{ name: string; value: string }>): { rows: Array<{ name: string; value: string }>; unnamed: number } {
+  const filled = rows.map((r) => ({ name: r.name.trim(), value: r.value.trim() })).filter((r) => r.value !== '');
+  return { rows: filled.filter((r) => r.name !== ''), unnamed: filled.filter((r) => r.name === '').length };
+}
+
 /** Sort the results of uploading several files at once: what worked, and what failed by name. */
 export function splitUploads<F extends { name: string }, R>(
   files: F[],

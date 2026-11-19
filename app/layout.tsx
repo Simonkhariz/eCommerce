@@ -1,3 +1,4 @@
+import { SHOP } from '@/lib/shop';
 import type { Metadata } from 'next';
 import localFont from 'next/font/local';
 import './globals.css';
@@ -41,9 +42,18 @@ const spaceGrotesk = localFont({
 // already open follow changes through StoreLiveUpdates (components/layout/StoreShell.tsx).
 export const dynamic = 'force-dynamic';
 
-const SITE_TITLE = 'SHOP.CO | Find Clothes That Match Your Style';
-const SITE_DESCRIPTION =
-  'Browse through our diverse range of meticulously crafted garments, designed to bring out your individuality and cater to your sense of style.';
+const SITE_TITLE = SHOP.title;
+// The shop's colours as CSS variables on <html>: every bg-accent, bg-surface, bg-card and bg-hero
+// class reads them (tailwind.config.js).
+const THEME_STYLE = {
+  '--accent': SHOP.theme.accent,
+  '--accent-hover': SHOP.theme.accentHover,
+  '--accent-ink': SHOP.theme.accentInk,
+  '--surface': SHOP.theme.surface,
+  '--card': SHOP.theme.card,
+  '--hero': SHOP.theme.hero,
+} as React.CSSProperties;
+const SITE_DESCRIPTION = SHOP.description;
 
 /**
  * A shared link to the shop shows the hero picture (WhatsApp, Facebook, X and the rest read
@@ -51,14 +61,14 @@ const SITE_DESCRIPTION =
  * base. A product page replaces the picture with the product's (app/products/[id]/page.tsx).
  */
 export async function generateMetadata(): Promise<Metadata> {
-  const picture = { url: '/share/home', width: SHARE_WIDTH, height: SHARE_HEIGHT, type: 'image/jpeg', alt: 'SHOP.CO' };
+  const picture = { url: '/share/home', width: SHARE_WIDTH, height: SHARE_HEIGHT, type: 'image/jpeg', alt: SHOP.name };
   return {
     metadataBase: new URL(await siteOrigin()),
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
     openGraph: {
       type: 'website',
-      siteName: 'SHOP.CO',
+      siteName: SHOP.name,
       title: SITE_TITLE,
       description: SITE_DESCRIPTION,
       images: [picture],
@@ -87,8 +97,8 @@ export default async function RootLayout({
     // suppressHydrationWarning: the admin's dark mode is set on <html> before React loads
     // (app/admin/layout.tsx), so its class differs from the server's on purpose. Only this
     // element's own attributes are exempt; the rest of the page is still checked.
-    <html lang="en" className={`${satoshi.variable} ${spaceGrotesk.variable}`} suppressHydrationWarning>
-      <body className="min-h-screen flex flex-col bg-white text-black antialiased selection:bg-black selection:text-white">
+    <html lang="en" className={`${satoshi.variable} ${spaceGrotesk.variable}`} style={THEME_STYLE} suppressHydrationWarning>
+      <body className="min-h-screen flex flex-col bg-white text-black antialiased selection:bg-accent selection:text-accent-ink">
         <QueryProvider>
           <StoreDataProvider seed={{ facets, shipping, payments, version }}>
             <AuthProvider>

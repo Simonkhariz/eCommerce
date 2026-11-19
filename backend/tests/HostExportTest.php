@@ -89,7 +89,8 @@ $t->ok('no MariaDB-only way of adding columns', !preg_match('/ADD COLUMN IF NOT 
 $t->ok('no address of this PC', !str_contains($sql, '127.0.0.1:3000'));
 
 $t->section('It loads into a new empty database and gives a working shop');
-$hostDb = 'shopco_hostexport_test';
+// Named after this run's test database, so several shop copies on one PC never share it.
+$hostDb = preg_replace('/[^A-Za-z0-9_]/', '', (string) \App\Config\Env::get('DB_DATABASE', 'shopco_test')) . '_hostexport';
 $t->sql("DROP DATABASE IF EXISTS `{$hostDb}`");
 $t->sql("CREATE DATABASE `{$hostDb}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
 $proc = proc_open([PHP_BINARY, BASE_PATH . '/scripts/restore_database.php', "--file={$file}", "--database={$hostDb}"], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, BASE_PATH);

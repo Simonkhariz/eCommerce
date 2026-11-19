@@ -298,6 +298,15 @@ keep the Node.js app from being put to sleep by the host.
    over it, then **Restart** in Setup Node.js App.
 4. Don't update during a client demo: pages can fail for a few minutes.
 
+## Hosting the six store editions (not done; recommendation of 19 Nov 2026)
+
+Truehost Starter has 1 GB of memory and each storefront measured 140-225 MB, so it holds Shop.co
+but not seven shops. When the editions (SCENT.CO, GLOW.CO, CROWN.CO, CRATE.CO, CARAT.CO, VOLT.CO)
+should go online, use one small Linux VPS (2-4 GB) running all seven, each on its own subdomain
+of `kharizdigital.com.ng`. `deploy/oracle/` (setup, deploy, nginx, systemd, cron) works on any
+Ubuntu VPS and is the starting point for a deploy-all script. Folding all shops into one hosted
+app would be a large rework and is not advised for demos.
+
 ## Problems met and their fixes
 
 | Date | Problem | Fix |
@@ -314,6 +323,7 @@ keep the Node.js app from being put to sleep by the host.
 
 | Date | Done |
 |---|---|
+| 19 Nov 2026 | **Prepared, not uploaded yet** (API first, then storefront; goes up with any earlier release in this log still marked "not uploaded"): Shop.co brought level with the store editions (one settings file, product specifications, unique automatic SKUs, the cross-check fixes of 12 Nov, "Built by KharizDigital" footer). **Database update:** migrations 030, 031 and 032 add columns only (product specifications, warranty, heavy-item flag and zone fee, adults-only flag, starting sales figure, age confirmation time); no data changed. Run the update check from step 3.6 once after uploading the API. **New file the API needs:** `backend/config/shop.json` (inside the API zip; the API refuses to start without it, with a plain message). **`.env`:** nothing to add. **Storefront:** the shop's name and colours are now built in from the same file, so rebuild the storefront zip after any change to it. Shoppers will see "Colour" (was "Color") and "Product details" (was "Specifications") on product pages; no other visible change. **Check after upload:** `/api/v1/health`, the homepage, a product page, and one test order to the payment page |
 | 11 Nov 2026 | **Prepared, not uploaded yet** (goes up together with the 10 Nov release below, API first): unpaid-order cap and shorter payment windows, refunds on the sales chart, pictures on shared links. Database update: migration 029 adds two columns and one index to `orders` and the setting `max_unpaid_orders` = 2; no data changed. Run the update check from step 3.6 once after uploading the API (six migrations in all, 024 to 029). **`.env`:** nothing to add; the windows are now 30 minutes and 6 hours by default. If the live `.env` has `ORDER_PAYMENT_WINDOW_MINUTES` or `ORDER_MANUAL_PAYMENT_WINDOW_HOURS`, those lines win: delete them or set 30 and 6. **Storefront:** no new setting needed, the shop works out its own address for share pictures (`SITE_URL=https://shopco.kharizdigital.com.ng` can be added in Setup Node.js App if a preview ever shows the wrong address). No new cron job. **Check after upload:** open `https://shopco.kharizdigital.com.ng/share/home` (a picture must show), then send the shop's link and a product link to yourself on WhatsApp. WhatsApp keeps old previews for days: add `?v=2` to the link to see a fresh one |
 | 10 Nov 2026 | **Prepared, not uploaded yet:** API + storefront release with a database update (migration 024: indexes only, no data changed; migration 025: starting ratings, adds two product columns and the 4.5 default, then recomputes every product's stars; migration 026: one new column on the activity log so a deleted admin's name stays on their past actions; migration 027: the oldest active admin becomes the Owner, whom other admins cannot switch off or delete; migration 028: sizes saved with long names become S, M, L, XL...). Order: API zip first → run the migrate cron once (step 3.6) and check `migrate.log` says 024 to 028 applied (5 migrations); then open My account -> Admin team and check that the Owner is your own account → storefront zip → Restart. Then: Settings → "Send admin alerts to" if alerts should go somewhere other than the admin accounts; My account can now change the sign-in email (needs the password) and add admins |
 | 7 Nov 2026 | Bought Truehost Starter and `kharizdigital.com.ng`; created both subdomains; host check passed; upload files built |

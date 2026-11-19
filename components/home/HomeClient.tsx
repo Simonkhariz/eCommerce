@@ -10,6 +10,7 @@ import { BrowseByDressStyle } from '@/components/home/BrowseByDressStyle';
 import { CustomerReviews } from '@/components/home/CustomerReviews';
 import { getHomepageData, mapApiProductToStorefront, HomepageData } from '@/lib/api-client';
 import { Product } from '@/types';
+import { SHOP } from '@/lib/shop';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Alert02Icon, RefreshIcon } from '@hugeicons/core-free-icons';
 
@@ -135,20 +136,20 @@ export function HomeClient({ initial = null }: { initial?: HomepageData | null }
         )}
 
         {/* 3. Featured: the products the admin ticked (hidden when there are none) */}
-        {homepageData && <ProductSection title="FEATURED" products={featured} viewAllHref="/category?featured=true" />}
+        {homepageData && <ProductSection title={SHOP.wording.featured} products={featured} viewAllHref="/category?featured=true" />}
 
         {/* 4. New Arrivals */}
         {homepageData && (
-          <ProductSection title="NEW ARRIVALS" products={newArrivals} viewAllHref="/category?sort=newest" hasDivider={true} />
+          <ProductSection title={SHOP.wording.newArrivals} products={newArrivals} viewAllHref="/category?sort=newest" hasDivider={true} />
         )}
 
         {/* 5. Top Selling: only products that have really sold (hidden until something has) */}
-        {homepageData && <ProductSection title="TOP SELLING" products={topSelling} viewAllHref="/category" hasDivider={false} />}
+        {homepageData && <ProductSection title={SHOP.wording.topSelling} products={topSelling} viewAllHref="/category" hasDivider={false} />}
 
         {/* 6. Categories (real counts) */}
         <CategoryGrid categories={homepageData?.categories} />
 
-        {/* 7. Dress styles that exist in the catalogue */}
+        {/* 7. The styles that exist in the catalogue (nothing when the shop has the style filter off) */}
         <BrowseByDressStyle />
 
         {/* 8. Approved customer reviews (hidden when there are none) */}

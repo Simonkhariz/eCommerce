@@ -123,14 +123,14 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout, isChecki
                   placeholder="Add promo code"
                   aria-invalid={promoError ? true : undefined}
                   aria-describedby={promoError ? 'promo-code-error' : undefined}
-                  className="w-full bg-[#F0F0F0] text-black placeholder:text-neutral-500 text-sm rounded-full pl-12 pr-4 py-3 sm:py-3.5 focus:outline-none focus:ring-2 focus:ring-black"
+                  className="w-full bg-surface text-black placeholder:text-neutral-500 text-sm rounded-full pl-12 pr-4 py-3 sm:py-3.5 focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={isApplying}
-                className="bg-black text-white hover:bg-neutral-800 disabled:opacity-50 text-sm font-semibold px-6 sm:px-8 py-3 sm:py-3.5 rounded-full transition-colors shrink-0"
+                className="bg-accent text-accent-ink hover:bg-accent-hover disabled:opacity-50 text-sm font-semibold px-6 sm:px-8 py-3 sm:py-3.5 rounded-full transition-colors shrink-0"
               >
                 {isApplying ? 'Applying…' : 'Apply'}
               </button>
@@ -148,7 +148,7 @@ export const OrderSummary: React.FC<OrderSummaryProps> = ({ onCheckout, isChecki
         type="button"
         disabled={items.length === 0 || isChecking}
         onClick={onCheckout}
-        className="w-full bg-black text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-black font-semibold py-4 rounded-full transition-all shadow-lg flex items-center justify-center gap-2 text-sm sm:text-base group"
+        className="w-full bg-accent text-accent-ink hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-accent font-semibold py-4 rounded-full transition-all shadow-lg flex items-center justify-center gap-2 text-sm sm:text-base group"
       >
         <span>{isChecking ? 'Checking your cart…' : 'Go to checkout'}</span>
         <HugeiconsIcon

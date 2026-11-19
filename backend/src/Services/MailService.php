@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Config\Env;
+use App\Config\Shop;
 use App\Database\Database;
 use App\Support\DevSwitches;
 use App\Support\Response;
@@ -852,6 +853,12 @@ class MailService
         return ['id' => $id, 'status' => $status, 'error' => $error];
     }
 
+    /** A value from an order line's saved options as text ('' when it is missing or not text). */
+    private static function optionText(mixed $value): string
+    {
+        return is_string($value) || is_int($value) || is_float($value) ? trim((string) $value) : '';
+    }
+
     /**
      * Everything the order templates need, read from the committed order.
      *
@@ -890,7 +897,10 @@ class MailService
             $opts = json_decode((string) ($item['variant_options'] ?? ''), true) ?: [];
             $items[] = [
                 'name' => (string) $item['item_name'],
-                'options' => implode(' / ', array_filter([$opts['size'] ?? null, $opts['color'] ?? $opts['color_name'] ?? null])),
+                // Only the options the product really uses: the "none" words are never shown.
+                'options' => Shop::optionsText(self::optionText($opts['size'] ?? null), self::optionText($opts['color'] ?? $opts['color_name'] ?? null)),
+                // The warranty the item was sold with (kept on the order line when the shop offers warranties).
+                'warranty' => self::optionText($opts['warranty'] ?? null),
                 'quantity' => (int) $item['quantity'],
                 'line_total' => (float) $item['line_total'],
             ];

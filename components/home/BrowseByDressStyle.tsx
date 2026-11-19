@@ -3,15 +3,22 @@
 import React from 'react';
 import Link from 'next/link';
 import Image from '@/components/ui/StoreImage';
-import { DRESS_STYLE_IMAGES } from '@/lib/dress-styles';
+import { DRESS_STYLE_IMAGES, styleTileSpan } from '@/lib/dress-styles';
 import { useStoreNav } from '@/lib/use-store-info';
+import { SHOP } from '@/lib/shop';
 
-/** Alternating tile widths (out of 12 columns) for the mosaic layout. */
-const SPANS = ['md:col-span-4', 'md:col-span-8', 'md:col-span-8', 'md:col-span-4'];
+/** The mosaic's tile widths (out of 12 columns), and how wide each shows its picture. */
+const SPAN_CLASS = { 4: 'md:col-span-4', 8: 'md:col-span-8', 12: 'md:col-span-12' } as const;
+const SPAN_SIZES = {
+  4: '(max-width: 768px) 100vw, 33vw',
+  8: '(max-width: 768px) 100vw, 66vw',
+  12: '100vw',
+} as const;
 
 /**
- * Dress-style tiles, only for styles that actually exist in the published catalogue.
- * Each tile links to the catalogue filtered by that style (?style=…).
+ * Style tiles ("dress style" in the template; the shop's own name for it elsewhere), only for
+ * styles that actually exist in the published catalogue. Each tile links to the catalogue
+ * filtered by that style (?style=…). A shop with the style filter off has no styles, so no section.
  */
 export const BrowseByDressStyle: React.FC = () => {
   // Shared with the header and footer (sent with the page, or loaded once).
@@ -24,16 +31,18 @@ export const BrowseByDressStyle: React.FC = () => {
   return (
     <section className="py-8 sm:py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-[#F0F0F0] rounded-3xl p-6 sm:p-12 lg:p-16">
+        <div className="bg-surface rounded-3xl p-6 sm:p-12 lg:p-16">
           <h2 className="font-integral text-2xl sm:text-4xl lg:text-5xl text-center text-black mb-8 sm:mb-14 tracking-tight">
-            BROWSE BY DRESS STYLE
+            {SHOP.style.browseTitle}
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6">
             {styles.map((style, idx) => {
               const slug = style.toLowerCase();
               const image = DRESS_STYLE_IMAGES[slug];
-              const span = styles.length === 1 ? 'md:col-span-12' : SPANS[idx % SPANS.length];
+              // Two tiles to a row; a last tile on its own takes the whole row (lib/dress-styles.ts).
+              const width = styleTileSpan(idx, styles.length);
+              const span = SPAN_CLASS[width];
               return (
                 <Link
                   key={style}
@@ -46,7 +55,7 @@ export const BrowseByDressStyle: React.FC = () => {
                         src={image}
                         alt=""
                         fill
-                        sizes={span === 'md:col-span-4' ? '(max-width: 768px) 100vw, 33vw' : '(max-width: 768px) 100vw, 66vw'}
+                        sizes={SPAN_SIZES[width]}
                         className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/30 pointer-events-none" />

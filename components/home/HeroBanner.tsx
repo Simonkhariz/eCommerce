@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { ApiBanner, ApiPromotion, HomepageData } from '@/lib/api-client';
 import { PromoTag } from '@/components/home/PromoCode';
 import { canOptimizeImage } from '@/lib/image';
+import { SHOP } from '@/lib/shop';
 
 interface HeroBannerProps {
   banners?: ApiBanner[];
@@ -19,17 +20,20 @@ const ALL_STATES_AND_FCT = 37;
 /** How long each slide stays (the progress bar runs for this long). */
 const SLIDE_MS = 6000;
 
+/** The shop's own slide (backend/config/shop.json), shown whole when the owner has set no banner and filling the gaps of one that has no text. */
 const DEFAULT_SLIDE = {
-  title: 'FIND CLOTHES THAT MATCH YOUR STYLE',
-  subtitle:
-    'Browse through our diverse range of meticulously crafted garments, designed to bring out your individuality and cater to your sense of style.',
-  ctaText: 'Shop Now',
+  title: SHOP.hero.title,
+  subtitle: SHOP.hero.subtitle,
+  ctaText: SHOP.hero.cta,
   ctaUrl: '/category',
-  imageUrl: '/images/hero/african_models_hero.webp',
+  imageUrl: SHOP.hero.image,
 };
 
-/** The store's own cut-out hero art stands on the brand strip; any other picture is a photo card. */
-const isCutout = (src: string) => src.startsWith('/images/hero/');
+/**
+ * The shop's own hero art, when it is a cut-out (hero.cutout), stands on the brand strip; any
+ * other picture is a photo card.
+ */
+const isCutout = (src: string) => SHOP.hero.cutout && src === SHOP.hero.image;
 const twoDigits = (n: number) => String(n).padStart(2, '0');
 
 /**
@@ -86,12 +90,12 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
             aria-current={idx === active ? 'true' : undefined}
             className="group px-[3px] py-3 focus:outline-none"
           >
-            <span className="relative block h-[3px] w-6 overflow-hidden rounded-full bg-black/15 transition-colors group-hover:bg-black/30 group-focus-visible:ring-2 group-focus-visible:ring-black group-focus-visible:ring-offset-2 sm:w-9">
+            <span className="relative block h-[3px] w-6 overflow-hidden rounded-full bg-black/15 transition-colors group-hover:bg-black/30 group-focus-visible:ring-2 group-focus-visible:ring-accent group-focus-visible:ring-offset-2 sm:w-9">
               {idx === active && (
                 // A new key restarts the bar; when it is full the next slide comes.
                 <span
                   key={`${s.key}-${active}`}
-                  className="hero-progress absolute inset-0 rounded-full bg-black"
+                  className="hero-progress absolute inset-0 rounded-full bg-accent"
                   style={{ animationPlayState: paused ? 'paused' : 'running', ['--hero-slide-ms' as string]: `${SLIDE_MS}ms` }}
                   onAnimationEnd={() => go(1)}
                 />
@@ -108,7 +112,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
           type="button"
           onClick={() => go(-1)}
           aria-label="Previous banner"
-          className="rounded-full p-2 text-neutral-600 transition-colors hover:text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
+          className="rounded-full p-2 text-neutral-600 transition-colors hover:text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           <ChevronLeft className="h-[18px] w-[18px]" aria-hidden="true" />
         </button>
@@ -116,7 +120,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
           type="button"
           onClick={() => go(1)}
           aria-label="Next banner"
-          className="rounded-full p-2 text-neutral-600 transition-colors hover:text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
+          className="rounded-full p-2 text-neutral-600 transition-colors hover:text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           <ChevronRight className="h-[18px] w-[18px]" aria-hidden="true" />
         </button>
@@ -126,7 +130,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
 
   return (
     <section
-      className="relative flex flex-1 overflow-hidden bg-[#F2F0F1]"
+      className="relative flex flex-1 overflow-hidden bg-hero"
       aria-roledescription={count > 1 ? 'carousel' : undefined}
       aria-label="Featured"
       onMouseEnter={() => setHovered(true)}
@@ -165,7 +169,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ banners = [], promotions
                     <Link
                       href={s.ctaUrl}
                       tabIndex={shown ? undefined : -1}
-                      className={`${activePromo ? 'shrink-0 px-6 sm:px-12' : 'w-full px-12'} rounded-full bg-black py-3.5 text-center text-sm font-semibold text-white shadow-lg transition-all hover:bg-neutral-800 active:scale-95 sm:w-auto sm:py-4 sm:text-base`}
+                      className={`${activePromo ? 'shrink-0 px-6 sm:px-12' : 'w-full px-12'} rounded-full bg-accent py-3.5 text-center text-sm font-semibold text-accent-ink shadow-lg transition-all hover:bg-accent-hover active:scale-95 sm:w-auto sm:py-4 sm:text-base`}
                     >
                       {s.ctaText}
                     </Link>

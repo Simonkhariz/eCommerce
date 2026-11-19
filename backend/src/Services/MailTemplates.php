@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Config\Env;
+use App\Config\Shop;
 use App\Database\Database;
 use InvalidArgumentException;
 
@@ -39,17 +40,22 @@ final class MailTemplates
     private string $frontendUrl;
     /** @var array{name: string, email: string, phone: string, whatsapp: string} */
     private array $store;
+    /** The shop's own colour (config/shop.json, theme.accent) for the wordmark and buttons, and the text on it. */
+    private string $accent;
+    private string $accentInk;
 
     public function __construct(?Database $db = null)
     {
         $this->frontendUrl = Env::frontendUrl();
+        $this->accent = Shop::colour('accent', '#000000');
+        $this->accentInk = Shop::colour('accentInk', '#ffffff');
         $settings = array_column(($db ?? Database::getInstance())->fetchAll(
             "SELECT `key_name`, `value` FROM `store_settings`
              WHERE `key_name` IN ('store_name', 'store_contact_email', 'store_contact_phone', 'store_whatsapp_phone')"
         ), 'value', 'key_name');
 
         $this->store = [
-            'name' => trim((string) ($settings['store_name'] ?? '')) ?: 'SHOP.CO',
+            'name' => trim((string) ($settings['store_name'] ?? '')) ?: Shop::name(),
             'email' => trim((string) ($settings['store_contact_email'] ?? '')),
             'phone' => trim((string) ($settings['store_contact_phone'] ?? '')),
             'whatsapp' => trim((string) ($settings['store_whatsapp_phone'] ?? '')) ?: trim((string) Env::get('STORE_WHATSAPP_PHONE', '')),
@@ -517,9 +523,9 @@ final class MailTemplates
     // -------------------------------------------------------------------------
 
     /*
-     * The look follows the storefront: white page cards on #F0F0F0, the black SHOP.CO wordmark,
+     * The look follows the storefront: white page cards on #F0F0F0, the store's wordmark in its accent colour,
      * bold uppercase headings (Space Grotesk where the mail app loads it, else a heavy Arial),
-     * 20px rounded panels with a faint black border, black pill buttons and red (#FF3333) for
+     * 20px rounded panels with a faint black border, accent pill buttons and red (#FF3333) for
      * discounts and warnings. Tables and inline styles only, because mail apps drop most CSS.
      */
     private const HEADING_FONT = "'Space Grotesk','Arial Black',Arial,Helvetica,sans-serif";
@@ -533,6 +539,7 @@ final class MailTemplates
         $home = $this->e($this->frontendUrl !== '' ? $this->frontendUrl : '#');
         $hf = self::HEADING_FONT;
         $bf = self::BODY_FONT;
+        $accent = $this->accent;
         // The grey preview line under the subject in most inboxes: the first sentences, not the greeting.
         $preview = trim((string) preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(str_replace(['</p>', '<br>'], ' ', $body)), ENT_QUOTES, 'UTF-8')));
         $preview = $this->e(mb_substr((string) preg_replace('/^Hi [^,]{1,60},\s*/u', '', $preview), 0, 140));
@@ -554,7 +561,7 @@ final class MailTemplates
       <tr><td style="background:#ffffff;border:1px solid #E6E6E6;border-radius:20px">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr><td style="padding:24px 28px;border-bottom:1px solid #E6E6E6">
-            <a href="{$home}" style="font-family:{$hf};font-size:28px;font-weight:700;letter-spacing:-1px;text-transform:uppercase;color:#000000;text-decoration:none">{$name}</a>
+            <a href="{$home}" style="font-family:{$hf};font-size:28px;font-weight:700;letter-spacing:-1px;text-transform:uppercase;color:{$accent};text-decoration:none">{$name}</a>
           </td></tr>
           <tr><td style="padding:28px;font-size:16px;line-height:1.55;color:#000000">
             <h1 style="margin:0 0 18px;font-family:{$hf};font-size:28px;line-height:1.1;font-weight:700;text-transform:uppercase;letter-spacing:-0.5px;color:#000000">{$headingE}</h1>
@@ -585,8 +592,10 @@ HTML;
         if ($this->store['whatsapp'] !== '' && $this->store['whatsapp'] !== $this->store['phone']) {
             $contact[] = 'WhatsApp ' . $this->e($this->store['whatsapp']);
         }
-        return '<div style="font-family:' . $hf . ';font-size:20px;font-weight:700;letter-spacing:-0.5px;text-transform:uppercase;color:#000000">' . $name . '</div>'
-            . '<div style="margin:6px 0 0">Clothes that suit your style and that you&#39;re proud to wear, delivered across Nigeria.</div>'
+        // The line under the name comes from config/shop.json; a shop without one has no such line.
+        $tagline = trim(Shop::tagline());
+        return '<div style="font-family:' . $hf . ';font-size:20px;font-weight:700;letter-spacing:-0.5px;text-transform:uppercase;color:' . $this->accent . '">' . $name . '</div>'
+            . ($tagline !== '' ? '<div style="margin:6px 0 0">' . $this->e($tagline) . '</div>' : '')
             . ($contact !== [] ? '<div style="margin:8px 0 0">' . implode(' &middot; ', $contact) . '</div>' : '')
             . '<div style="margin:12px 0 0;color:#999999">&copy; ' . date('Y') . ' ' . $name . '. All rights reserved.</div>';
     }
@@ -611,8 +620,8 @@ HTML;
 
     private function button(string $url, string $label): string
     {
-        return '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0"><tr><td style="background:#000000;border-radius:62px">'
-            . '<a href="' . $this->e($url) . '" style="display:inline-block;padding:16px 40px;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;border-radius:62px">' . $this->e($label) . '</a>'
+        return '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0"><tr><td style="background:' . $this->accent . ';border-radius:62px">'
+            . '<a href="' . $this->e($url) . '" style="display:inline-block;padding:16px 40px;color:' . $this->accentInk . ';text-decoration:none;font-weight:600;font-size:15px;border-radius:62px">' . $this->e($label) . '</a>'
             . '</td></tr></table>';
     }
 
@@ -641,10 +650,12 @@ HTML;
         $last = count($items) - 1;
         foreach (array_values($items) as $i => $item) {
             $options = trim((string) ($item['options'] ?? ''));
+            $warranty = trim((string) ($item['warranty'] ?? ''));
             $line = $i === $last ? '' : 'border-bottom:1px solid #E6E6E6;';
             $rows .= '<tr>'
                 . '<td style="padding:14px 0;' . $line . 'vertical-align:top"><span style="font-weight:700;font-size:15px">' . $this->e((string) $item['name']) . '</span>'
                 . ($options !== '' ? '<br><span style="color:#666666;font-size:13px">' . $this->e($options) . '</span>' : '')
+                . ($warranty !== '' ? '<br><span style="color:#666666;font-size:13px">Warranty: ' . $this->e($warranty) . '</span>' : '')
                 . '</td>'
                 . '<td style="padding:14px 8px;' . $line . 'text-align:center;white-space:nowrap;vertical-align:top;color:#666666;font-size:14px">&times; ' . (int) $item['quantity'] . '</td>'
                 . '<td style="padding:14px 0;' . $line . 'text-align:right;white-space:nowrap;vertical-align:top;font-weight:700;font-size:15px">' . $this->e($this->money($item['line_total'], $currency)) . '</td>'
@@ -660,8 +671,10 @@ HTML;
         $out = '';
         foreach ($items as $item) {
             $options = trim((string) ($item['options'] ?? ''));
+            $warranty = trim((string) ($item['warranty'] ?? ''));
             $out .= '- ' . $item['name'] . ($options !== '' ? " ({$options})" : '') . ' x' . (int) $item['quantity']
-                . '  ' . $this->money($item['line_total'], (string) ($p['currency'] ?? 'NGN')) . "\n";
+                . '  ' . $this->money($item['line_total'], (string) ($p['currency'] ?? 'NGN')) . "\n"
+                . ($warranty !== '' ? "  Warranty: {$warranty}\n" : '');
         }
         return $out === '' ? '' : $out . "\n";
     }

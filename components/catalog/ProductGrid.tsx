@@ -3,6 +3,7 @@ import { Product, FilterState } from '@/types';
 import { ProductCard } from '@/components/ui/ProductCard';
 import { formatPrice } from '@/lib/currency';
 import { catalogShowingLabel, EMPTY_FILTERS, hasActiveFilters } from '@/lib/catalog-query';
+import { SHOP } from '@/lib/shop';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   SlidersHorizontalIcon,
@@ -17,7 +18,9 @@ import {
 interface ProductGridProps {
   products: Product[];
   totalCount: number;
-  categoryTitle: string;
+  categoryTitle: React.ReactNode;
+  /** The chosen style as the shop wrote it (the filters hold the address form, in lower case). */
+  styleLabel?: string | null;
   filters: FilterState;
   onFilterChange: (newFilters: Partial<FilterState>) => void;
   onReset: () => void;
@@ -60,6 +63,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   products,
   totalCount,
   categoryTitle,
+  styleLabel,
   filters,
   onFilterChange,
   onReset,
@@ -98,7 +102,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           <button
             type="button"
             onClick={onOpenMobileFilters}
-            className="lg:hidden p-2.5 bg-[#F0F0F0] rounded-full text-black hover:bg-neutral-200 transition-colors flex items-center justify-center"
+            className="lg:hidden p-2.5 bg-surface rounded-full text-black hover:bg-neutral-200 transition-colors flex items-center justify-center"
             aria-label="Open filters"
           >
             <HugeiconsIcon icon={SlidersHorizontalIcon} size={20} aria-hidden="true" />
@@ -111,7 +115,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
                 id="catalog-sort"
                 value={filters.sortBy}
                 onChange={(e) => onFilterChange({ sortBy: e.target.value as FilterState['sortBy'] })}
-                className="appearance-none bg-transparent font-semibold text-black pr-6 py-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-black rounded"
+                className="appearance-none bg-transparent font-semibold text-black pr-6 py-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded"
               >
                 <option value="most-popular">Best selling</option>
                 <option value="newest">Newest</option>
@@ -131,12 +135,14 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <span className="text-xs font-semibold text-neutral-700 mr-1">Active:</span>
           {filters.category && <Chip label={filters.category.replace(/-/g, ' ')} onRemove={() => onFilterChange({ category: null })} />}
-          {filters.dressStyle && <Chip label={`Style: ${filters.dressStyle}`} onRemove={() => onFilterChange({ dressStyle: null })} />}
+          {/* The shop's own names for the style filter and the two options. The filters arrive
+              without a switched-off style or a "none" value (shopFilters in lib/shop.ts). */}
+          {filters.dressStyle && <Chip label={`${SHOP.style.short}: ${styleLabel || filters.dressStyle}`} onRemove={() => onFilterChange({ dressStyle: null })} />}
           {filters.selectedColors.map((color) => (
-            <Chip key={color} label={`Color: ${color}`} onRemove={() => onFilterChange({ selectedColors: filters.selectedColors.filter((c) => c !== color) })} />
+            <Chip key={color} label={`${SHOP.option2.label}: ${color}`} onRemove={() => onFilterChange({ selectedColors: filters.selectedColors.filter((c) => c !== color) })} />
           ))}
           {filters.selectedSizes.map((size) => (
-            <Chip key={size} label={`Size: ${size}`} onRemove={() => onFilterChange({ selectedSizes: filters.selectedSizes.filter((s) => s !== size) })} />
+            <Chip key={size} label={`${SHOP.option1.label}: ${size}`} onRemove={() => onFilterChange({ selectedSizes: filters.selectedSizes.filter((s) => s !== size) })} />
           ))}
           {filters.minPrice !== null && <Chip label={`From ${formatPrice(filters.minPrice)}`} onRemove={() => onFilterChange({ minPrice: null })} />}
           {filters.maxPrice !== null && <Chip label={`Up to ${formatPrice(filters.maxPrice)}`} onRemove={() => onFilterChange({ maxPrice: null })} />}
@@ -196,7 +202,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           <p className="text-sm text-neutral-700 max-w-sm mx-auto mb-6">
             {totalPages === 1 ? 'These products fit on one page.' : `These products end on page ${totalPages}.`}
           </p>
-          <button type="button" onClick={() => onPageChange(totalPages)} className="bg-black text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-neutral-800">
+          <button type="button" onClick={() => onPageChange(totalPages)} className="bg-accent text-accent-ink px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-accent-hover">
             Go to the last page
           </button>
         </div>
@@ -207,15 +213,19 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         <div className="bg-neutral-50 rounded-3xl p-8 sm:p-12 text-center my-8">
           <h2 className="font-bold text-lg text-black mb-2 break-words">No results for &ldquo;{filters.searchQuery.trim()}&rdquo;</h2>
           <p className="text-sm text-neutral-700 max-w-sm mx-auto mb-6">
-            Check the spelling, or try a shorter or more general word (for example &ldquo;shirt&rdquo; instead of &ldquo;blue cotton shirt&rdquo;).
-            {otherFiltersActive && ' Your filters are also narrowing the search.'}
+            Check the spelling, or try a shorter or more general word
+            {/* The example is the shop's own (a perfume shop does not suggest "shirt"); none set, none shown. */}
+            {SHOP.wording.searchExampleShort && SHOP.wording.searchExampleLong && (
+              <> (for example &ldquo;{SHOP.wording.searchExampleShort}&rdquo; instead of &ldquo;{SHOP.wording.searchExampleLong}&rdquo;)</>
+            )}
+            .{otherFiltersActive && ' Your filters are also narrowing the search.'}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             {otherFiltersActive && (
               <button
                 type="button"
                 onClick={() => onFilterChange({ ...searchOnlyFilters, searchQuery: filters.searchQuery })}
-                className="bg-black text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-neutral-800"
+                className="bg-accent text-accent-ink px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-accent-hover"
               >
                 Search without filters
               </button>
@@ -226,7 +236,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
               className={
                 otherFiltersActive
                   ? 'border border-neutral-300 text-black px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-neutral-100'
-                  : 'bg-black text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-neutral-800'
+                  : 'bg-accent text-accent-ink px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-accent-hover'
               }
             >
               Browse all products
@@ -242,7 +252,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             {active ? 'Try removing a filter or widening the price range.' : 'There are no products to show yet.'}
           </p>
           {active && (
-            <button type="button" onClick={onReset} className="bg-black text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-neutral-800">
+            <button type="button" onClick={onReset} className="bg-accent text-accent-ink px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-accent-hover">
               Clear all filters
             </button>
           )}
@@ -274,7 +284,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
                     aria-current={item === currentPage ? 'page' : undefined}
                     aria-label={`Page ${item}`}
                     className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center ${
-                      item === currentPage ? 'bg-black text-white' : 'text-neutral-700 hover:bg-neutral-100'
+                      item === currentPage ? 'bg-accent text-accent-ink' : 'text-neutral-700 hover:bg-neutral-100'
                     }`}
                   >
                     {item}

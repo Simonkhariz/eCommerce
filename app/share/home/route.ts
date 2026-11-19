@@ -12,5 +12,5 @@ export async function GET(): Promise<Response> {
   const home = await serverApiGet<HomepageData>('/storefront/homepage');
   const banner = home?.banners?.find((b) => Boolean(b.image_url))?.image_url ?? null;
   const src = banner || DEFAULT_HERO;
-  return sharePictureResponse(src, src.startsWith('/images/hero/') ? 'hero' : 'banner');
+  return sharePictureResponse(src, src === DEFAULT_HERO ? 'hero' : 'banner');
 }

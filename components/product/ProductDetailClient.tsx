@@ -8,7 +8,17 @@ import { useWishlist } from '@/context/WishlistContext';
 import { ImageGallery } from '@/components/product/ImageGallery';
 import { ShareProduct } from '@/components/product/ShareProduct';
 import { VariantSelector } from '@/components/product/VariantSelector';
-import { colorStockFor, findVariant, firstChoice, sizeAfterColorChange, sizeStatesFor, stockMessageFor } from '@/lib/variants';
+import {
+  colorStockFor,
+  findVariant,
+  firstChoice,
+  selectionLabelFor,
+  sizeAfterColorChange,
+  sizeStatesFor,
+  soldOutColorName,
+  stockMessageFor,
+} from '@/lib/variants';
+import { SHOP, option1HelpFor } from '@/lib/shop';
 import { StickyMobileBar } from '@/components/product/StickyMobileBar';
 import { ProductTabs } from '@/components/product/ProductTabs';
 import { ProductCard } from '@/components/ui/ProductCard';
@@ -155,7 +165,7 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
   const maxQuantity = Math.max(1, Math.min(MAX_QUANTITY_PER_LINE, stock));
   const canPurchase = !!selectedVariant && stock > 0;
   const displayPrice = selectedVariant?.price ?? product?.price ?? 0;
-  const stockMessage = stockMessageFor(selectedVariant, variants.length);
+  const stockMessage = stockMessageFor(selectedVariant, variants.length, soldOutColorName(variants, selectedColor));
 
   const handleAddToCart = () => {
     if (!product || !selectedVariant || !canPurchase) return;
@@ -205,7 +215,7 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
         </p>
         <Link
           href="/category"
-          className="inline-flex items-center gap-2 bg-black text-white hover:bg-neutral-800 font-semibold px-8 py-3.5 rounded-full text-sm transition-all shadow-md"
+          className="inline-flex items-center gap-2 bg-accent text-accent-ink hover:bg-accent-hover font-semibold px-8 py-3.5 rounded-full text-sm transition-all shadow-md"
         >
           <span>Explore All Products</span>
           <HugeiconsIcon icon={ArrowRight01Icon} size={16} />
@@ -346,6 +356,16 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
               )}
             </div>
 
+            {/* What helps a buyer decide, beside the price: the warranty, and who may buy. */}
+            {product.warranty && (
+              <p className="mt-2 text-sm text-neutral-700">
+                <span className="font-semibold text-black">Warranty:</span> {product.warranty}
+              </p>
+            )}
+            {product.ageRestricted && (
+              <p className="mt-2 text-xs text-neutral-600">For buyers aged {SHOP.ageCheck.minAge} and over.</p>
+            )}
+
             {/* Description */}
             <p className="text-neutral-600 text-sm sm:text-base leading-relaxed mt-4 pb-6 border-b border-neutral-200">
               {product.description}
@@ -355,7 +375,7 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
           {/* Modular Variant Selector Component */}
           <VariantSelector
             colors={product.colors}
-            sizes={product.sizes as string[]}
+            sizes={product.sizes}
             selectedColor={selectedColor}
             onSelectColor={handleSelectColor}
             selectedSize={selectedSize}
@@ -367,6 +387,7 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
             onQuantityChange={setQuantity}
             canPurchase={canPurchase}
             stockMessage={stockMessage}
+            option1Help={option1HelpFor(product.category)}
             onAddToCart={handleAddToCart}
             onBuyNow={handleBuyNow}
             isWishlisted={isWishlisted}
@@ -396,7 +417,7 @@ export function ProductDetailClient({ id, initial = null }: { id: string; initia
       <StickyMobileBar
         product={product}
         price={displayPrice}
-        selectionLabel={selectedVariant ? `${selectedVariant.size} • ${selectedVariant.color.name}` : 'Choose colour & size'}
+        selectionLabel={selectionLabelFor(selectedVariant, product)}
         canPurchase={canPurchase}
         onAddToCart={handleAddToCart}
         onBuyNow={handleBuyNow}

@@ -1,5 +1,6 @@
 'use client';
 
+import { SHOP } from '@/lib/shop';
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { ApiError, errorMessage as describeError } from '@/lib/api-client';
@@ -17,7 +18,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
 ];
 
 const inputClass =
-  'w-full pl-10 pr-4 py-3 rounded-full bg-neutral-50 border border-neutral-300 text-sm text-black placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-black';
+  'w-full pl-10 pr-4 py-3 rounded-full bg-neutral-50 border border-neutral-300 text-sm text-black placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-accent';
 const labelClass = 'block text-xs font-semibold text-neutral-700 mb-1.5';
 
 /** An input with a leading decorative icon and a properly linked label. */
@@ -192,7 +193,7 @@ export const AuthModal: React.FC = () => {
         {/* A fixed row: only the form below it scrolls (long sign-up form on a short phone). */}
         <div className="flex shrink-0 items-center justify-between border-b border-neutral-100 py-3 pl-6 pr-4 sm:pl-8 sm:pr-6">
           <span className="font-integral text-xl font-bold tracking-tight text-black" aria-hidden="true">
-            SHOP.CO
+            {SHOP.name}
           </span>
           <button
             type="button"
@@ -278,7 +279,7 @@ export const AuthModal: React.FC = () => {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full py-3.5 px-6 rounded-full bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50 mt-2"
+                className="w-full py-3.5 px-6 rounded-full bg-accent text-accent-ink text-sm font-semibold hover:bg-accent-hover transition-colors disabled:opacity-50 mt-2"
               >
                 {isSubmitting ? 'Signing in…' : 'Sign in'}
               </button>
@@ -340,7 +341,7 @@ export const AuthModal: React.FC = () => {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full py-3.5 px-6 rounded-full bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50 mt-2"
+                className="w-full py-3.5 px-6 rounded-full bg-accent text-accent-ink text-sm font-semibold hover:bg-accent-hover transition-colors disabled:opacity-50 mt-2"
               >
                 {isSubmitting ? 'Creating account…' : 'Create account'}
               </button>
@@ -366,7 +367,7 @@ export const AuthModal: React.FC = () => {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="w-full py-3.5 px-6 rounded-full bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50"
+                    className="w-full py-3.5 px-6 rounded-full bg-accent text-accent-ink text-sm font-semibold hover:bg-accent-hover transition-colors disabled:opacity-50"
                   >
                     {isSubmitting ? 'Sending link…' : 'Send sign-in link'}
                   </button>

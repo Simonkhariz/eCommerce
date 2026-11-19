@@ -5,6 +5,7 @@
  * and the page offers another way to reach the store.
  */
 
+import { SHOP, optionsText } from '@/lib/shop';
 import type { ApiOrder, ApiOrderItem } from '@/lib/api-client';
 
 /**
@@ -31,6 +32,10 @@ export interface WhatsAppOrderItem {
   name: string;
   quantity: number;
   price?: number;
+  /**
+   * The line's options as people read them ("M · Navy", "50ml"), both of them: two lines of one
+   * product can differ only in the second. Left out for a product with no options.
+   */
   size?: string;
   line_total?: number;
   product_name?: string;
@@ -56,13 +61,13 @@ export interface WhatsAppOrderDetails {
   };
 }
 
-/** Order lines as the WhatsApp messages list them. */
+/** Order lines as the WhatsApp messages list them. An option the product does not use is never named. */
 export function whatsAppItems(items: ApiOrderItem[] | null | undefined): WhatsAppOrderItem[] {
   return (items ?? []).map((it) => ({
     name: it.item_name,
     quantity: Number(it.quantity),
     line_total: Number(it.line_total),
-    size: it.variant_options?.size,
+    size: optionsText(it.variant_options?.size, it.variant_options?.color, ' · ') || undefined,
   }));
 }
 
@@ -126,7 +131,7 @@ export function buildWhatsAppPrePaymentHelpUrl(orderNumber?: string, totalAmount
     return whatsAppUrl(
       supportPhone,
       [
-        `*SHOP.CO — CUSTOMER INQUIRY*`,
+        `*${SHOP.name} — CUSTOMER INQUIRY*`,
         `━━━━━━━━━━━━━━━━━━━━`,
         `Hello Support! I have an inquiry regarding my order:`,
         ``,
@@ -138,7 +143,7 @@ export function buildWhatsAppPrePaymentHelpUrl(orderNumber?: string, totalAmount
     );
   }
 
-  return whatsAppUrl(supportPhone, 'Hello SHOP.CO Support! I am shopping on your store and have an inquiry.');
+  return whatsAppUrl(supportPhone, `Hello ${SHOP.name} Support! I am shopping on your store and have an inquiry.`);
 }
 
 /** Plain support chat link with a prefilled message. */

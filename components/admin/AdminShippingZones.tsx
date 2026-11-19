@@ -14,6 +14,7 @@ import {
 } from '@/lib/admin-api';
 import { formatPrice } from '@/lib/admin-format';
 import { zoneOverlaps } from '@/lib/admin-logic';
+import { SHOP } from '@/lib/shop';
 import {
   Button,
   Checkbox,
@@ -37,6 +38,8 @@ import {
 } from '@/components/admin/ui';
 
 const FALLBACK = '*';
+/** Only shops that charge extra for large or heavy items see the heavy item fee. */
+const HEAVY_ITEMS = SHOP.features.heavyDelivery;
 
 const EMPTY_ZONE: ShippingZoneInput = {
   name: '',
@@ -169,6 +172,9 @@ export function AdminShippingZones() {
                         {Number(z.items_included) > 1 ? `covers ${z.items_included} items, ` : ''}+{formatPrice(z.extra_item_fee)} per extra item
                       </span>
                     )}
+                    {HEAVY_ITEMS && Number(z.heavy_item_fee) > 0 && (
+                      <span className="block text-xs text-[#6b7280]">+{formatPrice(Number(z.heavy_item_fee))} per heavy item</span>
+                    )}
                   </td>
                   <td className="whitespace-nowrap text-[#4b5563]">{z.estimated_days || '—'}</td>
                   <td>
@@ -202,6 +208,8 @@ export function AdminShippingZones() {
                               fee: z.fee,
                               items_included: z.items_included,
                               extra_item_fee: z.extra_item_fee,
+                              // Carried along even when the box is hidden, so saving never changes it.
+                              heavy_item_fee: z.heavy_item_fee,
                               estimated_days: z.estimated_days,
                               is_active: z.is_active,
                             },
@@ -250,9 +258,11 @@ function ZoneModal({
   const toast = useToast();
   const [form, setForm] = useState<ShippingZoneInput>(EMPTY_ZONE);
   const [feeText, setFeeText] = useState('');
-  const guardedClose = useDiscardGuard(!!editing, [form, feeText], onClose);
+  const [heavyText, setHeavyText] = useState('0');
   const [includedText, setIncludedText] = useState('1');
   const [extraText, setExtraText] = useState('0');
+  // Every box that is typed into, so Cancel asks before throwing away a change to any of them.
+  const guardedClose = useDiscardGuard(!!editing, [form, feeText, includedText, extraText, heavyText], onClose);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [lastEditing, setLastEditing] = useState<typeof editing>(null);
@@ -265,6 +275,7 @@ function ZoneModal({
       setFeeText(editing.id ? String(editing.zone.fee) : '');
       setIncludedText(String(editing.zone.items_included ?? 1));
       setExtraText(String(editing.zone.extra_item_fee ?? 0));
+      setHeavyText(String(editing.zone.heavy_item_fee ?? 0));
       setErrors({});
     }
   }
@@ -287,6 +298,8 @@ function ZoneModal({
     const extra = Number(extraText || '0');
     if (!Number.isInteger(included) || included < 1) local.items_included = 'Enter how many items the fee covers (1 or more).';
     if (!Number.isFinite(extra) || extra < 0) local.extra_item_fee = 'Enter 0 or more for each extra item.';
+    const heavy = Number(heavyText || '0');
+    if (HEAVY_ITEMS && (!Number.isFinite(heavy) || heavy < 0)) local.heavy_item_fee = 'Enter 0 or more for each heavy item.';
     if (!form.estimated_days.trim()) local.estimated_days = 'Give customers a delivery estimate, e.g. "2-4 business days".';
     if (form.states_covered.length === 0) local.states_covered = 'Pick at least one state.';
     setErrors(local);
@@ -302,6 +315,8 @@ function ZoneModal({
         fee,
         items_included: included,
         extra_item_fee: extra,
+        // With the box hidden the zone keeps the fee it came with (`form` carries it).
+        ...(HEAVY_ITEMS ? { heavy_item_fee: heavy } : {}),
       });
       toast.success(editing.id ? 'Delivery zone updated.' : 'Delivery zone created.');
       onSaved();
@@ -351,6 +366,11 @@ function ZoneModal({
         <Field label="Each extra item (₦)" error={errors.extra_item_fee} hint="Added for every item after that. 0 keeps one fee whatever the quantity.">
           {(p) => <TextInput {...p} type="number" min={0} step="50" inputMode="decimal" value={extraText} onChange={(e) => setExtraText(e.target.value)} />}
         </Field>
+        {HEAVY_ITEMS && (
+          <Field label="Heavy item fee (₦)" error={errors.heavy_item_fee} hint="Added once for each large or heavy item in the order.">
+            {(p) => <TextInput {...p} type="number" min={0} step="50" inputMode="decimal" value={heavyText} onChange={(e) => setHeavyText(e.target.value)} />}
+          </Field>
+        )}
         <Field label="Delivery estimate" required error={errors.estimated_days} hint="Shown at checkout.">
           {(p) => (
             <TextInput {...p} maxLength={50} value={form.estimated_days} onChange={(e) => setForm((f) => ({ ...f, estimated_days: e.target.value }))} placeholder="2-4 business days" />

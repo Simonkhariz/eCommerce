@@ -17,6 +17,7 @@ import {
 import { apiUploadProductImage } from '@/lib/api-client';
 import { AdminImage } from '@/components/admin/AdminImage';
 import { formatDate } from '@/lib/admin-format';
+import { SHOP } from '@/lib/shop';
 import {
   Button,
   Checkbox,
@@ -307,7 +308,7 @@ function BannerModal({ id, initial, onClose, onSaved }: { id: number | null; ini
         <Field label="Button text" error={errors.cta_text}>
           {(p) => <TextInput {...p} value={form.cta_text} maxLength={50} onChange={(e) => set('cta_text', e.target.value)} />}
         </Field>
-        <Field label="Button link" error={errors.cta_url} hint="A store path like /category?cat=t-shirts, or an https:// URL.">
+        <Field label="Button link" error={errors.cta_url} hint={`A store path like ${SHOP.wording.categoryHint}, or an https:// URL.`}>
           {(p) => <TextInput {...p} value={form.cta_url} maxLength={255} onChange={(e) => set('cta_url', e.target.value)} />}
         </Field>
 

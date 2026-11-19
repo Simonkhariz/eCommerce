@@ -163,3 +163,59 @@ test('a review keeps its title', () => {
 test('a product without a category has no category to link to', () => {
   assert.equal(api.mapApiProductToStorefront(product).category, '');
 });
+
+test('specification rows are tidied, and rows without a name or a value are left out', () => {
+  assert.deepEqual(
+    api.specificationRowsFrom([
+      { name: ' Battery ', value: ' 5000 mAh ' },
+      { name: 'Weight', value: 180 },
+      { name: '', value: 'no name' },
+      { name: 'No value', value: '  ' },
+      null,
+      'text',
+    ]),
+    [
+      { name: 'Battery', value: '5000 mAh' },
+      { name: 'Weight', value: '180' },
+    ]
+  );
+  for (const nothing of [null, undefined, '', {}, 'rows']) assert.deepEqual(api.specificationRowsFrom(nothing), []);
+});
+
+test('a product page answer brings its specifications, warranty and flags; a list answer has none', async () => {
+  const { SHOP } = await import('../lib/shop.ts');
+  const listed = api.mapApiProductToStorefront(product);
+  assert.deepEqual(listed.specifications, []);
+  assert.equal(listed.warranty, undefined);
+  assert.equal(listed.isHeavy, false);
+  assert.equal(listed.ageRestricted, false);
+
+  const detailed = api.mapApiProductToStorefront({
+    ...product,
+    specifications: [{ name: 'Top notes', value: 'Bergamot' }],
+    warranty: ' 12 months ',
+    is_heavy: true,
+    age_restricted: true,
+  });
+  assert.deepEqual(detailed.specifications, [{ name: 'Top notes', value: 'Bergamot' }]);
+  // A warranty is shown only by a shop that has warranties switched on.
+  assert.equal(detailed.warranty, SHOP.features.warranty ? '12 months' : undefined);
+  assert.equal(detailed.isHeavy, true);
+  assert.equal(detailed.ageRestricted, true);
+  // The SKU and category lines stay as they were.
+  assert.deepEqual(api.mapApiProductToStorefront({ ...product, sku: 'TEE-1', category_name: 'Tops' }).details, ['SKU: TEE-1', 'Category: Tops']);
+  assert.equal(api.mapApiProductToStorefront({ ...product, warranty: null, specifications: null }).warranty, undefined);
+});
+
+test("a product's style keeps the shop's spelling", () => {
+  assert.deepEqual(api.mapApiProductToStorefront({ ...product, dress_style: 'LG' }).dressStyle, ['LG']);
+  assert.deepEqual(api.mapApiProductToStorefront({ ...product, dress_style: ' Eau de Parfum ' }).dressStyle, ['Eau de Parfum']);
+  for (const none of [null, '', '  ']) assert.deepEqual(api.mapApiProductToStorefront({ ...product, dress_style: none }).dressStyle, []);
+});
+
+test('the age check reads the answer the server worked out, whatever else it sends', () => {
+  // `is_age_restricted` is the owner's own flag on one product; `age_restricted` already counts it.
+  assert.equal(api.mapApiProductToStorefront({ ...product, is_age_restricted: true, age_restricted: true }).ageRestricted, true);
+  assert.equal(api.mapApiProductToStorefront({ ...product, is_age_restricted: false, age_restricted: true }).ageRestricted, true);
+  assert.equal(api.mapApiProductToStorefront({ ...product, is_age_restricted: false, age_restricted: false }).ageRestricted, false);
+});

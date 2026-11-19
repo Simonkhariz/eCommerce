@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { InventoryRow, adminAdjustStock, adminGetInventory, adminGetInventoryLogs, errorMessage, fieldErrors } from '@/lib/admin-api';
 import { formatDateTime, formatPrice, num } from '@/lib/admin-format';
 import { wholeNumber } from '@/lib/admin-logic';
+import { SHOP, hasOption2, option1Word, option2Word, optionsText } from '@/lib/shop';
 import {
   Button,
   DataState,
@@ -37,8 +38,15 @@ function stockPill(stock: number, threshold: number) {
   return <StatusPill label="In stock" tone="green" />;
 }
 
+/** "M / Navy", or a dash for an item without options (the stored "none" values are never printed). */
 function variantLabel(size: string, color: string): string {
-  return [size, color].filter(Boolean).join(' / ') || '—';
+  return optionsText(size, color) || '—';
+}
+
+/** "Product (M / Navy)", "Product · M / Navy · SKU": an item without options is just its name. */
+function withOptions(row: { product_name: string; size: string; color_name: string }, open = ' (', close = ')'): string {
+  const options = optionsText(row.size, row.color_name);
+  return options ? `${row.product_name}${open}${options}${close}` : row.product_name;
 }
 
 export function AdminInventory() {
@@ -47,7 +55,7 @@ export function AdminInventory() {
 
   return (
     <div className="flex w-full flex-col">
-      <PageHeader title="Inventory" description="Stock per size and colour. Every change is recorded in stock movements." />
+      <PageHeader title="Inventory" description={`Stock per ${option1Word} and ${option2Word}. Every change is recorded in stock movements.`} />
 
       <div role="tablist" aria-label="Inventory views" className="mb-3 inline-flex w-fit rounded-lg border border-[#e5e7eb] bg-[#f9fafb] p-0.5">
         {(
@@ -94,7 +102,7 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
   const [searchText, setSearchText] = useSearchBox(filters.search, setFilters);
 
   const { data, loading, error, reload } = useAdminData('AdminInventory',
-    // 50 rows: every size and colour is its own row, so a page of 25 holds only a few products.
+    // 50 rows: every variant (size and colour) is its own row, so a page of 25 holds only a few products.
     () => adminGetInventory({ filter: stockFilter, search: filters.search, page, per_page: 50 }),
     [stockFilter, filters.search, page]
   );
@@ -135,7 +143,7 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
     setSaving(true);
     try {
       const saved = await adminAdjustStock({ variant_id: target.id, change_amount: amount, reason: reasonText });
-      const name = `${target.product_name} (${variantLabel(target.size, target.color_name)})`;
+      const name = withOptions(target);
       const now = num(saved?.new_stock ?? resulting);
       // Sales since this screen loaded change the starting figure: say what it really was.
       toast.success(
@@ -181,14 +189,16 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
           hasData={!!data}
           empty={rows.length === 0}
           emptyTitle={filters.search || stockFilter !== 'all' ? 'No variants match these filters' : 'No product variants yet'}
-          emptyDescription={filters.search || stockFilter !== 'all' ? 'Try a different search or stock level.' : 'Add products with sizes and colours to track stock here.'}
+          emptyDescription={filters.search || stockFilter !== 'all' ? 'Try a different search or stock level.' : `Add products with ${SHOP.option1.plural.toLowerCase()} and ${SHOP.option2.plural.toLowerCase()} to track stock here.`}
         >
           <Table minWidth={860}>
             <thead>
               <tr>
                 <th>Product</th>
                 <th>SKU</th>
-                <th>Size / colour</th>
+                <th>
+                  {SHOP.option1.label} / {option2Word}
+                </th>
                 <th>Stock</th>
                 <th>Price</th>
                 <th>Updated</th>
@@ -215,11 +225,13 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
                     <td className="font-mono text-xs text-[#4b5563]">{row.sku}</td>
                     <td>
                       <span className="inline-flex items-center gap-1.5">
-                        <span
-                          className="size-3.5 shrink-0 rounded-full border border-black/10"
-                          style={{ backgroundColor: row.color_hex || '#ffffff' }}
-                          aria-hidden="true"
-                        />
+                        {SHOP.option2.swatch && hasOption2(row.color_name) && (
+                          <span
+                            className="size-3.5 shrink-0 rounded-full border border-black/10"
+                            style={{ backgroundColor: row.color_hex || '#ffffff' }}
+                            aria-hidden="true"
+                          />
+                        )}
                         {variantLabel(row.size, row.color_name)}
                       </span>
                     </td>
@@ -255,7 +267,7 @@ function StockLevels({ filters, setFilters }: { filters: Filters; setFilters: (c
         persistent
         size="sm"
         title="Adjust stock"
-        description={target ? `${target.product_name} · ${variantLabel(target.size, target.color_name)} · ${target.sku}` : undefined}
+        description={target ? `${withOptions(target, ' · ', '')} · ${target.sku}` : undefined}
         footer={
           <>
             <Button onClick={() => setTarget(null)} disabled={saving}>

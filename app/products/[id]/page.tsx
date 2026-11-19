@@ -1,3 +1,4 @@
+import { SHOP } from '@/lib/shop';
 import type { Metadata } from 'next';
 import { cache } from 'react';
 import { notFound } from 'next/navigation';
@@ -44,10 +45,10 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const product = await lookupProduct(id);
   if (product === 'missing') {
-    return { title: 'Product not found | SHOP.CO', robots: { index: false, follow: false } };
+    return { title: `Product not found | ${SHOP.name}`, robots: { index: false, follow: false } };
   }
   if (!product) {
-    return { title: 'Shop | SHOP.CO' };
+    return { title: `Shop | ${SHOP.name}` };
   }
 
   const description = summarise(product.description);
@@ -63,7 +64,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const sharePicture = primary
     ? `/share/product/${encodeURIComponent(String(product.id))}?v=${pictureVersion(primary)}`
     : '/share/home';
-  const title = `${product.name} | SHOP.CO`;
+  const title = `${product.name} | ${SHOP.name}`;
 
   return {
     title,
@@ -72,7 +73,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
       title: product.name,
       description,
       type: 'website',
-      siteName: 'SHOP.CO',
+      siteName: SHOP.name,
       url: `/products/${encodeURIComponent(id)}`,
       images: [{ url: sharePicture, width: SHARE_WIDTH, height: SHARE_HEIGHT, type: 'image/jpeg', alt: product.name }],
     },

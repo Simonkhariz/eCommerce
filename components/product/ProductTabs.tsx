@@ -3,6 +3,7 @@
 import React, { useRef, useState } from 'react';
 import { Product } from '@/types';
 import { ReviewForm } from '@/components/product/ReviewForm';
+import { SHOP } from '@/lib/shop';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { StarIcon, CheckmarkCircle01Icon, ArrowDown01Icon } from '@hugeicons/core-free-icons';
 
@@ -25,7 +26,10 @@ export const ProductTabs: React.FC<ProductTabsProps> = ({ product }) => {
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const sortedReviews = sortBy === 'highest' ? [...reviews].sort((a, b) => b.rating - a.rating) : reviews;
-  const dressStyles = (Array.isArray(product.dressStyle) ? product.dressStyle : [product.dressStyle]).filter(Boolean);
+  // A shop with the style filter switched off does not name a style here either.
+  const dressStyles = SHOP.style.enabled ? (Array.isArray(product.dressStyle) ? product.dressStyle : [product.dressStyle]).filter(Boolean) : [];
+  const specifications = product.specifications ?? [];
+  const hasSpecifications = specifications.length > 0 || product.details.length > 0;
 
   const tabs: { id: TabId; label: string }[] = [
     { id: 'details', label: 'Product Details' },
@@ -66,8 +70,8 @@ export const ProductTabs: React.FC<ProductTabsProps> = ({ product }) => {
               tabIndex={selected ? 0 : -1}
               onClick={() => setActiveTab(tab.id)}
               onKeyDown={(e) => onTabKey(e, index)}
-              className={`flex-1 pb-4 relative transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 rounded-t-md ${
-                selected ? 'text-black font-bold border-b-2 border-black' : 'text-neutral-600 hover:text-black'
+              className={`flex-1 pb-4 relative transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 rounded-t-md ${
+                selected ? 'text-black font-bold border-b-2 border-accent' : 'text-neutral-600 hover:text-black'
               }`}
             >
               {tab.label}
@@ -84,23 +88,51 @@ export const ProductTabs: React.FC<ProductTabsProps> = ({ product }) => {
               <p className="text-sm text-neutral-700 leading-relaxed whitespace-pre-line">{product.description}</p>
             </div>
           )}
-          {product.details.length > 0 && (
+          {hasSpecifications && (
             <div>
-              <h3 className="font-bold text-lg text-black mb-3">Specifications</h3>
-              <ul className="space-y-2 text-neutral-700 text-sm list-disc pl-5">
-                {product.details.map((detail) => (
-                  <li key={detail}>{detail}</li>
-                ))}
-              </ul>
+              {/* The shop's own title ("Fragrance notes", "Materials and care") is for the owner's rows.
+                  With none, the block holds only the SKU and category lines, so it has a plain title. */}
+              <h3 className="font-bold text-lg text-black mb-3">{specifications.length > 0 ? SHOP.specs.label : 'Product details'}</h3>
+              {/* The owner's own rows, name beside value. The table keeps its two columns on a
+                  phone: long values wrap inside theirs. */}
+              {specifications.length > 0 && (
+                <table className={`w-full table-fixed text-left text-sm ${product.details.length > 0 ? 'mb-4' : ''}`}>
+                  <caption className="sr-only">{SHOP.specs.label}</caption>
+                  <tbody className="divide-y divide-neutral-200 border-y border-neutral-200">
+                    {specifications.map((row, index) => (
+                      <tr key={`${index}-${row.name}`}>
+                        <th scope="row" className="w-2/5 py-2.5 pr-4 align-top font-medium text-neutral-600 break-words">
+                          {row.name}
+                        </th>
+                        <td className="py-2.5 align-top text-black break-words whitespace-pre-line">{row.value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {product.details.length > 0 && (
+                <ul className="space-y-2 text-neutral-700 text-sm list-disc pl-5">
+                  {product.details.map((detail) => (
+                    <li key={detail}>{detail}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {product.warranty && (
+            <div>
+              <h3 className="font-bold text-lg text-black mb-2">Warranty</h3>
+              <p className="text-sm text-neutral-700 leading-relaxed">{product.warranty}</p>
             </div>
           )}
           {dressStyles.length > 0 && (
             <div>
-              <h3 className="font-bold text-lg text-black mb-2">Style</h3>
-              <p className="text-sm text-neutral-700 capitalize">{dressStyles.join(', ')}</p>
+              <h3 className="font-bold text-lg text-black mb-2">{SHOP.style.short}</h3>
+              {/* As the shop wrote it ("LG", "Eau de Parfum"): no change of case. */}
+              <p className="text-sm text-neutral-700">{dressStyles.join(', ')}</p>
             </div>
           )}
-          {!product.description && product.details.length === 0 && dressStyles.length === 0 && (
+          {!product.description && !hasSpecifications && !product.warranty && dressStyles.length === 0 && (
             <p className="text-sm text-neutral-600">No further details have been added for this product yet.</p>
           )}
         </div>
@@ -124,7 +156,7 @@ export const ProductTabs: React.FC<ProductTabsProps> = ({ product }) => {
                     id="review-sort"
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value as 'latest' | 'highest')}
-                    className="bg-[#F0F0F0] text-black font-semibold rounded-full pl-4 pr-9 py-2.5 appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-black"
+                    className="bg-surface text-black font-semibold rounded-full pl-4 pr-9 py-2.5 appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent"
                   >
                     <option value="latest">Latest</option>
                     <option value="highest">Highest Rating</option>
@@ -137,7 +169,7 @@ export const ProductTabs: React.FC<ProductTabsProps> = ({ product }) => {
               <button
                 type="button"
                 onClick={() => setReviewOpen(true)}
-                className="bg-black text-white hover:bg-neutral-800 font-semibold px-5 py-2.5 rounded-full text-xs sm:text-sm"
+                className="bg-accent text-accent-ink hover:bg-accent-hover font-semibold px-5 py-2.5 rounded-full text-xs sm:text-sm"
               >
                 Write a review
               </button>

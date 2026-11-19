@@ -19,7 +19,11 @@ final class SessionCookie
     public static function name(string $scope): string
     {
         if ($scope === self::SCOPE_ADMIN) {
-            return 'shopco_admin';
+            // A browser keeps one set of cookies per host name whatever the port, so two shops on
+            // one PC would sign each other's admins out unless each has its own name
+            // (ADMIN_COOKIE_NAME). Anything that is not a plain cookie name falls back to the usual one.
+            $name = trim((string) Env::get('ADMIN_COOKIE_NAME', ''));
+            return preg_match('/^[A-Za-z0-9_\-]{1,64}$/', $name) === 1 ? $name : 'shopco_admin';
         }
         return Env::get('SESSION_COOKIE_NAME', 'shopco_session') ?: 'shopco_session';
     }

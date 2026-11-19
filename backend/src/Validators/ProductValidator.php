@@ -4,10 +4,17 @@ declare(strict_types=1);
 
 namespace App\Validators;
 
+use App\Config\Shop;
+use App\Repositories\ProductRepository;
 use App\Support\Input;
 
 class ProductValidator
 {
+    public const MAX_SPECIFICATIONS = 30;
+    public const MAX_SPECIFICATION_NAME = 60;
+    public const MAX_SPECIFICATION_VALUE = 300;
+    public const MAX_WARRANTY = 160;
+
     /**
      * Validate product input data for creation or updates.
      *
@@ -85,6 +92,24 @@ class ProductValidator
             $errors['images'] = $problem;
         }
 
+        if (array_key_exists('specifications', $data) && ($problem = self::specificationsProblem($data['specifications'])) !== null) {
+            $errors['specifications'] = $problem;
+        }
+
+        if (is_array($data['warranty'] ?? null) || is_bool($data['warranty'] ?? null)) {
+            $errors['warranty'] = 'Enter the warranty as plain text, or leave it empty.';
+        } elseif (Input::tooLong($data['warranty'] ?? '', self::MAX_WARRANTY)) {
+            $errors['warranty'] = 'Warranty can be at most ' . self::MAX_WARRANTY . ' characters.';
+        }
+
+        if (array_key_exists('is_heavy', $data) && !in_array($data['is_heavy'], [true, false, 0, 1, '0', '1'], true)) {
+            $errors['is_heavy'] = 'Say whether this is a heavy item with yes or no.';
+        }
+
+        if (array_key_exists('is_age_restricted', $data) && !in_array($data['is_age_restricted'], [true, false, 0, 1, '0', '1'], true)) {
+            $errors['is_age_restricted'] = 'Say whether this product is for adults only with yes or no.';
+        }
+
         if (isset($data['product_type']) && $data['product_type'] !== 'physical') {
             $errors['product_type'] = "Product type must be 'physical'. Digital products are not supported in this store.";
         }
@@ -117,22 +142,48 @@ class ProductValidator
         if (!is_array($variants)) {
             return 'Send the variants as a list.';
         }
+        // The two options are named by the shop ("size" and "colour", "volume" and "scent").
+        $first = Shop::option1Word();
+        $second = Shop::option2Word();
+        // Which options this product really uses: some row gives a value that is not the "none" word.
+        $usesFirst = false;
+        $usesSecond = false;
+        foreach ($variants as $v) {
+            $usesFirst = $usesFirst || (is_array($v) && Shop::usesOption1(Input::text($v['size'] ?? null)));
+            $usesSecond = $usesSecond || (is_array($v) && Shop::usesOption2(Input::text($v['color_name'] ?? null)));
+        }
+        $seen = [];
         foreach (array_values($variants) as $i => $v) {
             $row = 'Variant ' . ($i + 1) . ': ';
-            if (!is_array($v)) {
-                return $row . 'send it as a size and a colour.';
+            if (!is_array($v) || is_array($v['size'] ?? null) || is_array($v['color_name'] ?? null)) {
+                return $row . 'send it as ' . Shop::withArticle($first) . ' and ' . Shop::withArticle($second) . '.';
             }
-            if (Input::text($v['size'] ?? '') === '' || Input::text($v['color_name'] ?? '') === '') {
-                return $row . 'every variant needs a size and a colour.';
+            if (Input::tooLong($v['size'] ?? '', 50) || Input::tooLong($v['color_name'] ?? '', 50)) {
+                return $row . "{$first} and {$second} can be at most 50 characters.";
             }
-            if (Input::tooLong($v['size'], 50) || Input::tooLong($v['color_name'], 50)) {
-                return $row . 'size and colour can be at most 50 characters.';
+            // The "none" word is how a product without the option is stored, and it is never shown.
+            // Typed as a real choice beside others ("Standard" next to "Pro") that choice would
+            // vanish from the product page, the filters and the receipts.
+            foreach ([[$usesFirst, 'size', Shop::option1None(), $first], [$usesSecond, 'color_name', Shop::option2None(), $second]] as [$used, $field, $none, $word]) {
+                $typed = Input::text($v[$field] ?? null);
+                if ($used && $typed !== '' && mb_strtolower($typed) === mb_strtolower($none)) {
+                    return $row . "\"{$typed}\" is the word this shop keeps for a product without " . Shop::withArticle($word)
+                        . ", so it cannot be one of the choices. Use another name, for example \"{$none} {$word}\".";
+                }
             }
+            // An option left empty is fine: the product does not use it (it is stored as the
+            // shop's "none" word). Two variants still cannot be the same pair.
+            $options = ProductRepository::variantOptions($v);
+            $pair = mb_strtolower($options['size']) . '|' . mb_strtolower($options['color_name']);
+            if (isset($seen[$pair])) {
+                return $row . "another variant already has the same {$first} and {$second}.";
+            }
+            $seen[$pair] = true;
             if (is_array($v['sku'] ?? null) || Input::tooLong($v['sku'] ?? '', 100)) {
                 return $row . 'SKU can be at most 100 characters.';
             }
             if (is_array($v['color_hex'] ?? null) || Input::tooLong($v['color_hex'] ?? '', 10)) {
-                return $row . 'colour code can be at most 10 characters.';
+                return $row . "{$second} code can be at most 10 characters.";
             }
             if (!in_array($v['price_override'] ?? null, [null, ''], true) && !Input::isMoney($v['price_override'])) {
                 return $row . 'price must be from ₦0 to ' . Input::maxMoneyLabel() . '.';
@@ -147,6 +198,36 @@ class ProductValidator
             if (isset($v['low_stock_threshold']) && Input::wholeNumber($v['low_stock_threshold'], 0, Input::MAX_STOCK) === null) {
                 return $row . 'low-stock level must be a whole number from 0 to ' . number_format(Input::MAX_STOCK) . '.';
             }
+        }
+        return null;
+    }
+
+    /**
+     * The first thing wrong with the specification rows ("Material: Cotton"), or null. A row
+     * without a name or without a value is not a problem: the form's empty rows are simply dropped.
+     */
+    private static function specificationsProblem(mixed $specifications): ?string
+    {
+        if ($specifications === null) {
+            return null;
+        }
+        if (!is_array($specifications) || !array_is_list($specifications)) {
+            return 'Send the specifications as a list of names and values.';
+        }
+        foreach ($specifications as $i => $spec) {
+            $row = 'Specification ' . ($i + 1) . ': ';
+            if (!is_array($spec) || is_array($spec['name'] ?? null) || is_array($spec['value'] ?? null)) {
+                return $row . 'send it as a name and a value.';
+            }
+            if (Input::tooLong($spec['name'] ?? '', self::MAX_SPECIFICATION_NAME)) {
+                return $row . 'the name can be at most ' . self::MAX_SPECIFICATION_NAME . ' characters.';
+            }
+            if (Input::tooLong($spec['value'] ?? '', self::MAX_SPECIFICATION_VALUE)) {
+                return $row . 'the value can be at most ' . self::MAX_SPECIFICATION_VALUE . ' characters.';
+            }
+        }
+        if (count(ProductRepository::specificationRows($specifications)) > self::MAX_SPECIFICATIONS) {
+            return 'A product can have at most ' . self::MAX_SPECIFICATIONS . ' specifications.';
         }
         return null;
     }
