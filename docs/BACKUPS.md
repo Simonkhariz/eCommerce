@@ -31,7 +31,7 @@ with `--php-dump`. The script never deletes old backups.
 ```
 
 (cPanel: "Cron Jobs", e.g. `30 2 * * * /usr/local/bin/php /home/<user>/shopco/backend/scripts/backup.php`;
-use the PHP path cPanel shows. Windows: `schtasks /Create /SC DAILY /ST 02:30 /TN "ShopCo Backup" /TR "C:\xampp\php\php-win.exe C:\path\to\E-commerce\backend\scripts\backup.php"`.)
+use the PHP path cPanel shows. Windows: `schtasks /Create /SC DAILY /ST 02:30 /TN "ShopCo Backup" /TR "C:\xampp\php\php-win.exe C:\path\to\shopco\backend\scripts\backup.php"`.)
 
 ### Keep a copy off the server
 
