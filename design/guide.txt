@@ -1,6 +1,6 @@
 # Master Next.js Prompt Playbook: E-Commerce Multi-Page Prototyping
 
-This document organizes the **10 unarranged design mockups** in [E-commerce](file:///C:/Users/smnkh/Desktop/E-templates/E-commerce) into a structured user flow and provides the **customized Next.js master prompts** to build the multi-page e-commerce web application.
+This document organizes the **10 unarranged design mockups** in [E-commerce](file:///C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco) into a structured user flow and provides the **customized Next.js master prompts** to build the multi-page e-commerce web application.
 
 ---
 
@@ -21,11 +21,11 @@ graph TD
 
 | Page / Route | Desktop Screen File | Mobile Screen File | Key UI Elements & Layout |
 | :--- | :--- | :--- | :--- |
-| **Home** (`/`) | [Homepage-1.png](file:///C:/Users/smnkh/Desktop/E-templates/E-commerce/Homepage-1.png) | [Homepage.png](file:///C:/Users/smnkh/Desktop/E-templates/E-commerce/Homepage.png) | Hero promo carousel, Category icon grid, Flash Deals countdown, Curated Collections, Value props banner, Footer. |
-| **Catalog** (`/category`) | [Category Page-1.png](file:///C:/Users/smnkh/Desktop/E-templates/E-commerce/Category%20Page-1.png) | [Category Page.png](file:///C:/Users/smnkh/Desktop/E-templates/E-commerce/Category%20Page.png) | Hero category banner, Sorting dropdown (`Price`, `Rating`, `Newest`), Desktop Left Filter Sidebar, 3-4 Col Product Grid, Mobile Sticky Filter Bar. |
-| **Filter Modal** (`/category#filters`) | *(Embedded in Sidebar)* | [Filters.png](file:///C:/Users/smnkh/Desktop/E-templates/E-commerce/Filters.png) | Mobile bottom-sheet / slide-over drawer: Price range slider, Brand checkboxes, Color swatches, Rating pills, Apply button. |
-| **Product Detail** (`/products/[id]`) | [Product Detail Page-1.png](file:///C:/Users/smnkh/Desktop/E-templates/E-commerce/Product%20Detail%20Page-1.png) | [Product Detail Page.png](file:///C:/Users/smnkh/Desktop/E-templates/E-commerce/Product%20Detail%20Page.png) | Multi-thumbnail image gallery, Size & Color chips, Stock counter, Add to Cart / Buy Now buttons, Product specs accordion, Customer Reviews list, Related items. |
-| **Cart** (`/cart`) | [Cart-1.png](file:///C:/Users/smnkh/Desktop/E-templates/E-commerce/Cart-1.png) | [Cart.png](file:///C:/Users/smnkh/Desktop/E-templates/E-commerce/Cart.png) | Line item cards (quantity +/- and delete), Promo code input, Order Summary box (Subtotal, Shipping, Discount, Total), Sticky Mobile Checkout Bar. |
+| **Home** (`/`) | [Homepage-1.png](file:///C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/Homepage-1.png) | [Homepage.png](file:///C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/Homepage.png) | Hero promo carousel, Category icon grid, Flash Deals countdown, Curated Collections, Value props banner, Footer. |
+| **Catalog** (`/category`) | [Category Page-1.png](file:///C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/Category%20Page-1.png) | [Category Page.png](file:///C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/Category%20Page.png) | Hero category banner, Sorting dropdown (`Price`, `Rating`, `Newest`), Desktop Left Filter Sidebar, 3-4 Col Product Grid, Mobile Sticky Filter Bar. |
+| **Filter Modal** (`/category#filters`) | *(Embedded in Sidebar)* | [Filters.png](file:///C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/Filters.png) | Mobile bottom-sheet / slide-over drawer: Price range slider, Brand checkboxes, Color swatches, Rating pills, Apply button. |
+| **Product Detail** (`/products/[id]`) | [Product Detail Page-1.png](file:///C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/Product%20Detail%20Page-1.png) | [Product Detail Page.png](file:///C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/Product%20Detail%20Page.png) | Multi-thumbnail image gallery, Size & Color chips, Stock counter, Add to Cart / Buy Now buttons, Product specs accordion, Customer Reviews list, Related items. |
+| **Cart** (`/cart`) | [Cart-1.png](file:///C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/Cart-1.png) | [Cart.png](file:///C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/Cart.png) | Line item cards (quantity +/- and delete), Promo code input, Order Summary box (Subtotal, Shipping, Discount, Total), Sticky Mobile Checkout Bar. |
 
 ---
 
