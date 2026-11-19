@@ -41,7 +41,7 @@ Also still open from earlier work:
       Failed emails are already retried automatically by the API (a few a minute, never twice),
       so this is about punctuality on a quiet shop. On the live server use the three cron lines
       in the root README ("Background jobs"); on cPanel, add them under "Cron Jobs". On this PC
-      (optional): `schtasks /Create /SC MINUTE /MO 1 /TN "ShopCo Send Email" /TR "C:\xampp\php\php-win.exe C:\Users\smnkh\Desktop\E-templates\E-commerce\backend\scripts\process_outbox.php --limit=500 --max-seconds=50 --rate=8"`
+      (optional): `schtasks /Create /SC MINUTE /MO 1 /TN "ShopCo Send Email" /TR "C:\xampp\php\php-win.exe C:\Users\smnkh\Desktop\E-templates\Domain-sites\shopco\backend\scripts\process_outbox.php --limit=500 --max-seconds=50 --rate=8"`
       Newsletters: `--rate=8` keeps within Resend's default 10 emails a second, so 1,000 subscribers
       take about 2 minutes and 20,000 about 42. Faster needs a higher limit from Resend (ask them),
       then raise `--rate`.
@@ -114,8 +114,8 @@ Apache runs PHP inside itself (mod_php), which does the same job as PHP-FPM.
    ```apache
    Listen 127.0.0.1:8080
    <VirtualHost 127.0.0.1:8080>
-       DocumentRoot "C:/Users/smnkh/Desktop/E-templates/E-commerce/backend/public"
-       <Directory "C:/Users/smnkh/Desktop/E-templates/E-commerce/backend/public">
+       DocumentRoot "C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/backend/public"
+       <Directory "C:/Users/smnkh/Desktop/E-templates/Domain-sites/shopco/backend/public">
            AllowOverride All
            Require all granted
        </Directory>
